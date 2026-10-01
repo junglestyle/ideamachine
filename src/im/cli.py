@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from im import config, db, fixtures, migrate, pipeline
+from im import config, db, fixtures, label, migrate, pipeline, projects
 from im.checks import run_checks
 from im.show import show
 
@@ -37,6 +37,30 @@ def cmd_show(args) -> None:
         print(show(conn, args.episode))
 
 
+def cmd_label(args) -> None:
+    with db.connect(db.pipeline_dsn()) as conn:
+        if args.status:
+            print(label.status(conn))
+            return
+        try:
+            n = label.session(conn)
+        except (KeyboardInterrupt, EOFError):
+            n = None  # each label is saved as it's confirmed, so nothing is lost
+        print("\n" + label.status(conn) if n is None else f"saved {n}\n" + label.status(conn))
+
+
+def cmd_project(args) -> None:
+    with db.connect(db.pipeline_dsn()) as conn:
+        try:
+            if args.action == "add":
+                print(projects.add(conn, args.slug, args.description, args.alias or []))
+            elif args.action == "retire":
+                projects.retire(conn, args.slug)
+            print(projects.listing(conn))
+        except ValueError as e:
+            raise SystemExit(str(e)) from None
+
+
 def cmd_check(args) -> None:
     with db.connect(db.pipeline_dsn()) as conn:
         failures = {k: v for k, v in run_checks(conn).items() if v}
@@ -61,6 +85,19 @@ def main(argv=None) -> None:
     s = sub.add_parser("show", help="print an episode")
     s.add_argument("episode", help="episode id or unique prefix")
     s.set_defaults(func=cmd_show)
+    lb = sub.add_parser("label", help="label episodes with my answers to the triage questions")
+    lb.add_argument("--status", action="store_true", help="show labeling progress and exit")
+    lb.set_defaults(func=cmd_label)
+    pr = sub.add_parser("project", help="the projects registry")
+    pa = pr.add_subparsers(dest="action", required=True, metavar="action")
+    a = pa.add_parser("add", help="add a project, or update its description and add aliases")
+    a.add_argument("slug")
+    a.add_argument("--description", "-d")
+    a.add_argument("--alias", "-a", action="append")
+    r2 = pa.add_parser("retire", help="hide a project from labeling (labels keep it)")
+    r2.add_argument("slug")
+    pa.add_parser("list")
+    pr.set_defaults(func=cmd_project)
     sub.add_parser("check", help="run invariant queries; exit 1 on failure").set_defaults(func=cmd_check)
     args = p.parse_args(argv)
     args.func(args)

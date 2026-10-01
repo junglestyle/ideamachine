@@ -29,15 +29,19 @@ def _finish_run(conn, run_id: int, stats: dict) -> None:
                  (json.dumps(stats), run_id))
 
 
-def _purge_tombstoned(conn) -> set[str]:
-    """Delete every episode, current or retired, that contains a forgotten segment (ROADMAP §3.4)."""
+def _purge_tombstoned(conn) -> tuple[set[str], int]:
+    """Delete every episode (current or retired) and every label that contains a forgotten
+    segment (ROADMAP §3.4). Labels are human input, and this is the only thing that deletes them."""
+    labels = conn.execute(
+        """DELETE FROM im.labels l WHERE EXISTS (
+             SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(l.segment_ids))""").rowcount
     rows = conn.execute(
         """DELETE FROM im.episodes e
            WHERE EXISTS (SELECT 1 FROM im.episode_segments es
                          JOIN im.source_tombstones t USING (segment_id)
                          WHERE es.episode_id = e.episode_id)
            RETURNING session_id""").fetchall()
-    return {r[0] for r in rows}
+    return {r[0] for r in rows}, labels
 
 
 def _sessions_needing_work(conn, stage_version: str) -> set[str]:
@@ -103,10 +107,11 @@ def run(conn: psycopg.Connection, cfg: Config, stream_dir: Path) -> dict:
         conn.execute("SELECT pg_advisory_xact_lock(hashtext('im.run'))")
         run_id = _start_run(conn, "run")
         sessions, stats = import_stream(conn, stream_dir)
-        purged = _purge_tombstoned(conn)
+        purged, labels_purged = _purge_tombstoned(conn)
         sessions |= purged
         sessions |= _sessions_needing_work(conn, cfg.segment.stage_version)
-        stats |= {"stage_version": cfg.segment.stage_version, "sessions_with_purges": len(purged)}
+        stats |= {"stage_version": cfg.segment.stage_version, "sessions_with_purges": len(purged),
+                  "labels_purged": labels_purged}
         stats |= _resegment(conn, cfg, sessions)
         _finish_run(conn, run_id, stats)
     return stats

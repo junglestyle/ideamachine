@@ -3,7 +3,8 @@
 Turns Hearsay's speaker-attributed transcript segments into episodes and, later, triage and ideas.
 See [docs/ROADMAP.md](docs/ROADMAP.md).
 
-Built so far: Phase 1 steps 1–2 (import Hearsay's utterance stream, heuristic episode segmentation).
+Built so far: Phase 1 steps 1–3 (import Hearsay's utterance stream, heuristic episode segmentation, the projects
+registry and labeling).
 
 ## Dev setup (eeyore)
 
@@ -19,7 +20,9 @@ uv run im load-fixtures --scenario edited   # the same stream after every kind o
 uv run im run
 uv run im check                   # invariant queries
 uv run im show <episode-prefix>
-uv run im reset --stage segment   # drop episodes; the next run rebuilds them
+uv run im reset --stage segment   # drop episodes; the next run rebuilds them (labels are kept)
+uv run im project add garden -d "Garden sensors" -a lora
+uv run im label                   # label episodes in the terminal; --status for progress
 uv run pytest                     # each test gets a fresh im_test database and stream directory
 ```
 
