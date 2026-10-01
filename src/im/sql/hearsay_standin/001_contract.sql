@@ -1,8 +1,6 @@
--- DEV/TEST ONLY. A local stand-in for the Hearsay contract in docs/ROADMAP.md §3.
--- Idea Machine never applies this to a real Hearsay database.
---
--- Supersession via a link table and deletion via tombstones are defaults
--- PENDING HEARSAY AGREEMENT (ROADMAP §3.2, §3.4).
+-- DEV/TEST ONLY. A stand-in, shaped like the im.source_* tables in
+-- docs/ROADMAP.md §3.3, until the stream importer (Phase 1 step 2) fills those
+-- from Hearsay's utterance stream and this schema goes away.
 
 CREATE SCHEMA hearsay;
 
