@@ -5,6 +5,16 @@ description = "Turns Hearsay transcript segments into episodes, triage and ideas
 requires-python = ">=3.13"
 dependencies = [
     "psycopg[binary]>=3.2",
+    "numpy>=2",
+]
+
+[project.optional-dependencies]
+# The triage backends (Laya, the fallback classifier) and their embeddings. CPU-only torch.
+models = [
+    "laya==0.3.23",
+    "torch>=2.8",
+    "sentence-transformers>=5",
+    "scikit-learn>=1.6",
 ]
 
 [project.scripts]
@@ -12,6 +22,14 @@ im = "im.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
@@ -22,3 +40,4 @@ packages = ["src/im"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["models: needs the real models (uv sync --extra models; set IM_TEST_MODELS=1)"]

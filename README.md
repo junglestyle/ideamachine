@@ -3,8 +3,8 @@
 Turns Hearsay's speaker-attributed transcript segments into episodes and, later, triage and ideas.
 See [docs/ROADMAP.md](docs/ROADMAP.md).
 
-Built so far: Phase 1 steps 1–3 (import Hearsay's utterance stream, heuristic episode segmentation, the projects
-registry and labeling).
+Built so far: Phase 1 steps 1–4 (import Hearsay's utterance stream, heuristic episode segmentation, the projects
+registry, labeling, and triage with Laya and a fallback classifier).
 
 ## Dev setup (eeyore)
 
@@ -12,10 +12,10 @@ registry and labeling).
 cp .env.example .env              # pick passwords; .env is gitignored
 podman compose up -d              # Postgres 16 + pgvector on 127.0.0.1:55432 (docker compose works too)
 set -a; . ./.env; set +a
-uv sync
+uv sync --extra models          # CPU-only torch, Laya, sentence-transformers, scikit-learn
 uv run im migrate                 # im schema
 uv run im load-fixtures           # a synthetic Hearsay stream in $IM_STREAM_DIR (dev/stream)
-uv run im run                     # import + segment; idempotent
+uv run im run                     # import + segment + triage; idempotent
 uv run im load-fixtures --scenario edited   # the same stream after every kind of correction and a forget
 uv run im run
 uv run im check                   # invariant queries
@@ -23,7 +23,11 @@ uv run im show <episode-prefix>
 uv run im reset --stage segment   # drop episodes; the next run rebuilds them (labels are kept)
 uv run im project add garden -d "Garden sensors" -a lora
 uv run im label                   # label episodes in the terminal; --status for progress
+uv run im train                   # fit the fallback classifier on my labels
+uv run im eval --laya             # accuracy and reliability per question, Laya vs the fallback
+uv run im reset --stage triage    # drop triage rows; the next run re-triages
 uv run pytest                     # each test gets a fresh im_test database and stream directory
+IM_TEST_MODELS=1 uv run pytest    # also load the real Laya model
 ```
 
 Settings are env vars:
@@ -34,8 +38,12 @@ Settings are env vars:
 - `IM_DEV_ADMIN_URL`: the local dev superuser, used only by tests to create and drop `im_test`. Code refuses it
   unless it points at localhost.
 
-`IM_CONFIG` can name a TOML file that overrides the segmentation defaults in `src/im/config.py`. Every value there
-goes into the episodes' `stage_version`, so changing one re-derives episodes on the next run.
+`IM_CONFIG` can name a TOML file that overrides the defaults in `src/im/config.py` (`[segment]` and `[triage]`).
+Every segmentation value goes into the episodes' `stage_version`, so changing one re-derives episodes on the
+next run. Triage rows record the model, its weights revision and a hash of the questions, so a model or
+question change re-triages.
+
+Set `CUDA_VISIBLE_DEVICES=""` on a box with a GPU to measure what the NAS's CPU will do.
 
 ## How `im run` works
 
@@ -50,3 +58,6 @@ One REPEATABLE READ transaction:
 3. **Segment.** Re-segment conversations whose membership changed, or whose episodes are stale or missing.
    Episodes are content-addressed (`uuid5(stage_version, input_hash)`), so unchanged episodes aren't touched,
    ones that no longer come out are retired (`current = false`), and new ones are inserted.
+
+Then, outside that transaction, **triage**: each configured backend answers the triage questions for current
+episodes it hasn't answered yet, newest first, committing in small batches.

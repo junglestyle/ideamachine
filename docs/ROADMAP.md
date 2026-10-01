@@ -1,6 +1,6 @@
 # Idea Machine Roadmap
 
-_Status: draft, 2026-10-01. Idea Machine reads Hearsay's utterance stream (§3). Hearsay has delivered the stream changes Idea Machine asked for; the forget command itself comes with Hearsay slice 12. Phase 1 steps 1–3 (stream import, segmentation, projects registry and labeling) are built._
+_Status: draft, 2026-10-01. Idea Machine reads Hearsay's utterance stream (§3). Hearsay has delivered the stream changes Idea Machine asked for; the forget command itself comes with Hearsay slice 12. Phase 1 steps 1–4 (stream import, segmentation, projects registry, labeling, and triage with Laya and the fallback) are built. What's left of Phase 1 needs real labels._
 
 ## 1. Scope
 
@@ -99,6 +99,8 @@ Until Hearsay slice 12 the list stays empty, so Idea Machine builds and tests th
 - Step 1 (done, 2026-10-01): the project skeleton, migrations, heuristic segmentation, tombstone purge and the invariant tests. They run against a stand-in `hearsay` Postgres schema shaped like the tables in §3.3.
 - Step 2 (done, 2026-10-01): the stream importer (§3.3) fills `im.source_*`, and the stand-in schema and the `seq` cursor are gone. Fixtures are stream directories in Hearsay's `format_version` 1, with every correction Hearsay makes. Checked once against a copy of the real data rendered by Hearsay's new `stream.py`: 17 conversations, 3,378 utterances and 76 episodes, with the invariants holding.
 - Step 3 (done, 2026-10-01): the projects registry (`im project add/list/retire`) and `im label`. Labels follow supersession links. A label counts for an episode only when it resolves *exactly* (one current episode, same segments); otherwise it's kept and the episode comes up again. `im label` also records a **boundaries** judgment (ok / should split / should merge) for the segmentation exit criterion, and `im label --status` tracks progress toward 50. Next: the Laya spike and the fallback classifier.
+- Step 4 (done, 2026-10-01): the Laya spike passed (`docs/decisions/0001-laya-spike.md`). Triage runs in `im run` with Laya and, once `im train` has run, the fallback classifier. `im eval` reports per-question accuracy and reliability for both, with the fallback cross-validated. `im reset --stage triage` is in place. Episode embeddings are stored in pgvector, ready for Phase 2.
+- Next, once there are about 50 real labels: compare Laya checkpoints and the fallback on `im eval`, fit Laya's temperatures on a training split (it ships over-confident), choose the router and its thresholds, and build `im review`.
 
 **Deliverables**
 - `im` schema and migrations. Tables: `source_conversations`, `source_segments`, `source_supersessions`, `source_tombstones`, `episodes`, `episode_segments`, `triage`, `labels`, `projects`, `runs`.
@@ -109,7 +111,8 @@ Until Hearsay slice 12 the list stays empty, so Idea Machine builds and tests th
 - **Labeling:** `im label` presents unlabeled episodes in the terminal (transcript, speakers, times, and the conversation ID and offsets for finding the audio in Hearsay) and records my answers to the triage questions, plus whether the episode's boundaries are right. Labels are stored against the episode's segment IDs. Target: **50 labeled episodes**, deliberately covering chatter and noise, not just ideas.
 - **Laya spike, then triage:**
   - First, confirm Laya installs, runs on the TrueNAS CPU at an acceptable per-episode latency, and accepts our typed questions. Timebox: 2 days. If it fails, skip to the fallback and continue.
-  - The triage questions per episode are `is_self_thinking` (bool), `kind` (idea/task/decision/chatter/noise), `project` (registry or none), and `keep_score` (1–5). Each answer is stored with its confidence.
+  - The triage questions per episode are `is_self_thinking` (bool), `kind` (idea/task/decision/chatter/noise), `project` (registry or none), and `keep_score` (1–5). Each answer is stored with its probabilities and confidence.
+  - Laya ships over-confident (per its model card, and seen in the spike). Its temperatures are fitted on a training split of the labels (`laya.fit_temperatures`) before any threshold is set from its confidences.
   - **Fallback classifier:** local sentence embeddings with one logistic regression per question, trained on my labels. Building it is not optional, because it doubles as the baseline Laya has to beat. The embeddings are reused in Phase 2.
 - **Routing:** `auto_file` / `review` / `escalate`, chosen by per-question confidence thresholds set from the eval set. A route is a label, and nothing is dropped.
 - **CLI:** `im run` (all stages, idempotent), `im reset --stage S`, `im show <episode>`, `im eval`, `im review` (works through the `review` queue and adds labels as I go).

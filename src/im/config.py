@@ -24,8 +24,19 @@ class SegmentConfig:
 
 
 @dataclass(frozen=True)
+class TriageConfig:
+    backends: tuple[str, ...] = ("laya", "fallback")  # run by `im run`; fallback only once trained
+    laya_checkpoint: str = "english"     # english | multilingual | typed-decisions
+    laya_max_len: int = 8192             # tokens of state; longer episodes are truncated (and say so)
+    threads: int | None = None           # torch CPU threads; None = torch's default
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    max_episodes_per_run: int | None = None   # bound a run's time; the rest wait for the next run
+
+
+@dataclass(frozen=True)
 class Config:
     segment: SegmentConfig = SegmentConfig()
+    triage: TriageConfig = TriageConfig()
 
 
 def load() -> Config:
@@ -34,7 +45,7 @@ def load() -> Config:
         return Config()
     with open(path, "rb") as f:
         data = tomllib.load(f)
-    return Config(
-        segment=SegmentConfig(**data.get("segment", {})),
-        **{k: v for k, v in data.items() if k != "segment"},
-    )
+    triage = data.get("triage", {})
+    if "backends" in triage:
+        triage["backends"] = tuple(triage["backends"])
+    return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage))
