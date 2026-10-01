@@ -43,4 +43,5 @@ One REPEATABLE READ transaction:
    (`uuid5(stage_version, input_hash)`), so unchanged episodes aren't touched, ones that no longer come out are
    retired (`current = false`), and new ones are inserted.
 
-The supersession link table and tombstones are contract defaults, pending Hearsay agreement (ROADMAP §3).
+For now the source is a stand-in `hearsay` schema. Phase 1 step 2 replaces it with an importer for Hearsay's
+utterance stream (ROADMAP §3).

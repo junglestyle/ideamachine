@@ -46,7 +46,7 @@ def _ingest(conn, cfg: Config) -> tuple[set[str], dict]:
 
 def _purge_tombstoned(conn) -> set[str]:
     """Delete every episode, current or retired, that contains a tombstoned segment.
-    Tombstones are contract defaults pending Hearsay agreement (ROADMAP §3.4)."""
+    Tombstones come from Hearsay's forgotten list (ROADMAP §3.4)."""
     rows = conn.execute(
         """DELETE FROM im.episodes e
            WHERE EXISTS (SELECT 1 FROM im.episode_segments es
