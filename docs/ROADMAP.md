@@ -1,6 +1,6 @@
 # Idea Machine Roadmap
 
-_Status: draft, 2026-10-01. Idea Machine reads Hearsay's utterance stream (§3); four small asks of Hearsay are pending. Phase 1 step 1 (segmentation) is built against a stand-in; step 2 swaps the stand-in for the stream importer._
+_Status: draft, 2026-10-01. Idea Machine reads Hearsay's utterance stream (§3). Hearsay has delivered the stream changes Idea Machine asked for; the forget command itself comes with Hearsay slice 12. Phase 1 step 1 (segmentation) is built against a stand-in; step 2 swaps the stand-in for the stream importer._
 
 ## 1. Scope
 
@@ -33,44 +33,49 @@ Idea Machine reads the speaker-attributed utterances that Hearsay publishes in i
 
 The source is Hearsay's **utterance stream** (Hearsay slice 8, `hearsay/stream.py`), read-only. Hearsay rewrites it after every hourly reprocess into `/mnt/storage/hearsay/stream/`. Idea Machine needs no Hearsay database and no access to Hearsay's internals.
 
-### 3.1 What Hearsay publishes today
+### 3.1 What Hearsay publishes
 
-- `index.json`: one entry per conversation, with `conversation_id`, `start`, `end`, `open`, `transcribed`, `taps`, `utterances`, `revision` and `file`.
+The authoritative description is the output contract in Hearsay's AGENTS.md. In summary:
+
+- `index.json`: `{"format_version": 1, "conversations": [...]}`. Each entry has `conversation_id`, `start`, `end`, `open`, `transcribed`, `taps`, `utterances`, `revision`, `transcript_revision` and `file`.
 - `conversations/<conversation_id>.jsonl`: one utterance per line, with `conversation_id`, `utterance_id` (`<conversation_id>:<idx>`), `start` and `end` (UTC), `speaker {kind: owner|person|anonymous|stranger|unknown, name, label}`, `text`, `text_confidence` and `speaker_confidence {basis, owner_similarity}`.
-- Behaviour already in the code:
-  - Files are written to a temp file and renamed, with the index written last.
-  - A file is rewritten only when its content changes.
-  - `revision` is the first 16 hex characters of the sha256 of the file's bytes.
-  - Turns the operator filed as `_noise` or `_media` are left out by Hearsay. That's Hearsay's call about who is speaking, not a content filter, so it doesn't conflict with "noise is a label".
-- The unit of change is the conversation. Naming a speaker rewrites the files of every conversation that speaker appears in, and a growing conversation is re-transcribed.
+- `forgotten.json`: an append-only list, never rewritten or shrunk, of `{forgotten_at, start, end, conversation_id, utterance_ids, reason}`, with IDs as they were. It's the only deletion signal: anything else that leaves the stream was restructured, not deleted.
+- Guarantees:
+  - Files are written atomically, conversation files first and `index.json` last, and only when their content changes.
+  - `revision` is the first 16 hex characters of the sha256 of the conversation file's bytes.
+  - `transcript_revision` hashes the conversation's turns as transcribed: times, index, text, diarized speaker and confidence, including `_noise`/`_media` turns. Who a turn is attributed to never goes into the hash, so naming, merging or relabeling a speaker leaves it unchanged. Within one `transcript_revision`, a given `utterance_id` always names the same stretch of speech; across revisions, IDs are renumbered. It's null for conversations that haven't been transcribed.
+- Turns the operator filed as `_noise` or `_media` are left out of the stream, and can come back if refiled. That's Hearsay's call about who is speaking, not a content filter, so it doesn't conflict with "noise is a label".
+- The unit of change is the conversation. Naming a speaker rewrites the files of every conversation that speaker appears in. An open conversation is re-transcribed as it grows, which gives it a new `transcript_revision` each time.
 
-### 3.2 Asks of Hearsay (PENDING)
+### 3.2 Status of the Hearsay asks (delivered 2026-10-01)
 
-1. **Format version.** Add `format_version` to `index.json`. Idea Machine refuses to import a version it doesn't know.
-2. **Transcript revision.** Today `utterance_id` is renumbered when a conversation is re-transcribed, so the same ID can name different speech. Add a per-conversation `transcript_revision` that changes when the transcript changes and stays the same when only speaker fields change. Within one `transcript_revision`, an `utterance_id` must always name the same stretch of speech.
-3. **Forgotten list.** Add an append-only `forgotten.json` that never shrinks. Each entry has `forgotten_at`, `start`, `end`, and the `conversation_id` and `utterance_ids` as they were. Anything that leaves the stream without appearing here is a restructure, not a deletion. Whether Hearsay also deletes raw is Hearsay's decision.
-4. **Stated guarantees.** Keep atomic writes (index last) and "revision = hash of the file" as documented guarantees.
+1. `format_version`: done.
+2. `transcript_revision`: done. Hearsay hashes the turns, not the WAV, which follows exactly what an ID points at.
+3. `forgotten.json`: the format is done; the list stays empty until Hearsay slice 12 adds the operator's forget command. Forgetting will be operator input, kept by absolute time and applied on every reprocess, so a re-run from raw never brings forgotten speech back. For now Hearsay keeps the raw payloads and audio of a forgotten span; whether to delete them is decided with retention in slice 12.
+4. Atomic writes and the revision definition: documented as guarantees in Hearsay's AGENTS.md.
 
 ### 3.3 How Idea Machine imports it
 
 These tables are owned by Idea Machine and live in its own database:
 
 - `im.source_conversations(conversation_id, revision, transcript_revision, imported_at)`: what was last imported.
+- `im.source_members(conversation_id, segment_id)`: which segments the latest import of each conversation contains.
 - `im.source_segments`: an append-only copy of every utterance version Idea Machine has seen.
   - `segment_id = uuid5(conversation_id, transcript_revision, utterance_id, content_hash)`. An unchanged utterance keeps its ID; any change gives a new one.
   - Field mapping: `session_id` is `conversation_id`. `is_self` is true for `owner`, NULL for `unknown`, and false otherwise. Hearsay already thresholds `owner` for precision, and NULL fails closed to not-me. `speaker_label` is name, else label, else kind. `speaker_conf` is `owner_similarity` and `asr_confidence` is `text_confidence`.
 - `im.source_supersessions(old_segment_id, new_segment_id)`, written by the importer:
   - Same `utterance_id` and same `transcript_revision` but different content (e.g. a speaker was named): link old to new.
   - The transcript changed, or a conversation was split, merged or disappeared: link each old segment to the new segments that overlap it in time. Splits and merges fall out of this.
-  - An old segment with no overlap gets no link. It stops being current but is not deleted.
-- `im.source_tombstones`: one row per segment matched by a forgotten entry.
-- `im.current_segments`: segments that are neither superseded nor tombstoned. Everything downstream reads only this.
+  - An old segment with no overlap gets no link. It leaves `source_members` but stays in `source_segments`.
+  - The links are for traceability and for carrying labels forward; they don't decide what is current.
+- `im.source_tombstones`: one row per segment matched by a forgotten entry. A segment matches if it is listed in the entry's `utterance_ids`, or if its time overlaps the entry's `start`..`end`. This covers every version Idea Machine holds, including ones from conversations that have since been renumbered or restructured.
+- `im.current_segments`: segments in `source_members` that aren't tombstoned. Everything downstream reads only this. A turn that's filed as `_noise` and later refiled comes back with the same `segment_id`, so its labels come back with it.
 
 **Import loop** (one transaction per run): read `index.json`. For each conversation whose `revision` changed:
 1. Read its file and check the file's hash matches the revision. If it doesn't, Hearsay was mid-write, so skip the conversation until the next run.
 2. Compare with the previous version and write new segments and supersession links.
 
-Conversations that left the index are handled as restructures unless the forgotten list covers them. After the import, segmentation runs exactly as built in Phase 1 step 1, finding stale episodes by anti-joining against `im.current_segments`.
+Conversations that left the index lose their members, and are handled as restructures unless the forgotten list covers them. Open conversations are imported like the rest (the 15-minute target needs them), so their episodes are re-derived each hour while they grow. That's cheap for the heuristic stages; Claude only re-runs when the egress payload hash changes (§6). After the import, segmentation runs exactly as built in Phase 1 step 1, finding stale episodes by anti-joining against `im.current_segments`.
 
 ### 3.4 Forgetting
 
@@ -82,7 +87,7 @@ A forgotten segment is deleted from everything Idea Machine holds:
 - embeddings, links and spans
 - synthesized objects
 
-Forgetting can't recall anything already sent to Claude. To at least report it, `egress_log` (Phase 4) records the `segment_id`s in every payload, and `im forgotten --sent` lists forgotten segments that went out, and when.
+Until Hearsay slice 12 the list stays empty, so Idea Machine builds and tests the purge against fixtures. Forgetting can't recall anything already sent to Claude. To at least report it, `egress_log` (Phase 4) records the `segment_id`s in every payload, and `im forgotten --sent` lists forgotten segments that went out, and when.
 
 ## 4. Phases
 
@@ -92,7 +97,7 @@ Forgetting can't recall anything already sent to Claude. To at least report it, 
 
 **Progress**
 - Step 1 (done, 2026-10-01): the project skeleton, migrations, heuristic segmentation, tombstone purge and the invariant tests. They run against a stand-in `hearsay` Postgres schema shaped like the tables in §3.3.
-- Step 2: the stream importer (§3.3) fills `im.source_*`, the stand-in schema goes away, and the fixtures become stream directories. This depends on Hearsay asks 1–3; until they land, it uses fixtures that already include the fields being asked for.
+- Step 2: the stream importer (§3.3) fills `im.source_*`, the stand-in schema and the `seq` cursor go away, and the fixtures become stream directories in Hearsay's `format_version` 1. Nothing blocks it.
 
 **Deliverables**
 - `im` schema and migrations. Tables: `source_conversations`, `source_segments`, `source_supersessions`, `source_tombstones`, `episodes`, `episode_segments`, `triage`, `labels`, `projects`, `runs`.
@@ -160,6 +165,8 @@ _Moved ahead of extraction: relating episodes is the core value, it's cheap, and
 
 **Goal:** flagged episodes plus their neighbors become structured objects, without other people's words leaving the box.
 
+**Gate:** nothing is sent to Claude until the operator can actually forget something. That needs Hearsay slice 12's forget command (or an earlier, smaller version of it), with Idea Machine's purge verified end to end on real data. Sending is the one step forgetting can't undo.
+
 **Deliverables**
 - **Object tables:** `ideas`, `tasks`, `decisions`, `project_mentions`. Each row has `source_segment_ids`, timestamps, `model`, `prompt_version`, `privacy_policy_version` and `batch_id`.
 - **Egress policy module** (`im.egress`, one swappable module, versioned):
@@ -188,7 +195,7 @@ _Moved ahead of extraction: relating episodes is the core value, it's cheap, and
 
 ## 5. Open questions
 
-1. The Hearsay asks in §3.2 (format version, transcript revision, forgotten list, stated guarantees) are pending. Step 2's importer is built against fixtures that include those fields, so the importer can be written now.
+1. The Hearsay asks in §3.2 are delivered. What's still open is when the operator can actually forget (Hearsay slice 12). Phase 4 is gated on it.
 2. Daily capture volume (hours/day, % multi-party) drives Laya throughput, GLiNER2 runtime and Claude cost. It needs measuring in the first week of Phase 1.
 3. Should episodes ever span sessions? Sessions are now Hearsay conversations, which Hearsay already splits on 3 minutes of silence. The default is no.
 4. Is 1–5 the right `keep_score` scale, or is binary keep/skip easier to label consistently? Decide during labeling.
