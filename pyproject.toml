@@ -1,0 +1,24 @@
+[project]
+name = "ideamachine"
+version = "0.1.0"
+description = "Turns Hearsay transcript segments into episodes, triage and ideas."
+requires-python = ">=3.13"
+dependencies = [
+    "psycopg[binary]>=3.2",
+]
+
+[project.scripts]
+im = "im.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/im"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

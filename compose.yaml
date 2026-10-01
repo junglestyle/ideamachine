@@ -1,0 +1,15 @@
+# Dev/test Postgres for Idea Machine. Local only: never point tests at the NAS.
+services:
+  db:
+    image: docker.io/pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      IM_PIPELINE_PASSWORD: ${IM_PIPELINE_PASSWORD:?set in .env}
+      POSTGRES_DB: im_dev
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - im-pgdata:/var/lib/postgresql/data
+      - ./dev/init:/docker-entrypoint-initdb.d:ro,z
+volumes:
+  im-pgdata:
