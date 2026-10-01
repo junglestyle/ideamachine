@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from pathlib import Path
 
 from im import config, db, fixtures, migrate, pipeline
 from im.checks import run_checks
@@ -18,13 +19,12 @@ def cmd_migrate(args) -> None:
 
 
 def cmd_load_fixtures(args) -> None:
-    with db.connect(db.dev_admin_dsn()) as conn:
-        _print(fixtures.load(conn))
+    _print(fixtures.write(Path(args.dir) if args.dir else db.stream_dir(), args.scenario))
 
 
 def cmd_run(args) -> None:
     with db.connect(db.pipeline_dsn()) as conn:
-        _print(pipeline.run(conn, config.load()))
+        _print(pipeline.run(conn, config.load(), db.stream_dir()))
 
 
 def cmd_reset(args) -> None:
@@ -34,7 +34,7 @@ def cmd_reset(args) -> None:
 
 def cmd_show(args) -> None:
     with db.connect(db.pipeline_dsn()) as conn:
-        print(show(conn, args.episode, config.load().segment))
+        print(show(conn, args.episode))
 
 
 def cmd_check(args) -> None:
@@ -49,8 +49,11 @@ def main(argv=None) -> None:
     p = argparse.ArgumentParser(prog="im", description="Idea Machine")
     sub = p.add_subparsers(required=True, metavar="command")
     sub.add_parser("migrate", help="apply im schema migrations").set_defaults(func=cmd_migrate)
-    sub.add_parser("load-fixtures", help="write synthetic segments into the local hearsay stand-in (dev only)"
-                   ).set_defaults(func=cmd_load_fixtures)
+    f = sub.add_parser("load-fixtures", help="write a synthetic Hearsay stream (dev only)")
+    f.add_argument("--dir", help="where to write it (default: $IM_STREAM_DIR)")
+    f.add_argument("--scenario", choices=fixtures.SCENARIOS, default="base",
+                   help="base, or base plus every correction and a forget")
+    f.set_defaults(func=cmd_load_fixtures)
     sub.add_parser("run", help="ingest and segment; idempotent").set_defaults(func=cmd_run)
     r = sub.add_parser("reset", help="drop a stage's derived rows so the next run rebuilds them")
     r.add_argument("--stage", required=True, choices=pipeline.STAGES)

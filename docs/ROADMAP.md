@@ -1,6 +1,6 @@
 # Idea Machine Roadmap
 
-_Status: draft, 2026-10-01. Idea Machine reads Hearsay's utterance stream (§3). Hearsay has delivered the stream changes Idea Machine asked for; the forget command itself comes with Hearsay slice 12. Phase 1 step 1 (segmentation) is built against a stand-in; step 2 swaps the stand-in for the stream importer._
+_Status: draft, 2026-10-01. Idea Machine reads Hearsay's utterance stream (§3). Hearsay has delivered the stream changes Idea Machine asked for; the forget command itself comes with Hearsay slice 12. Phase 1 steps 1–2 (stream import and segmentation) are built._
 
 ## 1. Scope
 
@@ -59,16 +59,16 @@ The authoritative description is the output contract in Hearsay's AGENTS.md. In 
 These tables are owned by Idea Machine and live in its own database:
 
 - `im.source_conversations(conversation_id, revision, transcript_revision, imported_at)`: what was last imported.
-- `im.source_members(conversation_id, segment_id)`: which segments the latest import of each conversation contains.
+- `im.source_members(conversation_id, segment_id, utterance_id)`: which segments the latest import of each conversation contains, and the `utterance_id` each has in that import.
 - `im.source_segments`: an append-only copy of every utterance version Idea Machine has seen.
-  - `segment_id = uuid5(conversation_id, transcript_revision, utterance_id, content_hash)`. An unchanged utterance keeps its ID; any change gives a new one.
+  - `segment_id` is a uuid5 over the `conversation_id` and a hash of the utterance record without its `utterance_id`. An utterance whose content is unchanged keeps its segment, even when a re-transcription renumbers it; any change to its times, speaker, text or confidences gives a new one.
   - Field mapping: `session_id` is `conversation_id`. `is_self` is true for `owner`, NULL for `unknown`, and false otherwise. Hearsay already thresholds `owner` for precision, and NULL fails closed to not-me. `speaker_label` is name, else label, else kind. `speaker_conf` is `owner_similarity` and `asr_confidence` is `text_confidence`.
 - `im.source_supersessions(old_segment_id, new_segment_id)`, written by the importer:
   - Same `utterance_id` and same `transcript_revision` but different content (e.g. a speaker was named): link old to new.
   - The transcript changed, or a conversation was split, merged or disappeared: link each old segment to the new segments that overlap it in time. Splits and merges fall out of this.
   - An old segment with no overlap gets no link. It leaves `source_members` but stays in `source_segments`.
   - The links are for traceability and for carrying labels forward; they don't decide what is current.
-- `im.source_tombstones`: one row per segment matched by a forgotten entry. A segment matches if it is listed in the entry's `utterance_ids`, or if its time overlaps the entry's `start`..`end`. This covers every version Idea Machine holds, including ones from conversations that have since been renumbered or restructured.
+- `im.source_tombstones`: one row per segment matched by a forgotten entry. A segment matches if its time overlaps the entry's `start`..`end`, whichever conversation or version it's in. `utterance_ids` aren't used for matching: they're renumbered across transcript revisions, so an old ID can name different speech in another version.
 - `im.current_segments`: segments in `source_members` that aren't tombstoned. Everything downstream reads only this. A turn that's filed as `_noise` and later refiled comes back with the same `segment_id`, so its labels come back with it.
 
 **Import loop** (one transaction per run): read `index.json`. For each conversation whose `revision` changed:
@@ -97,7 +97,7 @@ Until Hearsay slice 12 the list stays empty, so Idea Machine builds and tests th
 
 **Progress**
 - Step 1 (done, 2026-10-01): the project skeleton, migrations, heuristic segmentation, tombstone purge and the invariant tests. They run against a stand-in `hearsay` Postgres schema shaped like the tables in §3.3.
-- Step 2: the stream importer (§3.3) fills `im.source_*`, the stand-in schema and the `seq` cursor go away, and the fixtures become stream directories in Hearsay's `format_version` 1. Nothing blocks it.
+- Step 2 (done, 2026-10-01): the stream importer (§3.3) fills `im.source_*`, and the stand-in schema and the `seq` cursor are gone. Fixtures are stream directories in Hearsay's `format_version` 1, with every correction Hearsay makes. Checked once against a copy of the real data rendered by Hearsay's new `stream.py`: 17 conversations, 3,378 utterances and 76 episodes, with the invariants holding.
 
 **Deliverables**
 - `im` schema and migrations. Tables: `source_conversations`, `source_segments`, `source_supersessions`, `source_tombstones`, `episodes`, `episode_segments`, `triage`, `labels`, `projects`, `runs`.
@@ -170,7 +170,7 @@ _Moved ahead of extraction: relating episodes is the core value, it's cheap, and
 **Deliverables**
 - **Object tables:** `ideas`, `tasks`, `decisions`, `project_mentions`. Each row has `source_segment_ids`, timestamps, `model`, `prompt_version`, `privacy_policy_version` and `batch_id`.
 - **Egress policy module** (`im.egress`, one swappable module, versioned):
-  - My speech (`is_self = true` and `speaker_conf` ≥ threshold) goes out verbatim. Anything else counts as not-me (fail closed).
+  - My speech goes out verbatim. Anything else counts as not-me (fail closed). **Decide** whether `owner` turns whose basis is `diarization` (inherited from a diarized speaker rather than matched by voice) count as mine here. In the first real data they were 526 of 999 owner utterances.
   - Other speakers' turns are summarized locally by a 7–14B model via Ollama into gists that keep the conversational function (proposed, objected, agreed) and drop the wording.
   - Speakers are pseudonymized per request (`me`, `S1`, `S2`…) with a fresh mapping each call, re-linked locally on return. No speaker UUIDs or names go out.
   - Final scrub: GLiNER2 removes names, places, orgs and health terms from the gists. Laya flags sensitive turns, and if it's unsure the turn becomes `[S2: omitted]`.

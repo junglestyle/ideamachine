@@ -7,7 +7,7 @@ from im.config import SegmentConfig
 from im.segment import Seg, segment
 
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
-CFG = SegmentConfig(gap_s=60, mode_gap_s=5, min_monologue_s=30, self_conf_min=0.6)
+CFG = SegmentConfig(gap_s=60, mode_gap_s=5, min_monologue_s=30)
 
 
 def seg(n, start, dur, me, conf=0.9, label=None):
@@ -42,8 +42,8 @@ def test_long_monologue_without_a_pause_stays_in_the_conversation():
     assert len(segment(mono + other, CFG)) == 1
 
 
-def test_unknown_and_low_confidence_speakers_fail_closed():
-    eps = segment([seg(1, 0, 5, None, None), seg(2, 6, 5, True, 0.3), seg(3, 12, 5, True, None)], CFG)
+def test_unknown_speakers_fail_closed():
+    eps = segment([seg(1, 0, 5, None, None), seg(2, 6, 5, None, None, "C")], CFG)
     assert [(e.kind, e.self_segments) for e in eps] == [("others_only", 0)]
 
 

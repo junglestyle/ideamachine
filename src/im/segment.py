@@ -7,7 +7,7 @@
 
 Both rules only look inside a gap block, so a correction can only move
 boundaries in the block it lands in.
-Speakers fail closed: is_self counts only when true and speaker_conf >= self_conf_min.
+Speakers fail closed: only is_self = true (Hearsay's owner) counts as me.
 """
 
 import hashlib
@@ -51,7 +51,7 @@ def input_hash(segment_ids) -> str:
 
 
 def is_me(s: Seg, cfg: SegmentConfig) -> bool:
-    return s.is_self is True and s.speaker_conf is not None and s.speaker_conf >= cfg.self_conf_min
+    return s.is_self is True
 
 
 def _gap(a_end: datetime, b: Seg) -> float:
