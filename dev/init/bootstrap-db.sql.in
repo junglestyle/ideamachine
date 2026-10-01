@@ -1,0 +1,5 @@
+-- Per-database setup an admin does once (on the NAS too, by hand, when agreed).
+-- The pipeline role owns schema im and gets nothing on hearsay beyond the
+-- SELECT grants the hearsay schema hands out.
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE SCHEMA IF NOT EXISTS im AUTHORIZATION im_pipeline;

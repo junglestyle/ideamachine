@@ -1,6 +1,6 @@
 # Idea Machine Roadmap
 
-_Status: draft, 2026-10-01. The Hearsay contract (§3) needs agreement before Phase 1 ingestion is built._
+_Status: draft, 2026-10-01. The Hearsay contract (§3) needs agreement. Phase 1 ingest is built against a local stand-in of §3 using the defaults marked "pending Hearsay agreement"._
 
 ## 1. Scope
 
@@ -33,12 +33,13 @@ Idea Machine reads the immutable, speaker-attributed transcript segments that He
 
 Shared Postgres, schema `hearsay`. Idea Machine gets `SELECT` only.
 
+> **Where Hearsay is today (checked 2026-10-01):** Hearsay doesn't write to Postgres. Its derived data is a SQLite file (`/mnt/storage/hearsay/db/hearsay.sqlite`) that's rebuilt from raw every hour and swapped in. Its `turns` have IDs of the form `conversation_id:idx`, which change when a transcript changes, and there's no `seq` and no supersession record. Speaker data is in `turn_speakers.label` (owner / not_owner / NULL) and `turn_people.person`. So this contract needs a publisher on the Hearsay side: something that diffs each rebuild against what it last published and appends new segments, supersession links and tombstones to Postgres. Until that exists, Idea Machine runs against a local stand-in (`src/im/sql/hearsay_standin/`).
+
 ```sql
--- Append-only. Corrections are new rows that supersede old ones; nothing is UPDATEd or DELETEd.
+-- Append-only. Corrections are new rows plus supersession links; nothing is UPDATEd or DELETEd.
 CREATE TABLE hearsay.segments (
   segment_id      uuid PRIMARY KEY,
   seq             bigint GENERATED ALWAYS AS IDENTITY UNIQUE, -- poll cursor
-  supersedes      uuid NULL REFERENCES hearsay.segments(segment_id),
   source          text NOT NULL,          -- capture source/device, e.g. 'omi'; keeps IM source-agnostic
   session_id      text NOT NULL,          -- one continuous capture session
   started_at      timestamptz NOT NULL,
@@ -55,18 +56,37 @@ CREATE TABLE hearsay.segments (
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
--- What Idea Machine treats as truth: rows nobody has superseded.
+-- Pending Hearsay agreement (§3.2). A split is one old row linked to several new rows;
+-- a merge is several old rows linked to one new row.
+CREATE TABLE hearsay.segment_supersessions (
+  old_segment_id  uuid NOT NULL REFERENCES hearsay.segments(segment_id),
+  new_segment_id  uuid NOT NULL REFERENCES hearsay.segments(segment_id),
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (old_segment_id, new_segment_id)
+);
+
+-- Pending Hearsay agreement (§3.4).
+CREATE TABLE hearsay.tombstones (
+  segment_id  uuid PRIMARY KEY REFERENCES hearsay.segments(segment_id),
+  reason      text NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- What Idea Machine treats as truth: rows nobody has superseded and that aren't tombstoned.
 CREATE VIEW hearsay.current_segments AS
 SELECT s.* FROM hearsay.segments s
-WHERE NOT EXISTS (SELECT 1 FROM hearsay.segments n WHERE n.supersedes = s.segment_id);
+WHERE NOT EXISTS (SELECT 1 FROM hearsay.segment_supersessions x WHERE x.old_segment_id = s.segment_id)
+  AND NOT EXISTS (SELECT 1 FROM hearsay.tombstones t WHERE t.segment_id = s.segment_id);
 ```
+
+The poller also needs an index on `segments(created_at)` for the trailing window.
 
 Points to agree on:
 
 1. **Cursor safety.** Identity values can commit out of order under concurrent writers, which lets a naive `seq > last` poll skip rows. Two fixes: Hearsay keeps a single writer, or Idea Machine re-reads a trailing window (e.g. the last 10 min of `seq`) and upserts idempotently. The plan assumes the trailing window, since it costs nothing.
-2. **Supersession semantics.** A superseding row replaces the whole segment (text, speaker, times). A split or merge is several rows superseding one, or one row superseding several. The second case needs `supersedes uuid[]` or a link table. **Decide which.**
+2. **Supersession semantics.** A superseding row replaces the whole segment (text, speaker, times). A split or merge is several rows superseding one, or one row superseding several. **Default (pending Hearsay agreement): the `segment_supersessions` link table above**, written in the same transaction as the new rows. The link tables don't need their own cursor. Each run, Idea Machine anti-joins its current episodes against `current_segments`, which catches supersessions and tombstones whatever order they arrive in, chains included.
 3. **`is_self` fail-closed.** Idea Machine treats `NULL` or low `speaker_conf` as not-me. Hearsay needs to publish the threshold it considers reliable, or Idea Machine picks one from the eval set.
-4. **Deletion.** "Immutable" will collide with "delete what I said about X" or a request from someone else. Proposal: a `hearsay.tombstones(segment_id, reason, created_at)` table that Idea Machine honors by purging derived rows. **Decide whether raw text is physically deleted.**
+4. **Deletion.** "Immutable" will collide with "delete what I said about X" or a request from someone else. **Default (pending Hearsay agreement): the `hearsay.tombstones` table above.** Tombstoned segments drop out of `current_segments`, and on its next run Idea Machine deletes every derived row (current or retired) built from them. **Still open: whether Hearsay physically deletes the raw text.**
 5. **Speaker directory.** Idea Machine needs `speaker_id → display name` locally for CLI output. Proposal: read-only `hearsay.speakers(speaker_id, display_name)`. These names never leave the box (see Phase 4).
 
 ## 4. Phases
@@ -168,7 +188,7 @@ _Moved ahead of extraction: relating episodes is the core value, it's cheap, and
 
 ## 5. Open questions
 
-1. Contract items §3.2 (split/merge supersession) and §3.4 (deletion/tombstones) must be decided with Hearsay before Phase 1 ingest is coded.
+1. Contract items §3.2 (split/merge supersession) and §3.4 (deletion/tombstones) have working defaults, pending Hearsay agreement. The bigger gap: Hearsay has no Postgres publisher yet (see the note at the top of §3).
 2. Daily capture volume (hours/day, % multi-party) drives Laya throughput, GLiNER2 runtime and Claude cost. It needs measuring in the first week of Phase 1.
 3. Should episodes ever span sessions (e.g. a monologue interrupted by a reconnect)? The default is no.
 4. Is 1–5 the right `keep_score` scale, or is binary keep/skip easier to label consistently? Decide during labeling.
