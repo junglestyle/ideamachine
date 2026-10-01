@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from im import config, db, fixtures, label, migrate, pipeline, projects
+from im import config, db, fixtures, label, migrate, pipeline, projects, triage
 from im.checks import run_checks
 from im.show import show
 
@@ -22,9 +22,67 @@ def cmd_load_fixtures(args) -> None:
     _print(fixtures.write(Path(args.dir) if args.dir else db.stream_dir(), args.scenario))
 
 
+def _backends(conn, cfg, names):
+    """The configured triage backends that can run. The fallback waits until it's trained."""
+    from im import backends
+
+    out, notes = [], []
+    for name in names:
+        if name == "laya":
+            out.append(backends.LayaBackend(cfg.triage.laya_checkpoint, cfg.triage.laya_max_len, cfg.triage.threads))
+        elif name == "fallback":
+            try:
+                out.append(backends.FallbackBackend(conn, _embedder(cfg)))
+            except LookupError as e:
+                notes.append(str(e))
+        else:
+            raise SystemExit(f"unknown triage backend {name!r}")
+    return out, notes
+
+
+def _embedder(cfg):
+    from im.backends import SentenceEmbedder
+
+    return SentenceEmbedder(cfg.triage.embedding_model)
+
+
 def cmd_run(args) -> None:
+    cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
-        _print(pipeline.run(conn, config.load(), db.stream_dir()))
+        stats = pipeline.run(conn, cfg, db.stream_dir())
+        if cfg.triage.backends:
+            run_backends, notes = _backends(conn, cfg, cfg.triage.backends)
+            stats["triage"] = [triage.run_stage(conn, b, cfg.triage.max_episodes_per_run) for b in run_backends]
+            stats["triage_notes"] = notes
+        _print(stats)
+
+
+def cmd_train(args) -> None:
+    from im import backends
+
+    cfg = config.load()
+    with db.connect(db.pipeline_dsn()) as conn:
+        try:
+            _print(backends.train(conn, _embedder(cfg), args.C))
+        except ValueError as e:
+            raise SystemExit(str(e)) from None
+
+
+def cmd_eval(args) -> None:
+    from im import evaluate
+
+    cfg = config.load()
+    with db.connect(db.pipeline_dsn()) as conn:
+        if args.laya:  # make sure every labeled episode has Laya's answers to score
+            from im.backends import LayaBackend, exact_labels
+
+            only = [eid for _, eid, _ in exact_labels(conn)]
+            b = LayaBackend(cfg.triage.laya_checkpoint, cfg.triage.laya_max_len, cfg.triage.threads)
+            triage.run_stage(conn, b, only=only)
+        try:
+            print(evaluate.report(evaluate.evaluate(conn, _embedder(cfg), args.k)))
+        except ValueError as e:
+            raise SystemExit(str(e)) from None
 
 
 def cmd_reset(args) -> None:
@@ -78,7 +136,14 @@ def main(argv=None) -> None:
     f.add_argument("--scenario", choices=fixtures.SCENARIOS, default="base",
                    help="base, or base plus every correction and a forget")
     f.set_defaults(func=cmd_load_fixtures)
-    sub.add_parser("run", help="ingest and segment; idempotent").set_defaults(func=cmd_run)
+    sub.add_parser("run", help="import, segment and triage; idempotent").set_defaults(func=cmd_run)
+    t = sub.add_parser("train", help="train the fallback classifier on my exact labels")
+    t.add_argument("-C", type=float, default=1.0, help="inverse regularization strength")
+    t.set_defaults(func=cmd_train)
+    ev = sub.add_parser("eval", help="per-question accuracy and reliability for each backend, on my labels")
+    ev.add_argument("-k", type=int, default=5, help="folds for the fallback's cross-validation")
+    ev.add_argument("--laya", action="store_true", help="first triage any labeled episode Laya hasn't answered")
+    ev.set_defaults(func=cmd_eval)
     r = sub.add_parser("reset", help="drop a stage's derived rows so the next run rebuilds them")
     r.add_argument("--stage", required=True, choices=pipeline.STAGES)
     r.set_defaults(func=cmd_reset)

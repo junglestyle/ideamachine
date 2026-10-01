@@ -117,7 +117,7 @@ def run(conn: psycopg.Connection, cfg: Config, stream_dir: Path) -> dict:
     return stats
 
 
-STAGES = ("segment",)
+STAGES = ("segment", "triage")
 
 
 def reset(conn: psycopg.Connection, stage: str) -> dict:
@@ -127,7 +127,10 @@ def reset(conn: psycopg.Connection, stage: str) -> dict:
     with conn.transaction():
         conn.execute("SELECT pg_advisory_xact_lock(hashtext('im.run'))")
         run_id = _start_run(conn, f"reset --stage {stage}")
-        n = conn.execute("DELETE FROM im.episodes").rowcount
-        stats = {"episodes_deleted": n}
+        if stage == "segment":  # triage rows hang off episodes and go with them
+            stats = {"triage_deleted": conn.execute("SELECT count(*) FROM im.triage").fetchone()[0],
+                     "episodes_deleted": conn.execute("DELETE FROM im.episodes").rowcount}
+        else:
+            stats = {"triage_deleted": conn.execute("DELETE FROM im.triage").rowcount}
         _finish_run(conn, run_id, stats)
     return stats
