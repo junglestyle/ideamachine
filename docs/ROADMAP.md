@@ -176,6 +176,7 @@ _Moved ahead of extraction: relating episodes is the core value, it's cheap, and
 - **Egress policy module** (`im.egress`, one swappable module, versioned):
   - My speech goes out verbatim. Anything else counts as not-me (fail closed). **Decide** whether `owner` turns whose basis is `diarization` (inherited from a diarized speaker rather than matched by voice) count as mine here. In the first real data they were 526 of 999 owner utterances.
   - Other speakers' turns are summarized locally by a 7–14B model via Ollama into gists that keep the conversational function (proposed, objected, agreed) and drop the wording.
+  - The projects registry stays local. Its descriptions can hold other people's details (e.g. a friend's health), so they never go out verbatim: payloads name projects by slug only, or pass the descriptions through the same scrub as other speakers' gists.
   - Speakers are pseudonymized per request (`me`, `S1`, `S2`…) with a fresh mapping each call, re-linked locally on return. No speaker UUIDs or names go out.
   - Final scrub: GLiNER2 removes names, places, orgs and health terms from the gists. Laya flags sensitive turns, and if it's unsure the turn becomes `[S2: omitted]`.
   - `egress_log`: per call, the payload (or its hash, configurable), the `segment_id`s it was built from, policy version, model, token counts and cost. The segment IDs are what lets `im forgotten --sent` report forgotten segments that already went out (§3.4).
