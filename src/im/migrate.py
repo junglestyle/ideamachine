@@ -7,7 +7,6 @@ from importlib import resources
 import psycopg
 
 IM = ("im", "im.schema_migrations")
-HEARSAY_STANDIN = ("hearsay_standin", "public.hearsay_standin_migrations")
 
 _NAME = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
 

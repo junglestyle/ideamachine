@@ -1,12 +1,14 @@
 """Connections. Settings come from env vars only; no credentials live in the repo."""
 
 import os
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
 
-PIPELINE_ENV = "IM_DATABASE_URL"   # role with SELECT on hearsay.*, owner of im.*
-DEV_ADMIN_ENV = "IM_DEV_ADMIN_URL"  # local dev superuser: fixtures and tests only
+PIPELINE_ENV = "IM_DATABASE_URL"   # role im_pipeline: owns im.*, nothing else
+DEV_ADMIN_ENV = "IM_DEV_ADMIN_URL"  # local dev superuser: tests only
+STREAM_ENV = "IM_STREAM_DIR"        # Hearsay's utterance stream, read-only
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", ""}
 
@@ -20,6 +22,10 @@ def _env(name: str) -> str:
 
 def pipeline_dsn() -> str:
     return _env(PIPELINE_ENV)
+
+
+def stream_dir() -> Path:
+    return Path(_env(STREAM_ENV))
 
 
 def dev_admin_dsn() -> str:

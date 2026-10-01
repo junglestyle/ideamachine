@@ -8,7 +8,7 @@ import os
 import tomllib
 from dataclasses import dataclass, fields
 
-HEURISTIC = "heuristic-1"
+HEURISTIC = "heuristic-2"
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,6 @@ class SegmentConfig:
     gap_s: float = 60.0              # G: silence longer than this always splits
     mode_gap_s: float = 5.0          # a self/other switch splits only across a pause at least this long
     min_monologue_s: float = 30.0    # a run of my own speech this long becomes its own episode
-    self_conf_min: float = 0.6       # is_self counts only at or above this speaker_conf (fail closed)
 
     @property
     def stage_version(self) -> str:
@@ -27,7 +26,6 @@ class SegmentConfig:
 @dataclass(frozen=True)
 class Config:
     segment: SegmentConfig = SegmentConfig()
-    ingest_window_s: float = 600.0   # trailing re-read window for the seq cursor (ROADMAP §3.1)
 
 
 def load() -> Config:
