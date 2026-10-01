@@ -1,6 +1,6 @@
 # Idea Machine Roadmap
 
-_Status: draft, 2026-10-01. Idea Machine reads Hearsay's utterance stream (§3). Hearsay has delivered the stream changes Idea Machine asked for; the forget command itself comes with Hearsay slice 12. Phase 1 steps 1–2 (stream import and segmentation) are built._
+_Status: draft, 2026-10-01. Idea Machine reads Hearsay's utterance stream (§3). Hearsay has delivered the stream changes Idea Machine asked for; the forget command itself comes with Hearsay slice 12. Phase 1 steps 1–3 (stream import, segmentation, projects registry and labeling) are built._
 
 ## 1. Scope
 
@@ -98,6 +98,7 @@ Until Hearsay slice 12 the list stays empty, so Idea Machine builds and tests th
 **Progress**
 - Step 1 (done, 2026-10-01): the project skeleton, migrations, heuristic segmentation, tombstone purge and the invariant tests. They run against a stand-in `hearsay` Postgres schema shaped like the tables in §3.3.
 - Step 2 (done, 2026-10-01): the stream importer (§3.3) fills `im.source_*`, and the stand-in schema and the `seq` cursor are gone. Fixtures are stream directories in Hearsay's `format_version` 1, with every correction Hearsay makes. Checked once against a copy of the real data rendered by Hearsay's new `stream.py`: 17 conversations, 3,378 utterances and 76 episodes, with the invariants holding.
+- Step 3 (done, 2026-10-01): the projects registry (`im project add/list/retire`) and `im label`. Labels follow supersession links. A label counts for an episode only when it resolves *exactly* (one current episode, same segments); otherwise it's kept and the episode comes up again. `im label` also records a **boundaries** judgment (ok / should split / should merge) for the segmentation exit criterion, and `im label --status` tracks progress toward 50. Next: the Laya spike and the fallback classifier.
 
 **Deliverables**
 - `im` schema and migrations. Tables: `source_conversations`, `source_segments`, `source_supersessions`, `source_tombstones`, `episodes`, `episode_segments`, `triage`, `labels`, `projects`, `runs`.
@@ -105,7 +106,7 @@ Until Hearsay slice 12 the list stays empty, so Idea Machine builds and tests th
 - **Fixture loader:** writes synthetic stream directories (`index.json`, conversation JSONL and `forgotten.json`) in Hearsay's format, including revisions that name a speaker, re-transcribe a conversation, split or merge a conversation, and forget something. Development and tests never depend on live capture. For manual runs on eeyore, the real stream can be copied from the NAS, but tests never read it.
 - **Episode segmentation (heuristic):** split within a `session_id` on a silence gap > *G* seconds, plus a speaker-change rule (e.g. self-monologue vs. multi-party). *G* and the rules are config and are recorded as `stage_version`. Episodes store `input_hash` over their current segment IDs, so an episode is recomputed only when its inputs change.
 - **Projects registry:** a hand-maintained `projects` table (name, aliases, one-line description). It feeds the "which project" question.
-- **Labeling:** `im label` presents unlabeled episodes in the terminal (transcript, speakers, times, and the conversation ID and offsets for finding the audio in Hearsay) and records my answers to the triage questions. Labels are stored against the episode's segment IDs. Target: **50 labeled episodes**, deliberately covering chatter and noise, not just ideas.
+- **Labeling:** `im label` presents unlabeled episodes in the terminal (transcript, speakers, times, and the conversation ID and offsets for finding the audio in Hearsay) and records my answers to the triage questions, plus whether the episode's boundaries are right. Labels are stored against the episode's segment IDs. Target: **50 labeled episodes**, deliberately covering chatter and noise, not just ideas.
 - **Laya spike, then triage:**
   - First, confirm Laya installs, runs on the TrueNAS CPU at an acceptable per-episode latency, and accepts our typed questions. Timebox: 2 days. If it fails, skip to the fallback and continue.
   - The triage questions per episode are `is_self_thinking` (bool), `kind` (idea/task/decision/chatter/noise), `project` (registry or none), and `keep_score` (1–5). Each answer is stored with its confidence.
