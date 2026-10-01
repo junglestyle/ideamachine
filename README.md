@@ -45,6 +45,12 @@ question change re-triages.
 
 Set `CUDA_VISIBLE_DEVICES=""` on a box with a GPU to measure what the NAS's CPU will do.
 
+## Real data on eeyore
+
+Until Idea Machine runs on the NAS, `dev/pull-stream.sh` copies Hearsay's stream from the NAS (it only reads
+there) into `~/.local/share/ideamachine/stream`. Point `IM_STREAM_DIR` there and `IM_DATABASE_URL` at a
+database of its own (`im`), separate from the fixture one (`im_dev`). Then `dev/pull-stream.sh && uv run im run`.
+
 ## How `im run` works
 
 One REPEATABLE READ transaction:
