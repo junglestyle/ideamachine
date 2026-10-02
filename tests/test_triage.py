@@ -202,3 +202,10 @@ def test_temperature_scaling_softens_an_overconfident_backend():
     after = np.mean([a["kind"]["confidence"] for a, _ in calibrated])
     assert before == pytest.approx(0.95) and 0.5 < after < 0.75
     assert [a["kind"]["value"] for a, _ in calibrated] == [a["kind"]["value"] for a, _ in pairs]
+
+
+def test_each_laya_checkpoint_is_its_own_model_version():
+    pytest.importorskip("laya")
+    versions = {backends.LayaBackend(c).model_version for c in ("english", "multilingual", "typed-decisions")}
+    assert len(versions) == 3
+    assert backends.LayaBackend("english", max_len=2048).model_version not in versions
