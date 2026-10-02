@@ -28,7 +28,8 @@ class LayaBackend:
         self.revision = laya.PINNED_REVISIONS[repo]
         self.max_len, self.threads = max_len, threads
         self.model = f"laya/{checkpoint}"
-        self.model_version = f"laya-{laya.__version__}@{self.revision[:12]};max_len={max_len}"
+        # All checkpoints share one repo revision, so the checkpoint has to be part of the version.
+        self.model_version = f"laya-{laya.__version__}@{self.revision[:12]}/{checkpoint};max_len={max_len}"
         self._agent = None
 
     def _load(self):
