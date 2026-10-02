@@ -27,7 +27,8 @@ class SegmentConfig:
 class TriageConfig:
     backends: tuple[str, ...] = ("laya", "fallback")  # run by `im run`; fallback only once trained
     laya_checkpoint: str = "english"     # english | multilingual | typed-decisions
-    laya_max_len: int = 8192             # tokens of state; longer episodes are truncated (and say so)
+    laya_max_len: int = 4096             # tokens of state; longer episodes are truncated (and say so).
+                                         # Memory grows steeply with length on CPU: ~5 GB at 4k, ~8 GB at 7k.
     threads: int | None = None           # torch CPU threads; None = torch's default
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     max_episodes_per_run: int | None = None   # bound a run's time; the rest wait for the next run
