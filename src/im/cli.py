@@ -23,21 +23,30 @@ def cmd_load_fixtures(args) -> None:
 
 
 def _backends(conn, cfg, names):
-    """The configured triage backends that can run. The fallback waits until it's trained."""
+    """The configured triage backends that can run. logreg waits until it's trained."""
     from im import backends
 
     out, notes = [], []
     for name in names:
         if name == "laya":
             out.append(backends.LayaBackend(cfg.triage.laya_checkpoint, cfg.triage.laya_max_len, cfg.triage.threads))
-        elif name == "fallback":
+        elif name == "llm":
+            out.append(_llm(cfg))
+        elif name == "logreg":
             try:
-                out.append(backends.FallbackBackend(conn, _embedder(cfg)))
+                out.append(backends.LogregBackend(conn, _embedder(cfg)))
             except LookupError as e:
                 notes.append(str(e))
         else:
             raise SystemExit(f"unknown triage backend {name!r}")
     return out, notes
+
+
+def _llm(cfg):
+    from im.backends import LLMBackend
+
+    t = cfg.triage
+    return LLMBackend(t.llm_model, t.llm_url, t.llm_think, t.llm_num_ctx)
 
 
 def _embedder(cfg):
@@ -73,10 +82,12 @@ def cmd_eval(args) -> None:
 
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
-        if args.laya:  # make sure every labeled episode has Laya's answers to score
-            from im.backends import LayaBackend, exact_labels
+        from im.backends import LayaBackend, exact_labels
 
-            only = [eid for _, eid, _ in exact_labels(conn)]
+        only = [eid for _, eid, _ in exact_labels(conn)]
+        if args.llm:  # make sure every labeled episode has the backend's answers to score
+            triage.run_stage(conn, _llm(cfg), only=only)
+        if args.laya:
             b = LayaBackend(cfg.triage.laya_checkpoint, cfg.triage.laya_max_len, cfg.triage.threads)
             triage.run_stage(conn, b, only=only)
         try:
@@ -101,7 +112,10 @@ def cmd_label(args) -> None:
             print(label.status(conn))
             return
         try:
-            n = label.session(conn)
+            review = tuple(args.review.split("=", 1)) if args.review else None
+            if review and (len(review) != 2 or review[0] not in label.QUESTION_FIELDS):
+                raise SystemExit(f"--review takes question=answer, e.g. kind=idea; questions: {', '.join(label.QUESTION_FIELDS)}")
+            n = label.session(conn, review=review)
         except (KeyboardInterrupt, EOFError):
             n = None  # each label is saved as it's confirmed, so nothing is lost
         print("\n" + label.status(conn) if n is None else f"saved {n}\n" + label.status(conn))
@@ -137,11 +151,12 @@ def main(argv=None) -> None:
                    help="base, or base plus every correction and a forget")
     f.set_defaults(func=cmd_load_fixtures)
     sub.add_parser("run", help="import, segment and triage; idempotent").set_defaults(func=cmd_run)
-    t = sub.add_parser("train", help="train the fallback classifier on my exact labels")
+    t = sub.add_parser("train", help="train the logreg baseline on my exact labels")
     t.add_argument("-C", type=float, default=1.0, help="inverse regularization strength")
     t.set_defaults(func=cmd_train)
     ev = sub.add_parser("eval", help="per-question accuracy and reliability for each backend, on my labels")
-    ev.add_argument("-k", type=int, default=5, help="folds for the fallback's cross-validation")
+    ev.add_argument("-k", type=int, default=5, help="folds for logreg's and calibration's cross-validation")
+    ev.add_argument("--llm", action="store_true", help="first triage any labeled episode the LLM hasn't answered")
     ev.add_argument("--laya", action="store_true", help="first triage any labeled episode Laya hasn't answered")
     ev.set_defaults(func=cmd_eval)
     r = sub.add_parser("reset", help="drop a stage's derived rows so the next run rebuilds them")
@@ -152,6 +167,8 @@ def main(argv=None) -> None:
     s.set_defaults(func=cmd_show)
     lb = sub.add_parser("label", help="label episodes with my answers to the triage questions")
     lb.add_argument("--status", action="store_true", help="show labeling progress and exit")
+    lb.add_argument("--review", metavar="QUESTION=ANSWER",
+                    help="re-label episodes whose latest label has this answer, e.g. kind=idea or project=none")
     lb.set_defaults(func=cmd_label)
     pr = sub.add_parser("project", help="the projects registry")
     pa = pr.add_subparsers(dest="action", required=True, metavar="action")

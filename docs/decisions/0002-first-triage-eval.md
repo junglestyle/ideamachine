@@ -1,6 +1,6 @@
 # 0002: First triage eval: nothing beats the base rates
 
-_2026-10-01. Status: no router chosen. Direction pending (see Options)._
+_2026-10-01. Status: superseded in part. Chosen: option 1 (a local LLM), plus context in the state. See the follow-up at the end._
 
 ## Data
 
@@ -58,3 +58,29 @@ roadmap's own rule ("Eval before trust"), no automated triage output drives anyt
 
 These combine. The ROADMAP stack assumption "CPU-first on TrueNAS" would change for triage if option 1 is
 taken.
+
+## Follow-up (same day): local LLM
+
+`gpt-oss:20b` through Ollama on eeyore's GPU (`think=low`), same questions, same 52 labels:
+
+| Question | Baseline | LLM |
+|---|---|---|
+| me thinking | 77% | 73% |
+| kind | 56% | 54% |
+| project | 33% | **54%** |
+| keep | 50% | 46% |
+
+- About 1 s per episode. Token log-probabilities are near-certain after the model's reasoning, so they aren't
+  usable as confidence.
+- Most of the remaining misses were label-definition mismatches, not model errors:
+  - Projects I meant as *who's there or where* (a person, a place), while the question asked what it was *about*.
+  - The registry didn't know the name the bar goes by.
+  - "Idea" labels I gave to chatter because there were so few ideas.
+- Changes made from that:
+  - The project question now covers place as well as topic.
+  - The person-based project is replaced by the topic it was really about, and the bar's project gets the name it goes by as an alias.
+  - "Idea" counts anyone's idea.
+  - Keep counts "note to self" and pendant taps.
+  - Episodes carry time, speakers and taps in their context.
+- Because those changes were made after seeing these 52 labels, the next number that means anything is the score
+  on 20–30 labels collected afterwards.

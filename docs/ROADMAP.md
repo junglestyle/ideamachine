@@ -27,7 +27,7 @@ Idea Machine reads the speaker-attributed utterances that Hearsay publishes in i
 | Eval before trust | Each automated tier has to beat its exit threshold on the hand-labeled set before its output drives anything. |
 | Human labels are not derived | Labels live in their own table, anchored to segment IDs rather than episode IDs, so they survive episode re-derivation. When a segment is superseded, its labels follow the supersession links to the current segments, so a correction never orphans a label. |
 
-**Stack assumptions** (not questioned, change if wrong): Python; Idea Machine's own Postgres 16 + pgvector (Hearsay has no Postgres) with schema `im`; and a single container on TrueNAS, run by a timer, with Hearsay's stream directory mounted read-only. Everything is CPU-first. A GPU is a speedup, not a requirement.
+**Stack assumptions** (not questioned, change if wrong): Python; Idea Machine's own Postgres 16 + pgvector (Hearsay has no Postgres) with schema `im`; and a single container on TrueNAS, run by a timer, with Hearsay's stream directory mounted read-only. Triage needs a GPU after all (decision 0002): it runs against Ollama on eeyore, as Hearsay's transcription does. Everything else is CPU.
 
 ## 3. Hearsay → Idea Machine data contract
 
@@ -100,7 +100,7 @@ Until Hearsay slice 12 the list stays empty, so Idea Machine builds and tests th
 - Step 2 (done, 2026-10-01): the stream importer (§3.3) fills `im.source_*`, and the stand-in schema and the `seq` cursor are gone. Fixtures are stream directories in Hearsay's `format_version` 1, with every correction Hearsay makes. Checked once against a copy of the real data rendered by Hearsay's new `stream.py`: 17 conversations, 3,378 utterances and 76 episodes, with the invariants holding.
 - Step 3 (done, 2026-10-01): the projects registry (`im project add/list/retire`) and `im label`. Labels follow supersession links. A label counts for an episode only when it resolves *exactly* (one current episode, same segments); otherwise it's kept and the episode comes up again. `im label` also records a **boundaries** judgment (ok / should split / should merge) for the segmentation exit criterion, and `im label --status` tracks progress toward 50. Next: the Laya spike and the fallback classifier.
 - Step 4 (done, 2026-10-01): the Laya spike passed (`docs/decisions/0001-laya-spike.md`). Triage runs in `im run` with Laya and, once `im train` has run, the fallback classifier. `im eval` reports per-question accuracy and reliability for both, with the fallback cross-validated. `im reset --stage triage` is in place. Episode embeddings are stored in pgvector, ready for Phase 2.
-- Next, once there are about 50 real labels: compare Laya checkpoints and the fallback on `im eval`, fit Laya's temperatures on a training split (it ships over-confident), choose the router and its thresholds, and build `im review`.
+- Step 5 (2026-10-01, in progress): the first eval (`docs/decisions/0002-first-triage-eval.md`) found that neither Laya nor the logreg baseline beats always giving the most common answer. Triage now defaults to a local LLM through Ollama on eeyore's GPU (`gpt-oss:20b`, about 1 s per episode), which is the first backend to beat the baseline (project +21 points). Laya stays available for comparison. Episodes now carry context (local time, length, speakers present, pendant taps), and triage redoes an episode whenever that input changes. Labels can be revised (`im label --review kind=idea`), and an episode's latest label wins. Next: re-label with the revised definitions, then judge the LLM on 20–30 *fresh* labels, since the question wording was tuned on the first 52.
 
 **Deliverables**
 - `im` schema and migrations. Tables: `source_conversations`, `source_segments`, `source_supersessions`, `source_tombstones`, `episodes`, `episode_segments`, `triage`, `labels`, `projects`, `runs`.
@@ -173,6 +173,8 @@ _Moved ahead of extraction: relating episodes is the core value, it's cheap, and
 
 **Deliverables**
 - **Object tables:** `ideas`, `tasks`, `decisions`, `project_mentions`. Each row has `source_segment_ids`, timestamps, `model`, `prompt_version`, `privacy_policy_version` and `batch_id`.
+- **Provenance:** an idea counts whoever had it, and each object records who said it. That comes from the speakers of its source segments (me, a named person, or an anonymous voice), so it follows Hearsay's later re-attributions.
+- **Notes to self:** a pendant tap, or saying "note to self", marks speech I meant to keep. Episodes carry taps in their context now. Phase 4 should treat a tapped span as always worth synthesizing.
 - **Egress policy module** (`im.egress`, one swappable module, versioned):
   - My speech goes out verbatim. Anything else counts as not-me (fail closed). **Decide** whether `owner` turns whose basis is `diarization` (inherited from a diarized speaker rather than matched by voice) count as mine here. In the first real data they were 526 of 999 owner utterances.
   - Other speakers' turns are summarized locally by a 7–14B model via Ollama into gists that keep the conversational function (proposed, objected, agreed) and drop the wording.

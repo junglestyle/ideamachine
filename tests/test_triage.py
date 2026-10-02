@@ -1,4 +1,4 @@
-"""The triage stage, the fallback classifier and `im eval`, with fake models.
+"""The triage stage, the logreg baseline and `im eval`, with fake models.
 Laya itself is exercised only when IM_TEST_MODELS=1 (see test_laya_backend)."""
 
 import hashlib
@@ -141,16 +141,16 @@ def _label_everything(pipe):
                                "project": None, "keep_score": 4 if kind == "monologue" else 2}, None)
 
 
-def test_train_then_triage_with_the_fallback(pipe, cfg, stream):
+def test_train_then_triage_with_logreg(pipe, cfg, stream):
     run(pipe, cfg, stream)
     with pytest.raises(ValueError):
         backends.train(pipe, HashEmbedder())
     _label_everything(pipe)
     first = backends.train(pipe, HashEmbedder())
     assert backends.train(pipe, HashEmbedder())["model_version"] == first["model_version"]
-    fb = backends.FallbackBackend(pipe, HashEmbedder())
+    fb = backends.LogregBackend(pipe, HashEmbedder())
     assert triage.run_stage(pipe, fb)["triaged"] == 9
-    for (answers,) in table(pipe, "SELECT answers FROM im.triage WHERE backend = 'fallback'"):
+    for (answers,) in table(pipe, "SELECT answers FROM im.triage WHERE backend = 'logreg'"):
         assert answers["kind"]["value"] in {"idea", "chatter"}
         assert abs(sum(answers["kind"]["probabilities"].values()) - 1) < 1e-3
         assert 1 <= answers["keep_score"]["value"] <= 5
@@ -167,7 +167,7 @@ def test_eval_reports_every_backend(pipe, cfg, stream):
     # Wrong on three: two monologues never say "idea", and "Decided then." reads as a decision.
     assert kw["kind"]["accuracy"] == pytest.approx(6 / 9)
     text = evaluate.report(ev)
-    assert "fallback" in text and "confidence 0.7-0.8" in text
+    assert "logreg" in text and "confidence 0.7-0.8" in text
 
 
 @pytest.mark.models
@@ -209,3 +209,46 @@ def test_each_laya_checkpoint_is_its_own_model_version():
     versions = {backends.LayaBackend(c).model_version for c in ("english", "multilingual", "typed-decisions")}
     assert len(versions) == 3
     assert backends.LayaBackend("english", max_len=2048).model_version not in versions
+
+
+def test_llm_answer_distributions_read_the_value_tokens():
+    from im.backends import answer_distributions
+
+    def tok(t, alts):
+        return {"token": t, "logprob": 0.0, "top_logprobs": [{"token": a, "logprob": float(np.log(p))} for a, p in alts]}
+
+    qs = {"kind": {"type": "choice", "criteria": {"idea": "", "chatter": "", "noise": ""}},
+          "is_self_thinking": {"type": "noul", "criteria": {}},
+          "keep_score": {"type": "score", "criteria": ["a", "b", "c", "d", "e"]}}
+    content = '{"kind": "idea", "is_self_thinking": true, "keep_score": 4}'
+    stream = [tok("<|channel|>", []), tok("analysis", []), tok("<|message|>", []), tok("hmm", []),
+              tok("{", []), tok(' "', []), tok("kind", []), tok('":', []), tok(' "', [(' "', 1.0)]),
+              tok("idea", [("idea", 0.6), ("chat", 0.3), ("xyz", 0.1)]), tok('",', []),
+              tok(' "', []), tok("is_self_thinking", []), tok('":', []),
+              tok(" true", [(" true", 0.8), (" false", 0.2)]), tok(",", []),
+              tok(' "', []), tok("keep_score", []), tok('":', []), tok(" ", [(" ", 1.0)]),
+              tok("4", [("4", 0.5), ("3", 0.25), ("5", 0.25)]), tok("}", [])]
+    d = answer_distributions(stream, content, qs)
+    assert d["kind"] == pytest.approx({"idea": 2 / 3, "chatter": 1 / 3, "noise": 0.0})
+    assert d["is_self_thinking"] == pytest.approx({"true": 0.8, "false": 0.2})
+    assert d["keep_score"] == pytest.approx({"1": 0, "2": 0, "3": 0.25, "4": 0.5, "5": 0.25})
+
+
+def test_a_tap_reaches_the_context_and_retriages_its_episode(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    b = KeywordBackend()
+    triage.run_stage(pipe, b)
+    (eid,) = episodes_with_text(pipe, SECRET)
+    stream.conversations["c-forget"].taps = [fixtures_iso(14408)]
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    (st,) = triage.render(pipe, [eid])
+    assert "I tapped the pendant at" in st.context
+    stats = triage.run_stage(pipe, b)
+    assert stats["triaged"] == 1  # only the tapped episode's input changed
+    assert triage_count(pipe) == 9
+
+
+def fixtures_iso(seconds):
+    from im.fixtures import iso
+    return iso(seconds)

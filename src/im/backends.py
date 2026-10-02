@@ -1,4 +1,8 @@
-"""Triage backends: Laya, and the fallback classifier it has to beat.
+"""Triage backends:
+
+- `llm`: a local instruct model through Ollama (on eeyore's GPU). The default.
+- `laya`: Laya on CPU. Failed the first eval (docs/decisions/0002); kept for comparison.
+- `logreg`: logistic regression over sentence embeddings, trained on my labels: the baseline.
 
 Heavy imports (torch, laya, sentence-transformers, scikit-learn) happen
 inside the classes, so the rest of `im` runs without the `models` extra.
@@ -61,6 +65,151 @@ class LayaBackend:
         return out
 
 
+# --- Local LLM via Ollama ----------------------------------------------------
+
+LLM_SYSTEM = """You triage transcripts of speech I recorded on an always-on pendant, so I can find what's worth keeping.
+"me" is me. Other speakers are named, or labeled like "anon A", or "unknown".
+The context line gives the local date, time of day, length and the speakers present.
+Answer every question about the whole transcript, following each question's definitions exactly.
+
+Questions:
+{questions}"""
+
+
+def _describe(qs: dict) -> str:
+    out = []
+    for q, spec in qs.items():
+        out.append(f"- {q}: {spec['instructions']}")
+        if spec["type"] == "noul":
+            out += [f"    true: {spec['criteria']['true']}", f"    false: {spec['criteria']['false']}"]
+        elif spec["type"] == "score":
+            out += [f"    {i}: {level}" for i, level in enumerate(spec["criteria"], 1)]
+        else:
+            out += [f"    {k}: {v}" for k, v in spec["criteria"].items()]
+    return "\n".join(out)
+
+
+def _schema(qs: dict) -> dict:
+    props = {}
+    for q, spec in qs.items():
+        if spec["type"] == "noul":
+            props[q] = {"type": "boolean"}
+        elif spec["type"] == "score":
+            props[q] = {"type": "integer", "enum": list(range(1, len(spec["criteria"]) + 1))}
+        else:
+            props[q] = {"type": "string", "enum": list(spec["criteria"])}
+    return {"type": "object", "properties": props, "required": list(qs)}
+
+
+def _options(spec: dict) -> list[str]:
+    if spec["type"] == "noul":
+        return ["true", "false"]
+    if spec["type"] == "score":
+        return [str(i) for i in range(1, len(spec["criteria"]) + 1)]
+    return list(spec["criteria"])
+
+
+def answer_distributions(logprobs: list[dict], content: str, qs: dict) -> dict[str, dict]:
+    """Per question, the model's probabilities over its options, read at the token where the answer's
+    value starts. Options are matched by that first token, mass on tokens that match no option is
+    dropped, and the rest is renormalized. When several options share a first token they can't be told
+    apart there, so the chosen option takes that token's mass."""
+    # Find where the JSON content starts in the token stream (after any reasoning tokens).
+    texts = [t["token"] for t in logprobs]
+    squeeze = lambda x: "".join(x.split())  # noqa: E731 -- compare without whitespace
+    target = squeeze(content)[:20]
+    start = next((i for i in range(len(texts)) if texts[i].lstrip().startswith("{")
+                  and squeeze("".join(texts[i:])).startswith(target)), None)
+    if start is None:
+        return {}
+    parsed = json.loads(content)
+    out = {}
+    built = ""
+    for i in range(start, len(texts)):
+        built += texts[i]
+        for q, spec in qs.items():
+            if q in out:
+                continue
+            key = f'"{q}":'
+            tail = built.replace(" ", "")
+            if tail.endswith(key) or tail.endswith(key + '"'):
+                # The value starts at the first token after the key that isn't just spaces or a quote.
+                nxt = next((t for t in logprobs[i + 1:] if t["token"].strip().strip('"').strip()), None)
+                if nxt is None:
+                    continue
+                opts = _options(spec)
+                chosen = str(parsed[q]).lower() if spec["type"] == "noul" else str(parsed[q])
+                mass: dict = {}
+                for alt in nxt.get("top_logprobs", []):
+                    tok = alt["token"].strip().lstrip('"').strip()
+                    if not tok:
+                        continue
+                    hits = [o for o in opts if o.startswith(tok) or tok.startswith(o)]
+                    if not hits:
+                        continue
+                    who = chosen if chosen in hits else hits[0]
+                    mass[who] = mass.get(who, 0.0) + float(np.exp(alt["logprob"]))
+                total = sum(mass.values())
+                out[q] = {o: mass.get(o, 0.0) / total for o in opts} if total > 0 else {chosen: 1.0}
+    return out
+
+
+class LLMBackend:
+    """A local instruct model through Ollama, with schema-constrained JSON answers and probabilities
+    from the tokens' log-probabilities. Nothing leaves the machine Ollama runs on."""
+
+    name = "llm"
+
+    def __init__(self, model: str = "gpt-oss:20b", url: str = "http://localhost:11434", think: str | None = "low",
+                 num_ctx: int = 16384, timeout: float = 600):
+        import urllib.request
+
+        self.url, self.think, self.num_ctx, self.timeout = url.rstrip("/"), think, num_ctx, timeout
+        self._urlopen = urllib.request.urlopen
+        info = self._post("/api/show", {"model": model})
+        digest = info.get("digest") or hashlib.sha256(json.dumps(info.get("details", {}), sort_keys=True).encode()).hexdigest()
+        self.model = f"ollama/{model}"
+        self.ollama_model = model
+        self.model_version = f"{model}@{digest[:12]};think={think};ctx={num_ctx}"
+
+    def _post(self, path: str, body: dict) -> dict:
+        import urllib.request
+
+        req = urllib.request.Request(self.url + path, data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with self._urlopen(req, timeout=self.timeout) as r:
+            return json.loads(r.read())
+
+    def predict(self, states: list[EpisodeState], qs: dict) -> list[Prediction]:
+        system = LLM_SYSTEM.format(questions=_describe(qs))
+        out = []
+        for st in states:
+            body = {"model": self.ollama_model, "stream": False, "logprobs": True, "top_logprobs": 20,
+                    "format": _schema(qs), "options": {"temperature": 0, "seed": 0, "num_ctx": self.num_ctx},
+                    "messages": [{"role": "system", "content": system},
+                                 {"role": "user", "content": f"Context: {st.context}\n\nTranscript:\n{st.transcript}"}]}
+            if self.think is not None:
+                body["think"] = self.think
+            r = self._post("/api/chat", body)
+            content = r["message"]["content"]
+            parsed = json.loads(content)
+            dists = answer_distributions(r.get("logprobs") or [], content, qs)
+            answers = {}
+            for q, spec in qs.items():
+                chosen = str(parsed[q]).lower() if spec["type"] == "noul" else str(parsed[q])
+                d = dists.get(q) or {chosen: 1.0}  # no log-probabilities: certain, which eval will expose
+                if spec["type"] == "noul":
+                    answers[q] = normalize("noul", d.get("true", 0.0), None)
+                elif spec["type"] == "score":
+                    expected = sum(int(k) * v for k, v in d.items())
+                    answers[q] = normalize("score", expected - 1, d)
+                else:
+                    answers[q] = normalize("choice", parsed[q], d)
+            prompt_tokens = r.get("prompt_eval_count")
+            out.append(Prediction(answers, prompt_tokens, bool(prompt_tokens and prompt_tokens >= self.num_ctx)))
+        return out
+
+
 # --- Embeddings -------------------------------------------------------------
 
 
@@ -101,25 +250,28 @@ def _vec(v) -> str:
 def embeddings(conn, embedder: Embedder, states: list[EpisodeState]) -> np.ndarray:
     """Embeddings for these episodes, computing and storing any that are missing."""
     ids = [s.episode_id for s in states]
+    current = {s.episode_id: s.input_hash for s in states}
     have = {r[0]: np.array(json.loads(r[1])) for r in conn.execute(
-        """SELECT episode_id, embedding::text FROM im.episode_embeddings
+        """SELECT episode_id, embedding::text, input_hash FROM im.episode_embeddings
            WHERE episode_id = ANY(%s) AND model = %s AND model_version = %s""",
-        (ids, embedder.model, embedder.model_version))}
+        (ids, embedder.model, embedder.model_version)) if r[2] == current[r[0]]}
     missing = [s for s in states if s.episode_id not in have]
     if missing:
-        vecs = embedder.embed([s.transcript for s in missing])
+        vecs = embedder.embed([f"{s.context}\n{s.transcript}" for s in missing])
         with conn.transaction():
             for s, v in zip(missing, vecs, strict=True):
                 conn.execute(
                     """INSERT INTO im.episode_embeddings (episode_id, model, model_version, embedding,
                          schema_version, stage_version, input_hash)
-                       VALUES (%s, %s, %s, %s::vector, 1, 'embed/1', %s) ON CONFLICT DO NOTHING""",
+                       VALUES (%s, %s, %s, %s::vector, 1, 'embed/1', %s)
+                       ON CONFLICT (episode_id, model, model_version) DO UPDATE
+                       SET embedding = excluded.embedding, input_hash = excluded.input_hash, created_at = now()""",
                     (s.episode_id, embedder.model, embedder.model_version, _vec(v), s.input_hash))
                 have[s.episode_id] = v
     return np.vstack([have[i] for i in ids])
 
 
-# --- Fallback classifier ----------------------------------------------------
+# --- Logistic-regression baseline -----------------------------------------
 
 QUESTIONS = ("is_self_thinking", "kind", "project", "keep_score")
 QTYPES = {"is_self_thinking": "noul", "kind": "choice", "project": "choice", "keep_score": "score"}
@@ -183,12 +335,10 @@ def to_answers(probs: dict[str, dict]) -> dict:
 
 
 def exact_labels(conn) -> list[tuple[int, object, dict]]:
-    """(label_id, current episode_id, answers) for every label that resolves exactly."""
-    from im.label import resolve_all
+    """(label_id, current episode_id, answers): each labeled episode's latest exact label."""
+    from im.label import current_labels
 
-    res = resolve_all(conn)
-    rows = conn.execute("SELECT label_id, answers FROM im.labels ORDER BY label_id").fetchall()
-    return [(lid, next(iter(res[lid][1])), answers) for lid, answers in rows if res[lid][0] == "exact"]
+    return sorted((lid, eid, answers) for eid, (lid, answers) in current_labels(conn).items())
 
 
 def train(conn, embedder: Embedder, C: float = 1.0) -> dict:
@@ -209,17 +359,17 @@ def train(conn, embedder: Embedder, C: float = 1.0) -> dict:
             "classes": {q: params[q]["classes"] for q in QUESTIONS}}
 
 
-class FallbackBackend:
-    """The latest trained classifier, over episode embeddings."""
+class LogregBackend:
+    """The latest trained classifier over episode embeddings: the baseline every backend must beat."""
 
-    name = "fallback"
+    name = "logreg"
 
     def __init__(self, conn, embedder: Embedder):
         row = conn.execute(
             """SELECT model_version, params FROM im.classifiers WHERE embedding_model = %s
                ORDER BY trained_at DESC LIMIT 1""", (embedder.model_version,)).fetchone()
         if row is None:
-            raise LookupError("no fallback classifier trained yet (im train)")
+            raise LookupError("no logreg classifier trained yet (im train)")
         self.conn, self.embedder = conn, embedder
         self.model_version, params = row
         self.params = {q: params[q] for q in QUESTIONS}

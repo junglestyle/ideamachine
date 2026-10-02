@@ -4,7 +4,8 @@ Labels are anchored to segment IDs (ROADMAP §2). A label resolves to current
 episodes by following im.source_supersessions forward from its segments. It's
 *exact* when it lands on exactly one current episode with the same segments.
 Only exact labels count as labeling that episode; the others are kept, and
-the episode comes up again.
+the episode comes up again. When an episode has several exact labels (I
+re-labeled it), the latest is its label and the older ones are history.
 """
 
 import json
@@ -18,6 +19,7 @@ BOUNDARIES = {"o": "ok", "s": "split", "m": "merge"}
 KINDS = {"i": "idea", "t": "task", "d": "decision", "c": "chatter", "n": "noise"}
 YES_NO = {"y": True, "n": False}
 TARGET = 50
+QUESTION_FIELDS = ("boundaries", "is_self_thinking", "kind", "project", "keep_score")
 
 
 def validate(answers: dict, project_slugs: set[str]) -> None:
@@ -81,8 +83,19 @@ def resolve_all(conn) -> dict[int, tuple[str, set]]:
     return out
 
 
+def current_labels(conn) -> dict:
+    """episode_id -> (label_id, answers) of its latest exact label."""
+    res = resolve_all(conn)
+    out = {}
+    for lid, answers in conn.execute("SELECT label_id, answers FROM im.labels ORDER BY label_id"):
+        status, eps = res[lid]
+        if status == "exact":
+            out[next(iter(eps))] = (lid, answers)  # later labels overwrite earlier ones
+    return out
+
+
 def labeled_episodes(conn) -> set:
-    return {next(iter(eps)) for status, eps in resolve_all(conn).values() if status == "exact"}
+    return set(current_labels(conn))
 
 
 def next_episode(conn, skip=frozenset()):
@@ -144,13 +157,12 @@ def ask(conn, read, write) -> tuple[dict, str | None]:
 
 def status(conn) -> str:
     res = resolve_all(conn)
-    exact = {lid for lid, (st, _) in res.items() if st == "exact"}
+    latest = current_labels(conn)
     by_status = Counter(st for st, _ in res.values())
     kinds = Counter(r[0] for r in conn.execute(
-        "SELECT e.kind FROM im.episodes e WHERE e.current AND e.episode_id = ANY(%s)",
-        ([next(iter(res[lid][1])) for lid in exact],)))
-    answers = [r[0] for r in conn.execute("SELECT answers FROM im.labels WHERE label_id = ANY(%s)", (list(exact),))]
-    lines = [f"labeled episodes: {len(exact)} / {TARGET}",
+        "SELECT e.kind FROM im.episodes e WHERE e.current AND e.episode_id = ANY(%s)", (list(latest),)))
+    answers = [a for _, a in latest.values()]
+    lines = [f"labeled episodes: {len(latest)} / {TARGET}",
              "labels: " + ", ".join(f"{n} {st}" for st, n in sorted(by_status.items())) if res else "labels: none",
              "by episode kind: " + ", ".join(f"{k} {n}" for k, n in sorted(kinds.items()))]
     if answers:
@@ -160,12 +172,29 @@ def status(conn) -> str:
     return "\n".join(lines)
 
 
-def session(conn, read=input, write=print) -> int:
-    """Label episodes until I quit or none are left. Returns how many were saved."""
+def review_queue(conn, field: str, value: str) -> list:
+    """Labeled episodes whose latest label has answers[field] == value (`none` matches no project)."""
+    want = None if (field == "project" and value == "none") else value
+    out = []
+    for eid, (_, answers) in current_labels(conn).items():
+        got = answers.get(field)
+        if str(got).lower() == str(want).lower() if want is not None else got is None:
+            out.append(eid)
+    return out
+
+
+def session(conn, read=input, write=print, review: tuple[str, str] | None = None) -> int:
+    """Label episodes until I quit or none are left. Returns how many were saved.
+    With `review=(field, value)`, re-label the episodes whose latest label has that answer instead."""
     skipped, saved = set(), 0
-    while (eid := next_episode(conn, skipped)) is not None:
+    queue = review_queue(conn, *review) if review else None
+    while (eid := (queue.pop(0) if queue else None) if review else next_episode(conn, skipped)) is not None:
         write("\n" + "─" * 72)
-        write(f"{len(labeled_episodes(conn))} / {TARGET} labeled")
+        if review:
+            write(f"reviewing {review[0]}={review[1]}: {len(queue)} more after this")
+            write(f"previous label: {json.dumps(current_labels(conn)[eid][1])}")
+        else:
+            write(f"{len(labeled_episodes(conn))} / {TARGET} labeled")
         write(show(conn, str(eid)))
         cmd = _choose(read, write, "\n[enter] label · [s]kip · [q]uit > ", {"": "label", "s": "skip", "q": "quit"})
         if cmd == "quit":
