@@ -181,3 +181,24 @@ def test_laya_backend(pipe, cfg, stream):
         assert answers["kind"]["value"] in triage.KINDS and tokens > 0
         assert set(answers["keep_score"]["probabilities"]) <= {"1", "2", "3", "4", "5"}
         assert 1 <= answers["keep_score"]["value"] <= 5
+
+
+def test_temperature_scaling_softens_an_overconfident_backend():
+    from im.backends import label_value
+
+    rng = np.random.default_rng(3)
+    pairs = []
+    for i in range(60):
+        truth = ["idea", "chatter"][i % 2]
+        said = truth if rng.random() < 0.6 else ["idea", "chatter"][(i + 1) % 2]  # right 60% of the time...
+        probs = {said: 0.95, ["idea", "chatter"][said == "idea"]: 0.05}           # ...but always 95% sure
+        a = {q: normalize("choice", said, probs) for q in ("kind",)}
+        a |= {"is_self_thinking": normalize("noul", 0.5, None), "project": normalize("choice", "none", {"none": 1.0}),
+              "keep_score": normalize("score", 1.0, {"2": 1.0})}
+        pairs.append((a, {"kind": truth, "is_self_thinking": False, "project": None, "keep_score": 2}))
+    calibrated, temps = evaluate.calibrate_cv(pairs)
+    assert temps["kind"] > 2
+    before = np.mean([a["kind"]["confidence"] for a, _ in pairs])
+    after = np.mean([a["kind"]["confidence"] for a, _ in calibrated])
+    assert before == pytest.approx(0.95) and 0.5 < after < 0.75
+    assert [a["kind"]["value"] for a, _ in calibrated] == [a["kind"]["value"] for a, _ in pairs]

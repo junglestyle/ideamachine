@@ -5,6 +5,8 @@ a label it wasn't trained on. Laya isn't trained on labels, so its stored
 triage rows for the labeled episodes are scored directly.
 """
 
+from collections import Counter
+
 import numpy as np
 
 from im.backends import QTYPES, QUESTIONS, embeddings, exact_labels, fit, label_value, predict_proba, to_answers
@@ -58,6 +60,68 @@ def cross_validate(X: np.ndarray, labels: list[dict], k: int = 5, seed: int = 0,
     return preds
 
 
+TEMPERATURES = np.exp(np.linspace(np.log(0.2), np.log(20), 121))
+
+
+def temper(probs: dict, t: float) -> dict:
+    """Temperature-scale a distribution: p ** (1/t), renormalized. t > 1 softens, t < 1 sharpens."""
+    keys = list(probs)
+    z = np.log(np.clip([probs[k] for k in keys], 1e-9, 1)) / t
+    z = np.exp(z - z.max())
+    return dict(zip(keys, (z / z.sum()).tolist(), strict=True))
+
+
+def _distribution(q: str, answer: dict) -> dict:
+    return answer["probabilities"] or {}
+
+
+def fit_temperature(q: str, pairs: list[tuple[dict, dict]]) -> float:
+    """The temperature minimizing log-loss of the labeled answers (grid search; 1.0 if there's nothing to fit)."""
+    usable = [(_distribution(q, a[q]), label_value(q, lab)) for a, lab in pairs if _distribution(q, a[q])]
+    if len(usable) < 5:
+        return 1.0
+    def nll(t):
+        return -np.mean([np.log(max(temper(p, t).get(truth, 0.0), 1e-9)) for p, truth in usable])
+    return float(min(TEMPERATURES, key=nll))
+
+
+def apply_temperature(q: str, answer: dict, t: float) -> dict:
+    probs = temper(_distribution(q, answer), t) if _distribution(q, answer) else {}
+    if not probs:
+        return answer
+    if QTYPES[q] == "noul":
+        p = probs["true"]
+        return {"value": p, "probabilities": probs, "confidence": max(p, 1 - p)}
+    if QTYPES[q] == "score":
+        return {"value": sum(int(k) * v for k, v in probs.items()), "probabilities": probs,
+                "confidence": max(probs.values())}
+    return {"value": answer["value"], "probabilities": probs, "confidence": probs.get(str(answer["value"]))}
+
+
+def calibrate_cv(pairs: list[tuple[dict, dict]], k: int = 5, seed: int = 0) -> tuple[list, dict]:
+    """Held-out temperature scaling: each answer is scaled by a temperature fitted on the other folds.
+    Returns (calibrated pairs, temperatures fitted on all pairs)."""
+    order = np.random.default_rng(seed).permutation(len(pairs))
+    out: list = [None] * len(pairs)
+    for held in np.array_split(order, min(k, len(pairs))):
+        train = [pairs[i] for i in np.setdiff1d(order, held)]
+        temps = {q: fit_temperature(q, train) for q in QUESTIONS}
+        for i in held:
+            a, lab = pairs[i]
+            out[i] = ({q: apply_temperature(q, a[q], temps[q]) for q in QUESTIONS}, lab)
+    return out, {q: round(fit_temperature(q, pairs), 3) for q in QUESTIONS}
+
+
+def majority(labels: list[dict]) -> dict:
+    """Accuracy of always answering the most common label: the floor any backend has to clear."""
+    out = {}
+    for q in QUESTIONS:
+        counts = Counter(label_value(q, a) for a in labels)
+        answer, n = counts.most_common(1)[0]
+        out[q] = {"answer": answer, "accuracy": n / len(labels)}
+    return out
+
+
 def evaluate(conn, embedder=None, k: int = 5) -> dict:
     data = exact_labels(conn)
     if not data:
@@ -75,22 +139,31 @@ def evaluate(conn, embedder=None, k: int = 5) -> dict:
                WHERE backend <> 'fallback' AND prompt_version = %s AND episode_id = ANY(%s)""",
             (pv, [eid for _, eid, _ in data])):
         stored.setdefault(f"{backend} ({model}, {mv})", {})[eid] = answers
+    temperatures = {}
     for name, by_episode in stored.items():
         pairs = [(by_episode[eid], a) for _, eid, a in data if eid in by_episode]
         results[f"{name}, {len(pairs)}/{len(data)} labeled episodes triaged"] = score(pairs)
-    return {"labels": len(data), "results": results}
+        if len(pairs) >= 10:
+            calibrated, temperatures[name] = calibrate_cv(pairs, k)
+            results[f"{name}, temperature-scaled ({min(k, len(pairs))}-fold CV)"] = score(calibrated)
+    return {"labels": len(data), "majority": majority(labels), "results": results, "temperatures": temperatures}
 
 
 def report(ev: dict) -> str:
-    lines = [f"{ev['labels']} exact labels"]
+    lines = [f"{ev['labels']} exact labels", "", "baseline: always the most common answer"]
+    for q, m in ev["majority"].items():
+        lines.append(f"  {q:<17} accuracy {m['accuracy']:.0%} (always {m['answer']!r})")
     for name, metrics in ev["results"].items():
         lines += ["", name]
         for q, m in metrics.items():
             acc = "n/a" if m["accuracy"] is None else f"{m['accuracy']:.0%}"
             extra = f", MAE {m['mae']:.2f}" if "mae" in m else ""
-            lines.append(f"  {q:<17} accuracy {acc} (n={m['n']}){extra}")
+            lift = "" if m["accuracy"] is None else f", {100 * (m['accuracy'] - ev['majority'][q]['accuracy']):+.0f} pts vs baseline"
+            lines.append(f"  {q:<17} accuracy {acc} (n={m['n']}){extra}{lift}")
             for b in m["reliability"]:
                 lines.append(f"      confidence {b['confidence']}: n={b['n']:<3} accuracy {b['accuracy']:.0%}")
+    for name, temps in ev.get("temperatures", {}).items():
+        lines += ["", f"temperatures fitted on all labels, {name}: " + ", ".join(f"{q} {t}" for q, t in temps.items())]
     if not ev["results"]:
         lines.append("nothing to evaluate: train the fallback (im train) or triage the labeled episodes with Laya")
     return "\n".join(lines)
