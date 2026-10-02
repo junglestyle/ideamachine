@@ -1,8 +1,8 @@
 """`im eval`: per-question accuracy and a reliability table for each backend, on my labels.
 
-The fallback is scored by k-fold cross-validation, so every prediction is on
-a label it wasn't trained on. Laya isn't trained on labels, so its stored
-triage rows for the labeled episodes are scored directly.
+logreg is scored by k-fold cross-validation, so every prediction is on a
+label it wasn't trained on. The LLM and Laya aren't trained on labels, so
+their stored triage rows for the labeled episodes are scored directly.
 """
 
 from collections import Counter
@@ -130,13 +130,13 @@ def evaluate(conn, embedder=None, k: int = 5) -> dict:
     results = {}
     if embedder is not None and len(data) >= 2:
         X = embeddings(conn, embedder, render(conn, [eid for _, eid, _ in data]))
-        results[f"fallback (logreg/{embedder.model}, {min(k, len(data))}-fold CV)"] = score(
+        results[f"logreg baseline ({embedder.model}, {min(k, len(data))}-fold CV)"] = score(
             list(zip(cross_validate(X, labels, k), labels, strict=True)))
     pv = prompt_version(questions(conn))
     stored: dict = {}
     for backend, model, mv, eid, answers in conn.execute(
             """SELECT backend, model, model_version, episode_id, answers FROM im.triage
-               WHERE backend <> 'fallback' AND prompt_version = %s AND episode_id = ANY(%s)""",
+               WHERE backend <> 'logreg' AND prompt_version = %s AND episode_id = ANY(%s)""",
             (pv, [eid for _, eid, _ in data])):
         stored.setdefault(f"{backend} ({model}, {mv})", {})[eid] = answers
     temperatures = {}
@@ -165,5 +165,5 @@ def report(ev: dict) -> str:
     for name, temps in ev.get("temperatures", {}).items():
         lines += ["", f"temperatures fitted on all labels, {name}: " + ", ".join(f"{q} {t}" for q, t in temps.items())]
     if not ev["results"]:
-        lines.append("nothing to evaluate: train the fallback (im train) or triage the labeled episodes with Laya")
+        lines.append("nothing to evaluate: im eval --llm, or train the logreg baseline (im train)")
     return "\n".join(lines)

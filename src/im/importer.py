@@ -245,6 +245,12 @@ def import_stream(conn, stream_dir: Path) -> tuple[set[str], dict]:
     _link(conn, [(old, u.segment_id) for old, start, end in unmatched_all for u in arrived_all
                  if u.started_at < end and start < u.ended_at], "time_overlap")
 
+    # Taps live in the index, not the conversation file, so they can change without a new revision.
+    for cid, entry in entries.items():
+        conn.execute("""UPDATE im.source_conversations SET taps = %s::timestamptz[]
+                        WHERE conversation_id = %s AND taps IS DISTINCT FROM %s::timestamptz[]""",
+                     ([_time(t) for t in entry.get("taps", [])], cid, [_time(t) for t in entry.get("taps", [])]))
+
     changed |= _apply_forgotten(conn, forgotten)
     return changed, {"conversations_changed": len(changed), "segments_new": len(arrived_all),
                      "segments_left": len(unmatched_all), "raced": raced}

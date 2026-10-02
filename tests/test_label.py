@@ -121,3 +121,21 @@ def test_projects_registry(pipe):
     assert "[retired]" in projects.listing(pipe)
     projects.add(pipe, "garden", None, [])  # adding again un-retires
     assert [p[0] for p in projects.active(pipe)] == ["garden"]
+
+
+def test_relabeling_replaces_an_episodes_label_and_review_finds_them(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    label_text(pipe, BACKUP, kind="idea")
+    label_text(pipe, COFFEE, kind="idea")
+    label_text(pipe, HOSTING, kind="chatter")
+    assert len(label.review_queue(pipe, "kind", "idea")) == 2
+    read, write, out = script("", "o", "n", "c", "0", "1", "", "y",   # BACKUP's episode or COFFEE's: chatter now
+                              "q")
+    assert label.session(pipe, read, write, review=("kind", "idea")) == 1
+    assert len(label.review_queue(pipe, "kind", "idea")) == 1
+    assert any("previous label" in line for line in out)
+    latest = label.current_labels(pipe)
+    assert len(latest) == 3 and table(pipe, "SELECT count(*) FROM im.labels") == [(4,)]
+    from im.backends import exact_labels
+    assert len(exact_labels(pipe)) == 3  # one per episode: the re-labeled one counts once
+    assert len(label.review_queue(pipe, "project", "none")) == 3

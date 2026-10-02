@@ -25,7 +25,11 @@ class SegmentConfig:
 
 @dataclass(frozen=True)
 class TriageConfig:
-    backends: tuple[str, ...] = ("laya", "fallback")  # run by `im run`; fallback only once trained
+    backends: tuple[str, ...] = ("llm",)   # run by `im run`: llm | laya | logreg (logreg once trained)
+    llm_model: str = "gpt-oss:20b"         # an Ollama model
+    llm_url: str = "http://localhost:11434"
+    llm_think: str | None = "low"          # reasoning effort for models that think; None to leave it off
+    llm_num_ctx: int = 16384
     laya_checkpoint: str = "english"     # english | multilingual | typed-decisions
     laya_max_len: int = 4096             # tokens of state; longer episodes are truncated (and say so).
                                          # Memory grows steeply with length on CPU: ~5 GB at 4k, ~8 GB at 7k.
