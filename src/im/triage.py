@@ -62,6 +62,7 @@ class EpisodeState:
     episode_id: object
     transcript: str
     context: str = ""   # when, how long, who spoke: facts a transcript alone doesn't carry
+    taps: tuple = ()    # pendant taps during the episode (also in `context`)
 
     @property
     def input_hash(self) -> str:
@@ -107,7 +108,7 @@ def render(conn, episode_ids) -> list[EpisodeState]:
         if eid in taps:
             context += (" I tapped the pendant at " + ", ".join(f"{t.astimezone():%H:%M:%S}" for t in taps[eid])
                         + " (a tap means: keep what I said around then).")
-        out.append(EpisodeState(eid, "\n".join(lines[eid]), context))
+        out.append(EpisodeState(eid, "\n".join(lines[eid]), context, tuple(taps.get(eid, ()))))
     return out
 
 

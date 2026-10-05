@@ -38,7 +38,7 @@ def validate(answers: dict, project_slugs: set[str]) -> None:
         raise ValueError(f"keep_score: {answers['keep_score']!r}")
 
 
-def save(conn, episode_id, answers: dict, note: str | None) -> int:
+def save(conn, episode_id, answers: dict, note: str | None, source: str = "label") -> int:
     validate(answers, {p[0] for p in projects.active(conn)})
     with conn.transaction():
         row = conn.execute(
@@ -49,8 +49,8 @@ def save(conn, episode_id, answers: dict, note: str | None) -> int:
             raise ValueError(f"{episode_id} isn't a current episode")
         return conn.execute(
             """INSERT INTO im.labels (segment_ids, questions_version, answers, note, episode_id,
-                 episode_stage_version) VALUES (%s, %s, %s, %s, %s, %s) RETURNING label_id""",
-            (row[0], QUESTIONS_VERSION, json.dumps(answers), note or None, episode_id, row[1])).fetchone()[0]
+                 episode_stage_version, source) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING label_id""",
+            (row[0], QUESTIONS_VERSION, json.dumps(answers), note or None, episode_id, row[1], source)).fetchone()[0]
 
 
 def resolve_all(conn) -> dict[int, tuple[str, set]]:
@@ -183,27 +183,53 @@ def review_queue(conn, field: str, value: str) -> list:
     return out
 
 
-def session(conn, read=input, write=print, review: tuple[str, str] | None = None) -> int:
-    """Label episodes until I quit or none are left. Returns how many were saved.
-    With `review=(field, value)`, re-label the episodes whose latest label has that answer instead."""
-    skipped, saved = set(), 0
-    queue = review_queue(conn, *review) if review else None
-    while (eid := (queue.pop(0) if queue else None) if review else next_episode(conn, skipped)) is not None:
+def _loop(conn, read, write, items, source: str, empty: str) -> int:
+    """Show each (episode_id, header lines) and record my answers. Returns how many were saved."""
+    saved = 0
+    for eid, header in items:
         write("\n" + "─" * 72)
-        if review:
-            write(f"reviewing {review[0]}={review[1]}: {len(queue)} more after this")
-            write(f"previous label: {json.dumps(current_labels(conn)[eid][1])}")
-        else:
-            write(f"{len(labeled_episodes(conn))} / {TARGET} labeled")
+        for line in header:
+            write(line)
         write(show(conn, str(eid)))
         cmd = _choose(read, write, "\n[enter] label · [s]kip · [q]uit > ", {"": "label", "s": "skip", "q": "quit"})
         if cmd == "quit":
             return saved
         if cmd == "skip":
-            skipped.add(eid)
             continue
         answers, note = ask(conn, read, write)
-        save(conn, eid, answers, note)
+        save(conn, eid, answers, note, source)
         saved += 1
-    write("nothing left to label")
+    write(empty)
     return saved
+
+
+def session(conn, read=input, write=print, review: tuple[str, str] | None = None) -> int:
+    """Label episodes until I quit or none are left. Returns how many were saved.
+    With `review=(field, value)`, re-label the episodes whose latest label has that answer instead."""
+    if review:
+        queue = review_queue(conn, *review)
+        latest = current_labels(conn)
+        items = ((eid, [f"reviewing {review[0]}={review[1]}: {len(queue) - i - 1} more after this",
+                        f"previous label: {json.dumps(latest[eid][1])}"]) for i, eid in enumerate(queue))
+        return _loop(conn, read, write, items, "label", "nothing left to review")
+
+    def fresh():
+        seen: set = set()
+        while (eid := next_episode(conn, seen)) is not None:
+            seen.add(eid)  # labeled or skipped, either way not again this session
+            yield eid, [f"{len(labeled_episodes(conn))} / {TARGET} labeled"]
+    return _loop(conn, read, write, fresh(), "label", "nothing left to label")
+
+
+WHY = {"tap": "you tapped the pendant", "note_to_self": "you said \"note to self\""}
+
+
+def routed_session(conn, read=input, write=print) -> int:
+    """`im review`: work through what the router sent me. Each answer is a label (source `review`)."""
+    from im.router import review_queue as routed
+
+    queue = routed(conn)
+    items = ((eid, [f"review: {len(queue) - i - 1} more after this",
+                    "here because " + "; ".join(WHY.get(r, f"the LLM says {r.removeprefix('llm:')}") for r in reasons)])
+             for i, (eid, reasons) in enumerate(queue))
+    return _loop(conn, read, write, items, "review", "review queue is empty")

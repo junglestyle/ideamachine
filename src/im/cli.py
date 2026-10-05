@@ -31,7 +31,10 @@ def _backends(conn, cfg, names):
         if name == "laya":
             out.append(backends.LayaBackend(cfg.triage.laya_checkpoint, cfg.triage.laya_max_len, cfg.triage.threads))
         elif name == "llm":
-            out.append(_llm(cfg))
+            try:
+                out.append(_llm(cfg))
+            except OSError as e:
+                notes.append(f"llm unavailable, will retry next run: {e}")
         elif name == "logreg":
             try:
                 out.append(backends.LogregBackend(conn, _embedder(cfg)))
@@ -61,8 +64,16 @@ def cmd_run(args) -> None:
         stats = pipeline.run(conn, cfg, db.stream_dir())
         if cfg.triage.backends:
             run_backends, notes = _backends(conn, cfg, cfg.triage.backends)
-            stats["triage"] = [triage.run_stage(conn, b, cfg.triage.max_episodes_per_run) for b in run_backends]
+            stats["triage"] = []
+            for b in run_backends:
+                try:
+                    stats["triage"].append(triage.run_stage(conn, b, cfg.triage.max_episodes_per_run))
+                except OSError as e:  # e.g. Ollama down, or the GPU busy with Hearsay's transcription
+                    notes.append(f"{b.name} unavailable, will retry next run: {e}")
             stats["triage_notes"] = notes
+        from im import router
+
+        stats["route"] = router.run_stage(conn, cfg.triage.router_backend)
         _print(stats)
 
 
@@ -121,6 +132,20 @@ def cmd_label(args) -> None:
         print("\n" + label.status(conn) if n is None else f"saved {n}\n" + label.status(conn))
 
 
+def cmd_review(args) -> None:
+    from im import router
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        if args.status:
+            print(f"{len(router.review_queue(conn))} episodes waiting for review")
+            return
+        try:
+            n = label.routed_session(conn)
+        except (KeyboardInterrupt, EOFError):
+            n = None
+        print(f"\n{'' if n is None else f'reviewed {n}; '}{len(router.review_queue(conn))} still waiting")
+
+
 def cmd_project(args) -> None:
     with db.connect(db.pipeline_dsn()) as conn:
         try:
@@ -170,6 +195,9 @@ def main(argv=None) -> None:
     lb.add_argument("--review", metavar="QUESTION=ANSWER",
                     help="re-label episodes whose latest label has this answer, e.g. kind=idea or project=none")
     lb.set_defaults(func=cmd_label)
+    rv = sub.add_parser("review", help="work through the episodes the router sent me")
+    rv.add_argument("--status", action="store_true", help="show how many are waiting and exit")
+    rv.set_defaults(func=cmd_review)
     pr = sub.add_parser("project", help="the projects registry")
     pa = pr.add_subparsers(dest="action", required=True, metavar="action")
     a = pa.add_parser("add", help="add a project, or update its description and add aliases")

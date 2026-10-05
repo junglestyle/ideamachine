@@ -112,6 +112,48 @@ def calibrate_cv(pairs: list[tuple[dict, dict]], k: int = 5, seed: int = 0) -> t
     return out, {q: round(fit_temperature(q, pairs), 3) for q in QUESTIONS}
 
 
+def positive(answers: dict) -> bool:
+    """What the router exists to find: anything but chatter or noise, or something worth keeping."""
+    from im.router import FLAG_KEEP, FLAG_KINDS
+
+    return answers["kind"] in FLAG_KINDS or answers["keep_score"] >= FLAG_KEEP
+
+
+def router_report(conn) -> dict:
+    """How the current router's routes compare with my labels.
+
+    - By reason, the share of reviewed episodes I judged positive: the flag's precision.
+    - For episodes labeled with `im label` (not picked by the router), how many of my positives the router
+      sends to review (recall) and how much of what it sends is noise to me.
+    """
+    from im.label import current_labels
+    from im.router import ROUTER_VERSION
+
+    latest = current_labels(conn)
+    source = {r[0]: r[1] for r in conn.execute("SELECT label_id, source FROM im.labels")}
+    routes = {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT episode_id, route, reasons FROM im.routes WHERE router_version = %s", (ROUTER_VERSION,))}
+    by_reason: dict = {}
+    sampled = {"positives": 0, "positives_routed": 0, "routed": 0, "routed_positive": 0, "n": 0}
+    for eid, (lid, answers) in latest.items():
+        if eid not in routes:
+            continue
+        r, reasons = routes[eid]
+        pos = positive(answers)
+        if r == "review":
+            for reason in reasons:
+                b = by_reason.setdefault(reason, [0, 0])
+                b[0] += 1
+                b[1] += pos
+        if source[lid] == "label":
+            sampled["n"] += 1
+            sampled["positives"] += pos
+            sampled["positives_routed"] += pos and r == "review"
+            sampled["routed"] += r == "review"
+            sampled["routed_positive"] += pos and r == "review"
+    return {"router_version": ROUTER_VERSION, "by_reason": by_reason, "sampled": sampled}
+
+
 def majority(labels: list[dict]) -> dict:
     """Accuracy of always answering the most common label: the floor any backend has to clear."""
     out = {}
@@ -146,7 +188,8 @@ def evaluate(conn, embedder=None, k: int = 5) -> dict:
         if len(pairs) >= 10:
             calibrated, temperatures[name] = calibrate_cv(pairs, k)
             results[f"{name}, temperature-scaled ({min(k, len(pairs))}-fold CV)"] = score(calibrated)
-    return {"labels": len(data), "majority": majority(labels), "results": results, "temperatures": temperatures}
+    return {"labels": len(data), "majority": majority(labels), "results": results, "temperatures": temperatures,
+            "router": router_report(conn)}
 
 
 def report(ev: dict) -> str:
@@ -164,6 +207,16 @@ def report(ev: dict) -> str:
                 lines.append(f"      confidence {b['confidence']}: n={b['n']:<3} accuracy {b['accuracy']:.0%}")
     for name, temps in ev.get("temperatures", {}).items():
         lines += ["", f"temperatures fitted on all labels, {name}: " + ", ".join(f"{q} {t}" for q, t in temps.items())]
+    if "router" in ev:
+        rr = ev["router"]
+        lines += ["", f"router {rr['router_version']}"]
+        for reason, (n, pos) in sorted(rr["by_reason"].items()):
+            lines.append(f"  flagged for {reason:<14} {n:>3} labeled, {pos} of them positive to me ({pos / n:.0%})")
+        s = rr["sampled"]
+        if s["n"]:
+            lines.append(f"  on {s['n']} episodes labeled with im label: {s['positives']} positive to me, "
+                         f"{s['positives_routed']} of those sent to review; "
+                         f"{s['routed']} sent to review, {s['routed_positive']} of those positive")
     if not ev["results"]:
         lines.append("nothing to evaluate: im eval --llm, or train the logreg baseline (im train)")
     return "\n".join(lines)

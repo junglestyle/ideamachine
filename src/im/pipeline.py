@@ -117,7 +117,7 @@ def run(conn: psycopg.Connection, cfg: Config, stream_dir: Path) -> dict:
     return stats
 
 
-STAGES = ("segment", "triage")
+STAGES = ("segment", "triage", "route")
 
 
 def reset(conn: psycopg.Connection, stage: str) -> dict:
@@ -130,7 +130,10 @@ def reset(conn: psycopg.Connection, stage: str) -> dict:
         if stage == "segment":  # triage rows hang off episodes and go with them
             stats = {"triage_deleted": conn.execute("SELECT count(*) FROM im.triage").fetchone()[0],
                      "episodes_deleted": conn.execute("DELETE FROM im.episodes").rowcount}
+        elif stage == "triage":  # routes read triage, so they go too
+            stats = {"routes_deleted": conn.execute("DELETE FROM im.routes").rowcount,
+                     "triage_deleted": conn.execute("DELETE FROM im.triage").rowcount}
         else:
-            stats = {"triage_deleted": conn.execute("DELETE FROM im.triage").rowcount}
+            stats = {"routes_deleted": conn.execute("DELETE FROM im.routes").rowcount}
         _finish_run(conn, run_id, stats)
     return stats
