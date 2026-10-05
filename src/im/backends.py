@@ -175,10 +175,15 @@ class LLMBackend:
     def _post(self, path: str, body: dict) -> dict:
         import urllib.request
 
+        import urllib.error
+
         req = urllib.request.Request(self.url + path, data=json.dumps(body).encode(),
                                      headers={"Content-Type": "application/json"})
-        with self._urlopen(req, timeout=self.timeout) as r:
-            return json.loads(r.read())
+        try:
+            with self._urlopen(req, timeout=self.timeout) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:  # Ollama says why in the body (e.g. the GPU is out of memory)
+            raise OSError(f"ollama {path}: HTTP {e.code}: {e.read().decode(errors='replace')[:300]}") from None
 
     def predict(self, states: list[EpisodeState], qs: dict) -> list[Prediction]:
         system = LLM_SYSTEM.format(questions=_describe(qs))

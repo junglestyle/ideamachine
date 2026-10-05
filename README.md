@@ -23,8 +23,9 @@ uv run im show <episode-prefix>
 uv run im reset --stage segment   # drop episodes; the next run rebuilds them (labels are kept)
 uv run im project add garden -d "Garden sensors" -a lora
 uv run im label                   # label episodes in the terminal; --status for progress
-uv run im train                   # fit the fallback classifier on my labels
-uv run im eval --laya             # accuracy and reliability per question, Laya vs the fallback
+uv run im train                   # fit the logreg baseline on my labels
+uv run im eval --llm              # accuracy and reliability per question, per backend, plus the router's precision
+uv run im review                  # work through what the router sent me (pendant taps and notes to self first)
 uv run im reset --stage triage    # drop triage rows; the next run re-triages
 uv run pytest                     # each test gets a fresh im_test database and stream directory
 IM_TEST_MODELS=1 uv run pytest    # also load the real Laya model
@@ -65,5 +66,10 @@ One REPEATABLE READ transaction:
    Episodes are content-addressed (`uuid5(stage_version, input_hash)`), so unchanged episodes aren't touched,
    ones that no longer come out are retired (`current = false`), and new ones are inserted.
 
-Then, outside that transaction, **triage**: each configured backend answers the triage questions for current
-episodes it hasn't answered yet, newest first, committing in small batches.
+Then, outside that transaction:
+
+- **Triage.** Each configured backend (by default the local LLM through Ollama) answers the triage questions for
+  current episodes whose rendered input it hasn't answered yet, newest first, committing in small batches. If
+  Ollama is down or the GPU is busy, the run notes it and goes on.
+- **Route.** Router v1 sends to review whatever I tapped or called a note to self, and whatever the LLM flags; the
+  rest is auto-filed (`docs/decisions/0003-router-v1.md`).

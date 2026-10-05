@@ -30,6 +30,7 @@ class TriageConfig:
     llm_url: str = "http://localhost:11434"
     llm_think: str | None = "low"          # reasoning effort for models that think; None to leave it off
     llm_num_ctx: int = 16384
+    router_backend: str = "llm"            # whose triage answers the router reads
     laya_checkpoint: str = "english"     # english | multilingual | typed-decisions
     laya_max_len: int = 4096             # tokens of state; longer episodes are truncated (and say so).
                                          # Memory grows steeply with length on CPU: ~5 GB at 4k, ~8 GB at 7k.
