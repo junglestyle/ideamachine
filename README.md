@@ -56,6 +56,18 @@ Until Idea Machine runs on the NAS, `dev/pull-stream.sh` copies Hearsay's stream
 there) into `~/.local/share/ideamachine/stream`. Point `IM_STREAM_DIR` there and `IM_DATABASE_URL` at a
 database of its own (`im`), separate from the fixture one (`im_dev`). Then `dev/pull-stream.sh && uv run im run`.
 
+## Running on its own (eeyore)
+
+`dev/systemd/install.sh` links and enables two user units:
+
+- `ideamachine-db.service` keeps the Postgres container running. Its port forward on 127.0.0.1:55432 then lives in
+  that service and not in whichever shell started the container, and it comes back after a reboot (lingering is
+  on for this user).
+- `ideamachine-run.timer` runs `dev/pull-stream.sh && im run` hourly at :45, after Hearsay's transcription (:00)
+  and reprocess (:30). Logs: `journalctl --user -u ideamachine-run`.
+
+Then the only manual step is `im ideas --review`.
+
 ## How `im run` works
 
 One REPEATABLE READ transaction:

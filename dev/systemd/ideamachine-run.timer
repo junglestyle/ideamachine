@@ -1,0 +1,10 @@
+# Hourly at :45, after Hearsay's transcription (:00 on eeyore) and reprocess (:30 on the NAS).
+[Unit]
+Description=Run Idea Machine hourly at :45
+
+[Timer]
+OnCalendar=*-*-* *:45:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
