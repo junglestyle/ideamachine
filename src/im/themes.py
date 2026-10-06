@@ -104,13 +104,30 @@ def _unthemed(conn, tv: str) -> list[tuple]:
            ORDER BY d.created_at""", (tv,)).fetchall()
 
 
+def refile_corrected(conn) -> int:
+    """Ideas I corrected after they were filed lose the filer's themes (not the archive's) and get filed again:
+    the first filing may have rested on Claude's misreading."""
+    ids = [r[0] for r in conn.execute(
+        """SELECT x.idea_id FROM im.idea_text x JOIN im.theme_checks c USING (idea_id)
+           WHERE x.corrected_at > c.checked_at""")]
+    if ids:
+        with conn.transaction():
+            conn.execute("""DELETE FROM im.idea_themes WHERE idea_id = ANY(%s) AND origin IN ('assigned', 'proposed')""",
+                         (ids,))
+            conn.execute("DELETE FROM im.theme_checks WHERE idea_id = ANY(%s)", (ids,))
+    return len(ids)
+
+
 def file_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
     from im.extract import spent_this_month
+
+    refiled = refile_corrected(conn)
 
     tv = themes_version(conn)
     themes = current_themes(conn)
     todo = _unthemed(conn, tv)
-    stats = {"themes_version": tv, "pending": len(todo), "assigned": 0, "none": 0, "stopped": None}
+    stats = {"themes_version": tv, "pending": len(todo), "refiled_after_correction": refiled, "assigned": 0, "none": 0,
+             "stopped": None}
     if not themes or not todo:
         return stats
     letters = _letters(len(themes))
