@@ -71,10 +71,88 @@ def cmd_run(args) -> None:
                 except OSError as e:  # e.g. Ollama down, or the GPU busy with Hearsay's transcription
                     notes.append(f"{b.name} unavailable, will retry next run: {e}")
             stats["triage_notes"] = notes
+        if cfg.extract.enabled:
+            stats["extract"] = _extract(conn, cfg)
         from im import router
 
-        stats["route"] = router.run_stage(conn, cfg.triage.router_backend)
+        stats["route"] = router.run_stage(conn)
         _print(stats)
+
+
+def _extract(conn, cfg) -> dict:
+    """Run extraction, or say why it couldn't run (no credentials, API down); the run goes on either way."""
+    import anthropic
+
+    from im import extract
+
+    x = cfg.extract
+    try:
+        client = anthropic.Anthropic()
+        return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run)
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
+        return {"stopped": f"Claude credentials rejected: {e}"}
+    except anthropic.AnthropicError as e:  # e.g. no credentials configured at all
+        return {"stopped": f"Claude unavailable: {e}"}
+
+
+def cmd_ideas(args) -> None:
+    from im import extract
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        if args.review:
+            n = _review_items(conn, extract)
+            print(f"\ndecided {n}; {len(extract.review_items(conn))} still undecided")
+            return
+        rows = conn.execute(
+            """SELECT i.kind, i.said_by, i.quote, i.gist, i.confidence, e.started_at,
+                      (SELECT v.verdict FROM im.item_verdicts v WHERE v.item_id = i.item_id
+                       ORDER BY v.decided_at DESC LIMIT 1)
+               FROM im.items i JOIN im.episodes e USING (episode_id)
+               WHERE e.current ORDER BY e.started_at DESC, i.confidence DESC""").fetchall()
+        shown = 0
+        for kind, who, quote, gist, conf, at, verdict in rows:
+            if verdict == "discard" and not args.all:
+                continue
+            mark = {"keep": "kept", "discard": "discarded", None: "new"}[verdict]
+            print(f"{at.astimezone():%Y-%m-%d %H:%M}  {kind:<11} {who:<16} {conf:.2f}  [{mark}]")
+            print(f"    \u201c{quote}\u201d")
+            print(f"    {gist}\n")
+            shown += 1
+        print(f"{shown} shown ({len(rows)} captured on current episodes)")
+
+
+def _review_items(conn, extract, read=input, write=print) -> int:
+    from im.label import _choose
+
+    n = 0
+    for item_id, kind, who, quote, gist, themes, conf, _, at, _ in extract.review_items(conn):
+        write("\n" + "─" * 72)
+        write(f"{at.astimezone():%A %Y-%m-%d %H:%M}  {kind} said by {who}  (confidence {conf:.2f})")
+        write(f"  \u201c{quote}\u201d")
+        write(f"  {gist}")
+        if themes:
+            write(f"  themes: {', '.join(themes)}")
+        got = _choose(read, write, "[k]eep · [d]iscard · [s]kip · [q]uit > ",
+                      {"k": "keep", "d": "discard", "s": "skip", "q": "quit"})
+        if got == "quit":
+            break
+        if got == "skip":
+            continue
+        note = read("note (enter for none) > ").strip() or None
+        extract.decide(conn, item_id, got, note)
+        n += 1
+    return n
+
+
+def cmd_forgotten(args) -> None:
+    from im import extract
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        rows = extract.forgotten_sent(conn)
+    if not rows:
+        print("no forgotten segment was ever sent to Claude")
+    for seg, forgotten_at, first_sent, n in rows:
+        print(f"{seg}  forgotten {forgotten_at:%Y-%m-%d}, sent {n}x, first {first_sent:%Y-%m-%d %H:%M}")
 
 
 def cmd_train(args) -> None:
@@ -195,6 +273,13 @@ def main(argv=None) -> None:
     lb.add_argument("--review", metavar="QUESTION=ANSWER",
                     help="re-label episodes whose latest label has this answer, e.g. kind=idea or project=none")
     lb.set_defaults(func=cmd_label)
+    ia = sub.add_parser("ideas", help="what Claude captured; --review to keep or discard each item")
+    ia.add_argument("--review", action="store_true", help="keep or discard each undecided item, most confident first")
+    ia.add_argument("--all", action="store_true", help="also list discarded items")
+    ia.set_defaults(func=cmd_ideas)
+    fg = sub.add_parser("forgotten", help="forgotten segments that had already been sent to Claude")
+    fg.add_argument("--sent", action="store_true", required=True)
+    fg.set_defaults(func=cmd_forgotten)
     rv = sub.add_parser("review", help="work through the episodes the router sent me")
     rv.add_argument("--status", action="store_true", help="show how many are waiting and exit")
     rv.set_defaults(func=cmd_review)

@@ -184,8 +184,6 @@ def test_laya_backend(pipe, cfg, stream):
 
 
 def test_temperature_scaling_softens_an_overconfident_backend():
-    from im.backends import label_value
-
     rng = np.random.default_rng(3)
     pairs = []
     for i in range(60):

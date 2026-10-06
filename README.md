@@ -3,8 +3,8 @@
 Turns Hearsay's speaker-attributed transcript segments into episodes and, later, triage and ideas.
 See [docs/ROADMAP.md](docs/ROADMAP.md).
 
-Built so far: Phase 1 steps 1–4 (import Hearsay's utterance stream, heuristic episode segmentation, the projects
-registry, labeling, and triage with Laya and a fallback classifier).
+Built so far: importing Hearsay's utterance stream, heuristic episode segmentation, the projects registry, labeling,
+triage backends for evaluation (a local LLM, Laya, logreg), idea extraction with Claude, and routing.
 
 ## Dev setup (eeyore)
 
@@ -15,7 +15,8 @@ set -a; . ./.env; set +a
 uv sync --extra models          # CPU-only torch, Laya, sentence-transformers, scikit-learn
 uv run im migrate                 # im schema
 uv run im load-fixtures           # a synthetic Hearsay stream in $IM_STREAM_DIR (dev/stream)
-uv run im run                     # import + segment + triage; idempotent
+uv run im run                     # import + segment + extract ideas with Claude + route; idempotent
+uv run im ideas                   # what Claude captured; --review to keep or discard each item
 uv run im load-fixtures --scenario edited   # the same stream after every kind of correction and a forget
 uv run im run
 uv run im check                   # invariant queries
@@ -36,6 +37,8 @@ Settings are env vars:
 - `IM_DATABASE_URL`: the pipeline's database. Role `im_pipeline` owns `im.*` and nothing else.
 - `IM_STREAM_DIR`: Hearsay's utterance stream. Idea Machine only reads it. `im load-fixtures` writes only to
   directories it created itself.
+- `ANTHROPIC_API_KEY` (or an `ant auth login` profile): for idea extraction. Without it `im run` skips extraction
+  and says so. What's sent, and how, is in `docs/decisions/0004-claude-extraction.md`.
 - `IM_DEV_ADMIN_URL`: the local dev superuser, used only by tests to create and drop `im_test`. Code refuses it
   unless it points at localhost.
 

@@ -113,10 +113,8 @@ def calibrate_cv(pairs: list[tuple[dict, dict]], k: int = 5, seed: int = 0) -> t
 
 
 def positive(answers: dict) -> bool:
-    """What the router exists to find: anything but chatter or noise, or something worth keeping."""
-    from im.router import FLAG_KEEP, FLAG_KINDS
-
-    return answers["kind"] in FLAG_KINDS or answers["keep_score"] >= FLAG_KEEP
+    """What the router exists to find, by my label: an idea, task or decision, or something worth keeping."""
+    return answers["kind"] in ("idea", "task", "decision") or answers["keep_score"] >= 3
 
 
 def router_report(conn) -> dict:

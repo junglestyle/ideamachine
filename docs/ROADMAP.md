@@ -20,6 +20,7 @@ Idea Machine reads the speaker-attributed utterances that Hearsay publishes in i
 
 | Principle | How it shows up |
 |---|---|
+| Egress is a logged, versioned policy | What leaves the box is decided by `im.egress.POLICY_VERSION` (currently policy B: everyone's words, speakers pseudonymized; decision 0004) and every request is logged with the segment IDs it carried. |
 | Raw is immutable | Idea Machine reads Hearsay's stream read-only and never writes to it. Its own copy of the stream (`im.source_*`) is append-only: corrections become superseding rows (§3), never updates. Forgetting is the one exception, and it deletes for real (§3). |
 | Derived is re-derivable | Every derived row carries `schema_version`, `stage_version` (code/heuristic), and `model` + `model_version` + `prompt_version` where relevant, plus `input_hash`. Each stage supports `im reset --stage X`. |
 | Cheap models route, never drop | Triage writes labels and a route. No stage deletes or hides segments. "Noise" is a label, not a filter. |
@@ -102,6 +103,7 @@ Until Hearsay slice 12 the list stays empty, so Idea Machine builds and tests th
 - Step 4 (done, 2026-10-01): the Laya spike passed (`docs/decisions/0001-laya-spike.md`). Triage runs in `im run` with Laya and, once `im train` has run, the fallback classifier. `im eval` reports per-question accuracy and reliability for both, with the fallback cross-validated. `im reset --stage triage` is in place. Episode embeddings are stored in pgvector, ready for Phase 2.
 - Step 5 (2026-10-01, in progress): the first eval (`docs/decisions/0002-first-triage-eval.md`) found that neither Laya nor the logreg baseline beats always giving the most common answer. Triage now defaults to a local LLM through Ollama on eeyore's GPU (`gpt-oss:20b`, about 1 s per episode), which is the first backend to beat the baseline (project +21 points). Laya stays available for comparison. Episodes now carry context (local time, length, speakers present, pendant taps), and triage redoes an episode whenever that input changes. Labels can be revised (`im label --review kind=idea`), and an episode's latest label wins. Next: re-label with the revised definitions, then judge the LLM on 20–30 *fresh* labels, since the question wording was tuned on the first 52.
 - Step 6 (2026-10-05): router v1 and `im review` (`docs/decisions/0003-router-v1.md`). After re-labeling, 93 of 95 episodes are chatter with nothing to keep, so no model can be validated yet. Routing is cautious: taps and "note to self" always come to me, and LLM flags add to the review queue. Reviews are labels, which is how positives get collected. Phase 1 exit criteria still open: triage within 15 min without a manual step (needs a timer at :45 and, eventually, the NAS deployment), and a router chosen *from* an eval. That needs positives first.
+- Step 7 (2026-10-06): idea extraction with Claude, pulled forward from Phase 4 (`docs/decisions/0004-claude-extraction.md`). Every episode goes to Claude under privacy policy B (everyone's words, speakers pseudonymized, every request logged). Captured items go to `im ideas --review` (keep or discard), and router v2 sends to review whatever Claude captured, tapped episodes, and notes to self. The local LLM and Laya are off by default.
 
 **Deliverables**
 - `im` schema and migrations. Tables: `source_conversations`, `source_segments`, `source_supersessions`, `source_tombstones`, `episodes`, `episode_segments`, `triage`, `labels`, `projects`, `runs`.
@@ -170,7 +172,7 @@ _Moved ahead of extraction: relating episodes is the core value, it's cheap, and
 
 **Goal:** flagged episodes plus their neighbors become structured objects, without other people's words leaving the box.
 
-**Gate:** nothing is sent to Claude until the operator can actually forget something. That needs Hearsay slice 12's forget command (or an earlier, smaller version of it), with Idea Machine's purge verified end to end on real data. Sending is the one step forgetting can't undo.
+**Gate (lifted by decision 0004 for extraction):** nothing is sent to Claude until the operator can actually forget something. That needs Hearsay slice 12's forget command (or an earlier, smaller version of it), with Idea Machine's purge verified end to end on real data. Sending is the one step forgetting can't undo.
 
 **Deliverables**
 - **Object tables:** `ideas`, `tasks`, `decisions`, `project_mentions`. Each row has `source_segment_ids`, timestamps, `model`, `prompt_version`, `privacy_policy_version` and `batch_id`.
