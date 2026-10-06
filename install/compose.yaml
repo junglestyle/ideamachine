@@ -1,0 +1,55 @@
+# Idea Machine on TrueNAS (install/nas.sh): Postgres, the hourly pipeline run, and Lattice.
+name: ideamachine
+
+services:
+  # Internal only: no host port. Admin access: docker compose -f ... exec db psql -U postgres -d im
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: ideamachine-db
+    env_file: /mnt/storage/ideamachine/config/db.env
+    environment:
+      POSTGRES_DB: im
+    volumes:
+      - /mnt/storage/ideamachine/pg:/var/lib/postgresql/data
+      - ../dev/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "im"]
+      interval: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # One `im` command per run: the TrueNAS cron job runs `run --rm run` hourly at :45; install/nas.sh uses it for
+  # migrations and checks. Hearsay's stream is read-only here.
+  run:
+    build: ..
+    image: ideamachine
+    profiles: ["tools"]
+    init: true   # forwards stop signals: Python as PID 1 ignores them
+    user: "568:568"
+    env_file: /mnt/storage/ideamachine/config/pipeline.env
+    environment:
+      IM_STREAM_DIR: /data/stream
+      TZ: America/New_York   # payloads carry local times: keep them as they were on eeyore (im pending)
+    volumes:
+      - /mnt/storage/hearsay/stream:/data/stream:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Loopback only: tailscale serve publishes it to the tailnet over HTTPS. Never the LAN, never 0.0.0.0, never
+  # tailscale funnel: evidence quotes include other people's words.
+  lattice:
+    build: /mnt/storage/ideamachine/lattice
+    image: lattice
+    container_name: lattice
+    init: true
+    user: "568:568"
+    env_file: /mnt/storage/ideamachine/config/lattice.env
+    environment:
+      TZ: America/New_York
+    ports:
+      - "127.0.0.1:8790:8790"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped

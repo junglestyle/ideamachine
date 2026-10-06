@@ -149,6 +149,28 @@ def cmd_themes(args) -> None:
         print(themes.listing(conn))
 
 
+def cmd_pending(args) -> None:
+    """What the next run would send to Claude, without sending anything. After moving the database to another
+    machine, `already_extracted_would_resend` must be 0: anything else means the payloads changed (e.g. the time
+    zone), and the run would re-send episodes and orphan my verdicts."""
+    from im import extract, lattice, themes
+
+    cfg = config.load()
+    with db.connect(db.pipeline_dsn()) as conn:
+        pv = extract.prompt_version(cfg.extract.model, cfg.extract.effort)
+        todo = extract._pending(conn, cfg.extract.model, pv)
+        done = {r[0] for r in conn.execute(
+            "SELECT episode_id FROM im.extractions WHERE model = %s AND prompt_version = %s",
+            (cfg.extract.model, pv))}
+        out = {"episodes_to_extract": len(todo),
+               "already_extracted_would_resend": sum(p.episode_id in done for p in todo),
+               "items_to_match": len(lattice._pending_items(conn)),
+               "ideas_to_file": len(themes._unthemed(conn, themes.themes_version(conn)))}
+    _print(out)
+    if args.expect_none_resent and out["already_extracted_would_resend"]:
+        raise SystemExit(1)
+
+
 def cmd_seed(args) -> None:
     from im import lattice
 
@@ -351,6 +373,10 @@ def main(argv=None) -> None:
     lb.add_argument("--review", metavar="QUESTION=ANSWER",
                     help="re-label episodes whose latest label has this answer, e.g. kind=idea or project=none")
     lb.set_defaults(func=cmd_label)
+    pe = sub.add_parser("pending", help="what the next run would send to Claude, without sending anything")
+    pe.add_argument("--expect-none-resent", action="store_true",
+                    help="exit 1 if any already-extracted episode would be sent again (use after a move)")
+    pe.set_defaults(func=cmd_pending)
     sd = sub.add_parser("seed", help="import an idea archive into the lattice (its clusters become pinned themes)")
     sd.add_argument("path", help="the archive, e.g. ~/.local/share/ideamachine/seeds/chatgpt-archive.md")
     sd.add_argument("--name", default="chatgpt", help="prefix for its references, e.g. chatgpt#17")

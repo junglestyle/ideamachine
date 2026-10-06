@@ -8,3 +8,5 @@ CREATE SCHEMA IF NOT EXISTS pub AUTHORIZATION im_pipeline;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'lattice_app') THEN CREATE ROLE lattice_app NOLOGIN; END IF;
 END $$;
+-- A schema's grants belong with the schema: pg_restore -n (install/nas.sh) restores objects, not schemas.
+GRANT USAGE ON SCHEMA pub TO lattice_app;

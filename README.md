@@ -59,7 +59,11 @@ Until Idea Machine runs on the NAS, `dev/pull-stream.sh` copies Hearsay's stream
 there) into `~/.local/share/ideamachine/stream`. Point `IM_STREAM_DIR` there and `IM_DATABASE_URL` at a
 database of its own (`im`), separate from the fixture one (`im_dev`). Then `dev/pull-stream.sh && uv run im run`.
 
-## Running on its own (eeyore)
+## On the NAS
+
+Production runs on TrueNAS: see [docs/deploy.md](docs/deploy.md). eeyore is for development.
+
+## Running on its own (eeyore, before the move)
 
 `dev/systemd/install.sh` links and enables two user units:
 
