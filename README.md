@@ -18,6 +18,8 @@ uv run im load-fixtures           # a synthetic Hearsay stream in $IM_STREAM_DIR
 uv run im run                     # import + segment + extract ideas with Claude + route; idempotent
 uv run im ideas                   # what Claude captured; --review to keep or discard each item
 uv run im ideas --discards        # what I discarded and why: material for revising the extraction prompt
+uv run im seed ~/.local/share/ideamachine/seeds/chatgpt-archive.md   # seed the idea lattice (once)
+uv run im lattice                 # lattice counts: ideas, evidence, connections
 uv run im load-fixtures --scenario edited   # the same stream after every kind of correction and a forget
 uv run im run
 uv run im check                   # invariant queries
@@ -87,5 +89,8 @@ Then, outside that transaction:
 - **Triage.** Each configured backend (by default the local LLM through Ollama) answers the triage questions for
   current episodes whose rendered input it hasn't answered yet, newest first, committing in small batches. If
   Ollama is down or the GPU is busy, the run notes it and goes on.
+- **Lattice.** Each new capture is matched against the nearest existing ideas (local embeddings), and Claude
+  decides new / same as / evolves. Related-idea edges are rebuilt. Lattice, the separate presentation app, reads
+  the result through schema `pub` (ROADMAP §3.5).
 - **Route.** Router v1 sends to review whatever I tapped or called a note to self, and whatever the LLM flags; the
   rest is auto-filed (`docs/decisions/0003-router-v1.md`).
