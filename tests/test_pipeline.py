@@ -1,6 +1,5 @@
 """Phase 1 done-when criteria, against a real Postgres and a fixture stream."""
 
-import dataclasses
 import json
 import os
 
@@ -8,7 +7,7 @@ import pytest
 
 from im import db, fixtures, pipeline
 from im.config import Config, SegmentConfig
-from im.fixtures import UNKNOWN, FixtureStream, _alice, _me
+from im.fixtures import _alice, _me
 from im.importer import StreamError
 
 from helpers import (assert_invariants, changed_episodes, current_episodes, derived_state, episodes,

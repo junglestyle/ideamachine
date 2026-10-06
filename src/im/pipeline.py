@@ -35,6 +35,12 @@ def _purge_tombstoned(conn) -> tuple[set[str], int]:
     labels = conn.execute(
         """DELETE FROM im.labels l WHERE EXISTS (
              SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(l.segment_ids))""").rowcount
+    conn.execute("""DELETE FROM im.item_verdicts v WHERE EXISTS (
+                      SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(v.segment_ids))""")
+    # What was sent can't be recalled, but the local copy of the text goes; the segment IDs stay so
+    # `im forgotten --sent` can say what went out.
+    conn.execute("""UPDATE im.egress_log g SET payload = NULL WHERE payload IS NOT NULL AND EXISTS (
+                      SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(g.segment_ids))""")
     rows = conn.execute(
         """DELETE FROM im.episodes e
            WHERE EXISTS (SELECT 1 FROM im.episode_segments es
@@ -117,7 +123,7 @@ def run(conn: psycopg.Connection, cfg: Config, stream_dir: Path) -> dict:
     return stats
 
 
-STAGES = ("segment", "triage", "route")
+STAGES = ("segment", "triage", "extract", "route")
 
 
 def reset(conn: psycopg.Connection, stage: str) -> dict:
@@ -130,9 +136,12 @@ def reset(conn: psycopg.Connection, stage: str) -> dict:
         if stage == "segment":  # triage rows hang off episodes and go with them
             stats = {"triage_deleted": conn.execute("SELECT count(*) FROM im.triage").fetchone()[0],
                      "episodes_deleted": conn.execute("DELETE FROM im.episodes").rowcount}
-        elif stage == "triage":  # routes read triage, so they go too
+        elif stage == "triage":
+            stats = {"triage_deleted": conn.execute("DELETE FROM im.triage").rowcount}
+        elif stage == "extract":  # routes read items, so they go too. The egress log stays: it's a record.
             stats = {"routes_deleted": conn.execute("DELETE FROM im.routes").rowcount,
-                     "triage_deleted": conn.execute("DELETE FROM im.triage").rowcount}
+                     "items_deleted": conn.execute("DELETE FROM im.items").rowcount,
+                     "extractions_deleted": conn.execute("DELETE FROM im.extractions").rowcount}
         else:
             stats = {"routes_deleted": conn.execute("DELETE FROM im.routes").rowcount}
         _finish_run(conn, run_id, stats)

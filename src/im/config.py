@@ -25,12 +25,12 @@ class SegmentConfig:
 
 @dataclass(frozen=True)
 class TriageConfig:
-    backends: tuple[str, ...] = ("llm",)   # run by `im run`: llm | laya | logreg (logreg once trained)
+    backends: tuple[str, ...] = ()         # run by `im run`: llm | laya | logreg (logreg once trained)
     llm_model: str = "gpt-oss:20b"         # an Ollama model
     llm_url: str = "http://localhost:11434"
     llm_think: str | None = "low"          # reasoning effort for models that think; None to leave it off
     llm_num_ctx: int = 16384
-    router_backend: str = "llm"            # whose triage answers the router reads
+
     laya_checkpoint: str = "english"     # english | multilingual | typed-decisions
     laya_max_len: int = 4096             # tokens of state; longer episodes are truncated (and say so).
                                          # Memory grows steeply with length on CPU: ~5 GB at 4k, ~8 GB at 7k.
@@ -40,9 +40,19 @@ class TriageConfig:
 
 
 @dataclass(frozen=True)
+class ExtractConfig:
+    enabled: bool = True
+    model: str = "claude-opus-5-5"
+    effort: str = "medium"
+    monthly_cap_usd: float = 20.0        # the stage stops before the month's egress spend passes this
+    max_episodes_per_run: int | None = None
+
+
+@dataclass(frozen=True)
 class Config:
     segment: SegmentConfig = SegmentConfig()
     triage: TriageConfig = TriageConfig()
+    extract: ExtractConfig = ExtractConfig()
 
 
 def load() -> Config:
@@ -54,4 +64,5 @@ def load() -> Config:
     triage = data.get("triage", {})
     if "backends" in triage:
         triage["backends"] = tuple(triage["backends"])
-    return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage))
+    return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
+                  extract=ExtractConfig(**data.get("extract", {})))
