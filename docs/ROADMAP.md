@@ -163,7 +163,7 @@ _Replaces the earlier "connections between episodes" plan. Extraction (decision 
    - Related-idea edges come from the embeddings.
    - Publish `pub` with the `lattice_app` role (§3.5).
    - *Done when:* the same idea said in two conversations is one idea with two pieces of evidence, and the archive's ideas sit in the same lattice as the captures.
-2. **Thin Lattice view (new repo `lattice`).** An ugly, read-only page of nodes and edges straight from `pub`, on eeyore and tailnet-only. It proves the contract and shows whether the lattice is worth investing in before any weighting work.
+2. **Thin Lattice view (new repo `lattice`).** _Done 2026-10-06 (`~/data/code/lattice`, `lattice serve`). What it showed: captured ideas have no themes yet (all gray), most ideas are isolated, and the archive's clusters and evolutions read correctly._ An ugly, read-only page of nodes and edges straight from `pub`, on eeyore and tailnet-only. It proves the contract and shows whether the lattice is worth investing in before any weighting work.
 3. **Feedback that updates the weighting.**
    - A ★ *interesting* verdict above keep and discard, in `im ideas --review` and as a Lattice feedback event.
    - A small personal model (item embedding, kind, speaker → keep) orders review.
