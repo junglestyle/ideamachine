@@ -140,7 +140,7 @@ def _project(conn, read, write) -> str | None:
         write("  a number, 0, or +slug")
 
 
-def ask(conn, read, write) -> tuple[dict, str | None]:
+def ask(conn, read, write) -> dict:
     while True:
         answers = {
             "boundaries": _choose(read, write, "boundaries [o]k / should [s]plit / should [m]erge > ", BOUNDARIES),
@@ -149,10 +149,9 @@ def ask(conn, read, write) -> tuple[dict, str | None]:
             "project": _project(conn, read, write),
             "keep_score": _choose(read, write, "keep 1-5 > ", {str(i): i for i in range(1, 6)}),
         }
-        note = read("note (enter for none) > ").strip() or None
-        write("  " + json.dumps(answers) + (f"  note: {note}" if note else ""))
+        write("  " + json.dumps(answers))
         if _choose(read, write, "save? [y]es / [r]edo > ", {"y": True, "": True, "r": False}):
-            return answers, note
+            return answers
 
 
 def status(conn) -> str:
@@ -196,8 +195,7 @@ def _loop(conn, read, write, items, source: str, empty: str) -> int:
             return saved
         if cmd == "skip":
             continue
-        answers, note = ask(conn, read, write)
-        save(conn, eid, answers, note, source)
+        save(conn, eid, ask(conn, read, write), None, source)
         saved += 1
     write(empty)
     return saved

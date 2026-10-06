@@ -139,10 +139,13 @@ def test_reviewing_items(pipe, cfg, stream):
 
     run(pipe, cfg, stream)
     extract.run_stage(pipe, FakeClaude(coffee_item))
-    read, write, out = script("d", "", "q")
+    read, write, out = script("d", "a song lyric, not an idea", "q")
     assert cli._review_items(pipe, extract, read, write) == 1
-    assert table(pipe, "SELECT verdict, quote FROM im.item_verdicts") == [("discard", "coffee order")]
+    assert table(pipe, "SELECT verdict, quote, note FROM im.item_verdicts") == \
+        [("discard", "coffee order", "a song lyric, not an idea")]
     assert extract.review_items(pipe) == []
+    (d,) = extract.discards(pipe)
+    assert d[2] == "coffee order" and d[6] == "a song lyric, not an idea"
 
 
 @pytest.mark.parametrize("state, items, expect", [

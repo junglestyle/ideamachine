@@ -17,6 +17,7 @@ uv run im migrate                 # im schema
 uv run im load-fixtures           # a synthetic Hearsay stream in $IM_STREAM_DIR (dev/stream)
 uv run im run                     # import + segment + extract ideas with Claude + route; idempotent
 uv run im ideas                   # what Claude captured; --review to keep or discard each item
+uv run im ideas --discards        # what I discarded and why: material for revising the extraction prompt
 uv run im load-fixtures --scenario edited   # the same stream after every kind of correction and a forget
 uv run im run
 uv run im check                   # invariant queries

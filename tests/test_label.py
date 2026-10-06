@@ -32,15 +32,15 @@ def test_a_scripted_session_saves_labels(pipe, cfg, stream):
     projects.add(pipe, "garden", "Garden sensors", ["lora"])
     read, write, out = script(
         "",                              # label the first episode
-        "o", "maybe", "y", "i", "+backups", "Backup verification", "4", "worth a task", "y",
+        "o", "maybe", "y", "i", "+backups", "Backup verification", "4", "y",
         "s",                             # skip the second
-        "", "m", "n", "c", "0", "1", "", "r",   # redo...
-        "s", "n", "n", "1", "2", "", "y",       # ...then save
+        "", "m", "n", "c", "0", "1", "r",       # redo...
+        "s", "n", "n", "1", "2", "y",           # ...then save
         "q")
     assert label.session(pipe, read, write) == 2
     rows = table(pipe, "SELECT answers, note FROM im.labels ORDER BY label_id")
     assert rows[0] == ({"boundaries": "ok", "is_self_thinking": True, "kind": "idea", "project": "backups",
-                        "keep_score": 4}, "worth a task")
+                        "keep_score": 4}, None)
     assert rows[1] == ({"boundaries": "split", "is_self_thinking": False, "kind": "noise", "project": "backups",
                         "keep_score": 2}, None)
     assert any("one of: y, n" in line for line in out)  # "maybe" was re-asked
@@ -129,7 +129,7 @@ def test_relabeling_replaces_an_episodes_label_and_review_finds_them(pipe, cfg, 
     label_text(pipe, COFFEE, kind="idea")
     label_text(pipe, HOSTING, kind="chatter")
     assert len(label.review_queue(pipe, "kind", "idea")) == 2
-    read, write, out = script("", "o", "n", "c", "0", "1", "", "y",   # BACKUP's episode or COFFEE's: chatter now
+    read, write, out = script("", "o", "n", "c", "0", "1", "y",   # BACKUP's episode or COFFEE's: chatter now
                               "q")
     assert label.session(pipe, read, write, review=("kind", "idea")) == 1
     assert len(label.review_queue(pipe, "kind", "idea")) == 1

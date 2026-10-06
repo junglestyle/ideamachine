@@ -103,6 +103,15 @@ def cmd_ideas(args) -> None:
             n = _review_items(conn, extract)
             print(f"\ndecided {n}; {len(extract.review_items(conn))} still undecided")
             return
+        if args.discards:
+            rows = extract.discards(conn)
+            for kind, who, quote, gist, conf, at, note, model, pv in rows:
+                print(f"{at.astimezone():%Y-%m-%d %H:%M}  {kind:<11} {who:<16} {conf:.2f}  {model} prompt {pv}")
+                print(f"    \u201c{quote}\u201d")
+                print(f"    {gist}")
+                print(f"    why discarded: {note or '(no note)'}\n")
+            print(f"{len(rows)} discarded")
+            return
         rows = conn.execute(
             """SELECT i.kind, i.said_by, i.quote, i.gist, i.confidence, e.started_at,
                       (SELECT v.verdict FROM im.item_verdicts v WHERE v.item_id = i.item_id
@@ -138,7 +147,8 @@ def _review_items(conn, extract, read=input, write=print) -> int:
             break
         if got == "skip":
             continue
-        note = read("note (enter for none) > ").strip() or None
+        # Only a discard asks why: that's what tuning the extraction prompt needs (im ideas --discards).
+        note = (read("why? (optional; helps tune the prompt) > ").strip() or None) if got == "discard" else None
         extract.decide(conn, item_id, got, note)
         n += 1
     return n
@@ -276,6 +286,8 @@ def main(argv=None) -> None:
     ia = sub.add_parser("ideas", help="what Claude captured; --review to keep or discard each item")
     ia.add_argument("--review", action="store_true", help="keep or discard each undecided item, most confident first")
     ia.add_argument("--all", action="store_true", help="also list discarded items")
+    ia.add_argument("--discards", action="store_true",
+                    help="discarded items with why: material for revising the extraction prompt")
     ia.set_defaults(func=cmd_ideas)
     fg = sub.add_parser("forgotten", help="forgotten segments that had already been sent to Claude")
     fg.add_argument("--sent", action="store_true", required=True)
