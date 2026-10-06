@@ -13,7 +13,7 @@ Idea Machine reads the speaker-attributed utterances that Hearsay publishes in i
 - **Agent automation.** The proposals table and approved agent work are out of early scope (see Phase 5).
 - **Event infrastructure.** No Kafka, NATS or queues. One consumer polls one directory.
 - **A memory framework as the core.** No Mem0, Cognee or similar. Plain tables plus pgvector.
-- **A UI** before the CLI has proven what's worth looking at.
+- **A UI inside Idea Machine.** Presentation is a separate app, Lattice (§3.5), reading a published contract.
 - **Multi-user or hosted deployment.** One user, one TrueNAS box.
 
 ## 2. Principles applied
@@ -90,6 +90,17 @@ A forgotten segment is deleted from everything Idea Machine holds:
 
 Until Hearsay slice 12 the list stays empty, so Idea Machine builds and tests the purge against fixtures. Forgetting can't recall anything already sent to Claude. To at least report it, `egress_log` (Phase 4) records the `segment_id`s in every payload, and `im forgotten --sent` lists forgotten segments that went out, and when.
 
+### 3.5 Idea Machine → Lattice (the `pub` schema)
+
+**Lattice** is a separate app (its own repo) for the presentation layer: the map, digests, and voice and MCP access. Idea Machine owns the truth; Lattice is a read-mostly view of it. It's the same pattern as Hearsay → Idea Machine.
+
+- **Reads.** Idea Machine publishes views in schema `pub` (e.g. `pub.ideas`, `pub.evidence`, `pub.connections`, later `pub.themes`). Lattice connects as role `lattice_app`, which can read those views and nothing in `im.*`.
+- **Writes.** Lattice's only write is appending rows to `pub.feedback_events`: star, keep, discard, link or unlink two ideas, pin or rename a theme, each timestamped. Idea Machine reads the events and folds them into its weighting, themes and prompts.
+- **"Append-only" applies to Lattice, not to the table.** `lattice_app` can only insert. Idea Machine owns the table and deletes events when forgetting requires it: when a segment is purged, the events on ideas that existed only because of it go too. Otherwise forgotten speech would leak through the star history.
+- **No formal versioning yet.** One person, one consumer. The views and the role are the boundary; versioning comes with the first breaking change.
+- The schema is named `pub` so that "Lattice" always means the app.
+- If other sources of ideas appear (reading notes, a journal), `pub` and its event table can lift out into a service of their own, with Idea Machine as one producer.
+
 ## 4. Phases
 
 ### Phase 1 — Ingest, segment, triage, end to end
@@ -132,26 +143,43 @@ Until Hearsay slice 12 the list stays empty, so Idea Machine builds and tests th
 
 **Deferred:** entity extraction, related-episode search, Claude, any UI, audio playback, active-learning tooling beyond `im review`.
 
-### Phase 2 — Connections
+### Phase 2 — The idea lattice
 
-_Moved ahead of extraction: relating episodes is the core value, it's cheap, and it doesn't need extracted entities._
+_Replaces the earlier "connections between episodes" plan. Extraction (decision 0004) showed the value is in ideas, not episodes: 70 of 120 captured items were worth keeping from recordings I'd labeled 93% chatter._
 
-**Goal:** for any episode, show related episodes from any point in time.
+**Goal:** Idea Machine drinks from the fire hose, keeps a durable lattice of ideas that grows over time, and feeds it back to me. I navigate it graphically or in conversation, and my flags steer what it captures and how it categorizes.
 
-**Deliverables**
-- Store episode embeddings in pgvector, versioned by embedding model. Add an HNSW index.
-- `im related <episode>`: the top-k neighbors with similarity, dates and a snippet.
-- `links` table holding nearest-neighbor edges above a threshold, with `method` and `version`. The threshold is chosen from labels.
-- Add a "related or not" judgment to `im label` for neighbor pairs, to build a small pair-eval set (~50 pairs).
+**Model:**
+- **Ideas** are canonical and durable, and they carry my feedback.
+- **Items** (Claude's captures) are evidence attached to ideas: quote, who said it, when, and the segments it came from.
+- **Connections** link ideas: same as, evolves, related, and links I make.
+- **Themes** are categories proposed by clustering and steered by me.
 
-**Exit criteria**
-- [ ] On the pair-eval set, precision@5 ≥ 70% for episodes with `kind ∈ {idea, decision}`.
-- [ ] `im related` returns in < 1 s at my current corpus size.
-- [ ] Swapping the embedding model is a version bump plus `im reset --stage embed`, and old links are replaced without leftovers.
+**Slices, in order** (each usable on its own):
+1. **Lattice core (Idea Machine).**
+   - Seed it from my ChatGPT archive (36 ideas, 5 clusters).
+   - Embed items and ideas locally into pgvector.
+   - For each new item, Claude judges `new` / `same_as:<idea>` / `evolves:<idea>` against its nearest ideas. This was Phase 4's "object identity"; it only links, never merges destructively.
+   - Related-idea edges come from the embeddings.
+   - Publish `pub` with the `lattice_app` role (§3.5).
+   - *Done when:* the same idea said in two conversations is one idea with two pieces of evidence, and the archive's ideas sit in the same lattice as the captures.
+2. **Thin Lattice view (new repo `lattice`).** An ugly, read-only page of nodes and edges straight from `pub`, on eeyore and tailnet-only. It proves the contract and shows whether the lattice is worth investing in before any weighting work.
+3. **Feedback that updates the weighting.**
+   - A ★ *interesting* verdict above keep and discard, in `im ideas --review` and as a Lattice feedback event.
+   - A small personal model (item embedding, kind, speaker → keep) orders review.
+   - A rotating set of my kept and discarded examples goes into the extraction prompt.
+   - The prompt revision from my discard reasons (a capture must make sense without the conversation around it; my interests as context).
+   - *Done when:* a held-out eval shows the ranking puts my keeps first, and the keep rate of new captures rises above the first prompt's 58%.
+4. **Themes.** Periodic clustering of ideas, named by Claude. I can pin, rename, merge or split themes from Lattice (feedback events). Pinned themes become stable categories that new ideas are filed into.
+5. **The map (Lattice).** A 2D semantic map colored by theme and sized by weight, with edges. Clicking an idea shows its evidence. I can star, keep, discard and link in place, and "new since my last visit" is highlighted.
+6. **Periodic synthesis.** A weekly Claude pass over new ideas and the lattice: recurring themes, convergences, ideas that matter more than they seemed, emerging projects. Idea Machine writes the digest, Lattice shows it, and it may also go to my phone.
+7. **Talk to it.** An MCP server in Lattice over `pub` (search, open a theme, what's new, link, star), so a Claude app can walk the lattice with me, by voice too. Flags made there are feedback events.
 
-**Deferred:** clustering/topics, graph visualization, entity-based linking.
+**Deferred:** temporal fact tracking (Phase 5), sources other than Hearsay.
 
 ### Phase 3 — Entity and span extraction
+
+_Still wanted, now for a second reason: under privacy policy B (decision 0004), names spoken in conversations go to Claude unscrubbed. Entity extraction is what would let a stricter policy scrub them._
 
 **Goal:** know who, what project and when each episode involves, and which spans carry the actual content.
 
@@ -169,6 +197,13 @@ _Moved ahead of extraction: relating episodes is the core value, it's cheap, and
 **Deferred:** coreference, relation extraction, temporal normalization beyond what GLiNER2 gives.
 
 ### Phase 4 — Synthesis (Claude) with the privacy boundary
+
+_Mostly overtaken (2026-10-06):_
+- _Extraction with Claude is built under privacy policy B (decision 0004), which replaces the local-gist boundary below._
+- _Object identity moved to Phase 2 slice 1._
+- _The batch job became the hourly `im run` (Batches API optional)._
+
+_What's left from here: the leak test and local gists, if a stricter policy is ever wanted, and `im cost`. The text below is the original plan._
 
 **Goal:** flagged episodes plus their neighbors become structured objects, without other people's words leaving the box.
 
@@ -201,7 +236,7 @@ _Moved ahead of extraction: relating episodes is the core value, it's cheap, and
 
 - **Proposals:** `proposals(status: pending/approved/rejected, payload, source_object_ids)` for agent work I approve. Nothing runs without an explicit approval row.
 - **Temporal facts:** Graphiti-style validity intervals on project and decision facts ("planned X from t1, switched to Y at t2"). Only adopt it if `evolves:` links from Phase 4 turn out to be insufficient.
-- A review UI, if the CLI becomes the bottleneck.
+- A review UI: superseded by Lattice (§3.5, Phase 2).
 
 ## 5. Open questions
 
