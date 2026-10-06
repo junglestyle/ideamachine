@@ -218,6 +218,16 @@ def review_items(conn) -> list[tuple]:
            ORDER BY i.confidence DESC, e.started_at DESC""").fetchall()
 
 
+def discards(conn) -> list[tuple]:
+    """Items I discarded (latest verdict), with my note and the prompt that captured them, newest first."""
+    return conn.execute(
+        """SELECT i.kind, i.said_by, i.quote, i.gist, i.confidence, v.decided_at, v.note, i.model, i.prompt_version
+           FROM im.items i JOIN LATERAL (
+             SELECT verdict, note, decided_at FROM im.item_verdicts WHERE item_id = i.item_id
+             ORDER BY decided_at DESC LIMIT 1) v ON v.verdict = 'discard'
+           ORDER BY v.decided_at DESC""").fetchall()
+
+
 def decide(conn, item_id, verdict: str, note: str | None = None) -> None:
     conn.execute(
         """INSERT INTO im.item_verdicts (item_id, segment_ids, quote, verdict, note)
