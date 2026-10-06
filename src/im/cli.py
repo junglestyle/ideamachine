@@ -75,6 +75,7 @@ def cmd_run(args) -> None:
             stats["extract"] = _extract(conn, cfg)
         if cfg.lattice.enabled:
             stats["lattice"] = _lattice(conn, cfg)
+            stats["themes"] = _themes(conn, cfg)
         from im import router
 
         stats["route"] = router.run_stage(conn)
@@ -111,6 +112,41 @@ def _lattice(conn, cfg) -> dict:
         return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
+
+
+def _themes(conn, cfg) -> dict:
+    """Apply my theme feedback, file unthemed ideas, propose themes for the leftovers."""
+    import anthropic
+
+    from im import themes
+
+    out = {"feedback": themes.apply_feedback(conn)}
+    try:
+        client = anthropic.Anthropic()
+        out["file"] = themes.file_stage(conn, client, cfg.extract.monthly_cap_usd)
+        out["propose"] = themes.propose_stage(conn, client, cfg.extract.monthly_cap_usd)
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
+        out["stopped"] = f"Claude credentials rejected: {e}"
+    except anthropic.AnthropicError as e:
+        out["stopped"] = f"Claude unavailable: {e}"
+    return out
+
+
+def cmd_themes(args) -> None:
+    from im import themes
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        if args.action != "list":
+            try:
+                theme_id = themes.find(conn, args.theme)
+            except ValueError as e:
+                raise SystemExit(str(e)) from None
+            kind = {"pin": "pin_theme", "unpin": "unpin_theme", "rename": "rename_theme", "reject": "reject_theme"}
+            if args.action == "rename" and not args.name:
+                raise SystemExit("rename needs the new name")
+            themes.record(conn, kind[args.action], theme_id, {"name": args.name} if args.action == "rename" else None)
+            print(themes.apply_feedback(conn))
+        print(themes.listing(conn))
 
 
 def cmd_seed(args) -> None:
@@ -321,6 +357,11 @@ def main(argv=None) -> None:
     sd.set_defaults(func=cmd_seed)
     sub.add_parser("lattice", help="counts: ideas, evidence, connections, unmatched items").set_defaults(
         func=cmd_lattice)
+    th = sub.add_parser("themes", help="list themes; pin, unpin, rename or reject one")
+    th.add_argument("action", nargs="?", default="list", choices=["list", "pin", "unpin", "rename", "reject"])
+    th.add_argument("theme", nargs="?", help="theme name (or its start), or id prefix")
+    th.add_argument("name", nargs="?", help="the new name, for rename")
+    th.set_defaults(func=cmd_themes)
     ia = sub.add_parser("ideas", help="what Claude captured; --review to keep or discard each item")
     ia.add_argument("--review", action="store_true", help="keep or discard each undecided item, most confident first")
     ia.add_argument("--all", action="store_true", help="also list discarded items")
