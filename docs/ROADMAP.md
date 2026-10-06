@@ -156,7 +156,7 @@ _Replaces the earlier "connections between episodes" plan. Extraction (decision 
 - **Themes** are categories proposed by clustering and steered by me.
 
 **Slices, in order** (each usable on its own):
-1. **Lattice core (Idea Machine).**
+1. **Lattice core (Idea Machine).** _Done 2026-10-06: 36 archive ideas seeded (5 pinned themes, 11 cross-references), 120 captures matched into 70 captured ideas (5 evolutions) for $0.44, and 26 related edges at cosine ≥ 0.70._
    - Seed it from my ChatGPT archive (36 ideas, 5 clusters).
    - Embed items and ideas locally into pgvector.
    - For each new item, Claude judges `new` / `same_as:<idea>` / `evolves:<idea>` against its nearest ideas. This was Phase 4's "object identity"; it only links, never merges destructively.
