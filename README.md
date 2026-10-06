@@ -20,6 +20,7 @@ uv run im ideas                   # what Claude captured; --review to keep or di
 uv run im ideas --discards        # what I discarded and why: material for revising the extraction prompt
 uv run im seed ~/.local/share/ideamachine/seeds/chatgpt-archive.md   # seed the idea lattice (once)
 uv run im lattice                 # lattice counts: ideas, evidence, connections
+uv run im themes                  # themes; im themes pin|unpin|reject <name>, im themes rename <name> <new name>
 uv run im load-fixtures --scenario edited   # the same stream after every kind of correction and a forget
 uv run im run
 uv run im check                   # invariant queries
