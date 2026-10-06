@@ -1,6 +1,7 @@
 """Idea extraction with Claude, against a fake client: what goes out, what comes back, and what's logged."""
 
 import json
+import time
 from types import SimpleNamespace
 
 import anthropic
@@ -173,3 +174,22 @@ def test_im_run_goes_on_without_claude(pipe, cfg, stream, monkeypatch, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["extract"]["stopped"].startswith("Claude")
     assert out["route"]["waiting_for_claude"] == 9
+
+
+def test_pending_reports_what_would_be_resent(pipe, cfg, stream, monkeypatch, capsys):
+    from im import cli
+
+    run(pipe, cfg, stream)
+    extract.run_stage(pipe, FakeClaude())
+    monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
+    cli.main(["pending", "--expect-none-resent"])
+    assert json.loads(capsys.readouterr().out)["already_extracted_would_resend"] == 0
+    monkeypatch.setenv("TZ", "Asia/Tokyo")  # a machine in another time zone renders different payloads
+    time.tzset()
+    try:
+        with pytest.raises(SystemExit):
+            cli.main(["pending", "--expect-none-resent"])
+        assert json.loads(capsys.readouterr().out)["already_extracted_would_resend"] == 9
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
