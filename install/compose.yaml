@@ -6,6 +6,9 @@ services:
   db:
     image: pgvector/pgvector:pg16
     container_name: ideamachine-db
+    # The apps user, like the other containers: the image's own postgres uid (999) is `netdata` on TrueNAS, which
+    # would let the monitoring agent read the database files. The image supports any uid that owns the data dir.
+    user: "568:568"
     env_file: /mnt/storage/ideamachine/config/db.env
     environment:
       POSTGRES_DB: im

@@ -33,7 +33,14 @@ chown "root:$APPS_GID" "$NAS_LOGS"; chmod 750 "$NAS_LOGS"
 # Backups hold everyone's words: root and the apps group only. setgid + group-writable so a member of the apps
 # group (the operator, over ssh) can drop the database from eeyore here.
 chown "root:$APPS_GID" "$NAS_BACKUPS"; chmod 2770 "$NAS_BACKUPS"
-# pg: the Postgres image chowns it to its own user on first start.
+# pg: Postgres runs as the apps user (install/compose.yaml). Data from before that change belongs to uid 999
+# (`netdata` on TrueNAS); hand it over once, with the database stopped.
+if [ "$(stat -c %u "$NAS_PG")" != "$APPS_UID" ]; then
+    "${COMPOSE[@]}" stop db >/dev/null 2>&1 || true
+    chown -R "$APPS_UID:$APPS_GID" "$NAS_PG"
+    echo "pg now belongs to the apps user"
+fi
+chmod 700 "$NAS_PG"
 
 say "Secrets in $NAS_CONFIG"
 env_ensure "$NAS_DB_ENV" POSTGRES_PASSWORD "$(openssl rand -hex 24)"
