@@ -157,7 +157,7 @@ def idea_text(title: str, statement: str) -> str:
 
 
 def _idea_matrix(conn, embedder) -> tuple[list, np.ndarray]:
-    rows = conn.execute("SELECT idea_id, title, statement FROM im.ideas").fetchall()
+    rows = conn.execute("SELECT idea_id, title, statement FROM im.idea_text").fetchall()   # my corrections win
     _embed_missing(conn, embedder, "idea_embeddings", "idea_id", [(r[0], idea_text(r[1], r[2])) for r in rows])
     got = conn.execute("SELECT idea_id, embedding::text FROM im.idea_embeddings WHERE model_version = %s",
                        (embedder.model_version,)).fetchall()
@@ -183,7 +183,8 @@ def _ask(client, item: tuple, candidates: list[tuple]) -> tuple[dict, str, objec
     _, _, kind, said_by, quote, gist, _, _ = item
     who = "me" if said_by == "me" else "someone else"   # no names leave the box
     lines = [f"Item ({kind}, said by {who}): “{quote}” — {gist}", "", "Candidates:"]
-    lines += [f"{n}. {title}: {statement}" for n, (_, title, statement) in enumerate(candidates, 1)]
+    lines += [f"{n}. {title}: {statement}" + (f" (my note: {note})" if note else "")
+              for n, (_, title, statement, note) in enumerate(candidates, 1)]
     text = "\n".join(lines)
     r = client.beta.messages.create(
         model=MATCH_MODEL, max_tokens=4000, system=MATCH_SYSTEM, messages=[{"role": "user", "content": text}],
@@ -222,7 +223,7 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
     vecs = {r[0]: np.array(json.loads(r[1])) for r in conn.execute(
         "SELECT item_id, embedding::text FROM im.item_embeddings WHERE item_id = ANY(%s)", ([i[0] for i in items],))}
     idea_ids, M = _idea_matrix(conn, embedder)
-    info = {r[0]: (r[1], r[2]) for r in conn.execute("SELECT idea_id, title, statement FROM im.ideas")}
+    info = {r[0]: (r[1], r[2], r[3]) for r in conn.execute("SELECT idea_id, title, statement, my_note FROM im.idea_text")}
 
     for item in items[:limit] if limit else items:
         item_id = item[0]
@@ -266,7 +267,7 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
                 if decision == "evolves":
                     conn.execute("""INSERT INTO im.idea_links (a, b, kind, method) VALUES (%s, %s, 'evolves', %s)
                                     ON CONFLICT DO NOTHING""", (idea, target, version))
-                info[idea] = (title, statement)
+                info[idea] = (title, statement, None)
                 vec = embedder.embed([idea_text(title, statement)])[0]
                 conn.execute("""INSERT INTO im.idea_embeddings (idea_id, model_version, embedding, input_hash)
                                 VALUES (%s, %s, %s::vector, %s)""",
