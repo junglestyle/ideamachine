@@ -62,6 +62,10 @@ def cmd_run(args) -> None:
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
         stats = pipeline.run(conn, cfg, db.stream_dir())
+        from im import feedback
+
+        # Before extraction and matching, so captures I discarded in Lattice stay out of the lattice.
+        stats["feedback"] = feedback.apply_item_feedback(conn)
         if cfg.triage.backends:
             run_backends, notes = _backends(conn, cfg, cfg.triage.backends)
             stats["triage"] = []
@@ -212,7 +216,7 @@ def cmd_ideas(args) -> None:
         for kind, who, quote, gist, conf, at, verdict in rows:
             if verdict == "discard" and not args.all:
                 continue
-            mark = {"keep": "kept", "discard": "discarded", None: "new"}[verdict]
+            mark = {"keep": "kept", "star": "\u2605", "discard": "discarded", None: "new"}[verdict]
             print(f"{at.astimezone():%Y-%m-%d %H:%M}  {kind:<11} {who:<16} {conf:.2f}  [{mark}]")
             print(f"    \u201c{quote}\u201d")
             print(f"    {gist}\n")
@@ -231,8 +235,8 @@ def _review_items(conn, extract, read=input, write=print) -> int:
         write(f"  {gist}")
         if themes:
             write(f"  themes: {', '.join(themes)}")
-        got = _choose(read, write, "[k]eep · [d]iscard · [s]kip · [q]uit > ",
-                      {"k": "keep", "d": "discard", "s": "skip", "q": "quit"})
+        got = _choose(read, write, "[k]eep · [*] star · [d]iscard · [s]kip · [q]uit > ",
+                      {"k": "keep", "*": "star", "d": "discard", "s": "skip", "q": "quit"})
         if got == "quit":
             break
         if got == "skip":

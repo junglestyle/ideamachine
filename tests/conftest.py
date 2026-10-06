@@ -63,3 +63,7 @@ def stream(tmp_path):
     s.dir = tmp_path / "stream"
     s.write(s.dir)
     return s
+
+
+# The lattice fixtures live in test_lattice; make them available to every test module.
+from test_lattice import seeded, seeded_lattice  # noqa: E402,F401  # pyflakes: fixtures, used by name

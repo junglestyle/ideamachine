@@ -85,6 +85,19 @@ def seeded(pipe, tmp_path):
     return pipe
 
 
+def lat_setup(conn, cfg, stream):
+    """Captures extracted and matched into the seeded lattice."""
+    run(conn, cfg, stream)
+    extract.run_stage(conn, FakeClaude(items_for))
+    lattice.match_stage(conn, FakeMatcher(), HashEmbedder())
+    return conn
+
+
+@pytest.fixture
+def seeded_lattice(seeded, cfg, stream):
+    return lat_setup(seeded, cfg, stream)
+
+
 def test_parse_and_seed(seeded, tmp_path):
     entries, clusters = lattice.parse_archive(ARCHIVE)
     assert [e["n"] for e in entries] == [1, 2, 3] and entries[1]["notes"].startswith("Theme: truth")

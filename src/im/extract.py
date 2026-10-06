@@ -215,6 +215,7 @@ def review_items(conn) -> list[tuple]:
                   e.started_at, e.episode_id
            FROM im.items i JOIN im.episodes e USING (episode_id)
            WHERE e.current AND NOT EXISTS (SELECT 1 FROM im.item_verdicts v WHERE v.item_id = i.item_id)
+             AND NOT EXISTS (SELECT 1 FROM pub.feedback_events f WHERE f.item_id = i.item_id)
            ORDER BY i.confidence DESC, e.started_at DESC""").fetchall()
 
 
