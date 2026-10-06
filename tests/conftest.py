@@ -28,16 +28,27 @@ def _dsns():
 
 
 @pytest.fixture
-def pipe():
+def dbs():
     admin_test, pipe_test, admin_dev = _dsns()
     with psycopg.connect(admin_dev, autocommit=True) as c:
         c.execute(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE)")
         c.execute(f"CREATE DATABASE {TEST_DB}")
     with db.connect(admin_test) as admin:
         admin.execute(BOOTSTRAP.read_text())
-    with db.connect(pipe_test) as conn:
-        migrate.apply(conn, migrate.IM)
-        yield conn
+        with db.connect(pipe_test) as conn:
+            migrate.apply(conn, migrate.IM)
+            yield conn, admin
+
+
+@pytest.fixture
+def pipe(dbs):
+    return dbs[0]
+
+
+@pytest.fixture
+def admin(dbs):
+    """A superuser connection to the test database (e.g. to SET ROLE lattice_app)."""
+    return dbs[1]
 
 
 @pytest.fixture

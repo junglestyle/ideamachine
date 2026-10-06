@@ -35,6 +35,12 @@ def _purge_tombstoned(conn) -> tuple[set[str], int]:
     labels = conn.execute(
         """DELETE FROM im.labels l WHERE EXISTS (
              SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(l.segment_ids))""").rowcount
+    # An idea created from forgotten speech goes, with its feedback events (they cascade). Ideas that merely had
+    # forgotten evidence keep their other evidence; that evidence row goes with its item.
+    conn.execute("""DELETE FROM im.ideas d WHERE d.origin = 'captured' AND EXISTS (
+                      SELECT 1 FROM im.idea_evidence ev JOIN im.items i USING (item_id)
+                      JOIN im.source_tombstones t ON t.segment_id = ANY(i.source_segment_ids)
+                      WHERE ev.idea_id = d.idea_id AND ev.relation = 'origin')""")
     conn.execute("""DELETE FROM im.item_verdicts v WHERE EXISTS (
                       SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(v.segment_ids))""")
     # What was sent can't be recalled, but the local copy of the text goes; the segment IDs stay so

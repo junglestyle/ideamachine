@@ -5,6 +5,7 @@ services:
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
       IM_PIPELINE_PASSWORD: ${IM_PIPELINE_PASSWORD:?set in .env}
+      LATTICE_APP_PASSWORD: ${LATTICE_APP_PASSWORD:-}
       POSTGRES_DB: im_dev
     ports:
       - "127.0.0.1:55432:5432"

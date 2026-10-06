@@ -73,6 +73,8 @@ def cmd_run(args) -> None:
             stats["triage_notes"] = notes
         if cfg.extract.enabled:
             stats["extract"] = _extract(conn, cfg)
+        if cfg.lattice.enabled:
+            stats["lattice"] = _lattice(conn, cfg)
         from im import router
 
         stats["route"] = router.run_stage(conn)
@@ -93,6 +95,36 @@ def _extract(conn, cfg) -> dict:
         return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:  # e.g. no credentials configured at all
         return {"stopped": f"Claude unavailable: {e}"}
+
+
+def _lattice(conn, cfg) -> dict:
+    """Match new captures into the lattice, or say why it couldn't run; the run goes on either way."""
+    import anthropic
+
+    from im import lattice
+    from im.backends import SentenceEmbedder
+
+    try:
+        return lattice.match_stage(conn, anthropic.Anthropic(), SentenceEmbedder(cfg.lattice.embedding_model),
+                                   cfg.extract.monthly_cap_usd, cfg.lattice.max_items_per_run)
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
+        return {"stopped": f"Claude credentials rejected: {e}"}
+    except anthropic.AnthropicError as e:
+        return {"stopped": f"Claude unavailable: {e}"}
+
+
+def cmd_seed(args) -> None:
+    from im import lattice
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        _print(lattice.seed_archive(conn, Path(args.path), args.name))
+
+
+def cmd_lattice(args) -> None:
+    from im import lattice
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        _print(lattice.status(conn))
 
 
 def cmd_ideas(args) -> None:
@@ -283,6 +315,12 @@ def main(argv=None) -> None:
     lb.add_argument("--review", metavar="QUESTION=ANSWER",
                     help="re-label episodes whose latest label has this answer, e.g. kind=idea or project=none")
     lb.set_defaults(func=cmd_label)
+    sd = sub.add_parser("seed", help="import an idea archive into the lattice (its clusters become pinned themes)")
+    sd.add_argument("path", help="the archive, e.g. ~/.local/share/ideamachine/seeds/chatgpt-archive.md")
+    sd.add_argument("--name", default="chatgpt", help="prefix for its references, e.g. chatgpt#17")
+    sd.set_defaults(func=cmd_seed)
+    sub.add_parser("lattice", help="counts: ideas, evidence, connections, unmatched items").set_defaults(
+        func=cmd_lattice)
     ia = sub.add_parser("ideas", help="what Claude captured; --review to keep or discard each item")
     ia.add_argument("--review", action="store_true", help="keep or discard each undecided item, most confident first")
     ia.add_argument("--all", action="store_true", help="also list discarded items")

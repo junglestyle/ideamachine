@@ -1,5 +1,10 @@
 -- Per-database setup an admin does once (on the NAS too, by hand, when agreed).
--- The pipeline role owns schema im and gets nothing on hearsay beyond the
--- SELECT grants the hearsay schema hands out.
+-- The pipeline role owns schemas im (its own) and pub (what Lattice reads: ROADMAP §3.5).
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE SCHEMA IF NOT EXISTS im AUTHORIZATION im_pipeline;
+CREATE SCHEMA IF NOT EXISTS pub AUTHORIZATION im_pipeline;
+-- Lattice's role: reads pub's views, appends feedback events. Created without a login; dev/init/10-roles.sh
+-- (or an admin, by hand) gives it a password.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'lattice_app') THEN CREATE ROLE lattice_app NOLOGIN; END IF;
+END $$;

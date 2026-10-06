@@ -49,10 +49,18 @@ class ExtractConfig:
 
 
 @dataclass(frozen=True)
+class LatticeConfig:
+    enabled: bool = True
+    embedding_model: str = "BAAI/bge-small-en-v1.5"   # local, CPU
+    max_items_per_run: int | None = None
+
+
+@dataclass(frozen=True)
 class Config:
     segment: SegmentConfig = SegmentConfig()
     triage: TriageConfig = TriageConfig()
     extract: ExtractConfig = ExtractConfig()
+    lattice: LatticeConfig = LatticeConfig()
 
 
 def load() -> Config:
@@ -65,4 +73,4 @@ def load() -> Config:
     if "backends" in triage:
         triage["backends"] = tuple(triage["backends"])
     return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
-                  extract=ExtractConfig(**data.get("extract", {})))
+                  extract=ExtractConfig(**data.get("extract", {})), lattice=LatticeConfig(**data.get("lattice", {})))
