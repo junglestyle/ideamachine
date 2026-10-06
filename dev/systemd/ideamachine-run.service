@@ -1,0 +1,14 @@
+# One Idea Machine run: copy Hearsay's stream from the NAS, then import, segment, extract and route.
+# Started hourly by ideamachine-run.timer. Logs: journalctl --user -u ideamachine-run
+[Unit]
+Description=Idea Machine: pull the stream and run
+Wants=ideamachine-db.service
+After=ideamachine-db.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/data/code/ideamachine
+EnvironmentFile=%h/data/code/ideamachine/.env
+ExecStart=/bin/bash -c './dev/pull-stream.sh && %h/.local/bin/uv run im run'
+# Never overlap the next hour's run.
+TimeoutStartSec=50min

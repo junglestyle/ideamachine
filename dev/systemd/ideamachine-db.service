@@ -1,0 +1,16 @@
+# Keeps Idea Machine's Postgres container (compose.yaml) running, so its port forward on
+# 127.0.0.1:55432 lives in this service and survives the shells that start things.
+# Install: dev/systemd/install.sh
+[Unit]
+Description=Idea Machine Postgres (podman container ideamachine_db_1)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/podman start --attach ideamachine_db_1
+ExecStop=/usr/bin/podman stop --time 20 ideamachine_db_1
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
