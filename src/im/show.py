@@ -17,10 +17,16 @@ def find_episode(conn, prefix: str):
 def show(conn, prefix: str) -> str:
     (eid, conversation, start, end, kind, n, nspk, nself, current, retired,
      schema_v, stage_v, ihash) = find_episode(conn, prefix)
+    places = conn.execute(
+        """SELECT string_agg(p.name, ' → ' ORDER BY p.start)
+           FROM im.source_conversations c,
+                jsonb_to_recordset(c.places) AS p(name text, start timestamptz, "end" timestamptz)
+           WHERE c.conversation_id = %s AND p.start < %s AND p."end" > %s""", (conversation, end, start)).fetchone()[0]
     out = [
         f"episode       {eid}" + ("" if current else f"  [retired {retired:%Y-%m-%d %H:%M}]"),
         f"conversation  {conversation} (audio is in Hearsay under this id)",
         f"time          {start:%Y-%m-%d %H:%M:%S} → {end:%H:%M:%S} UTC ({(end - start).total_seconds():.0f} s)",
+        *([f"place         {places}"] if places else []),
         f"kind          {kind}: {n} segments, {nspk} speakers, {nself} mine",
         f"versions      schema {schema_v}, {stage_v}",
         f"input         {ihash[:16]}…",

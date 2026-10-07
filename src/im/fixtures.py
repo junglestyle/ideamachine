@@ -5,7 +5,8 @@ turns as transcribed. Turns filed as _noise (speaker None) count toward
 utterance numbering and transcript_revision but are left out of the stream,
 as in Hearsay. FixtureStream's methods apply the corrections Hearsay makes
 after the fact: naming a speaker, re-transcribing, filing a turn as noise,
-splitting or merging conversations, and forgetting.
+splitting or merging conversations, naming a place, rescoring affect, and
+forgetting.
 
 Writes only to directories it created (marked with MARKER), so it can never
 overwrite a real stream.
@@ -52,7 +53,8 @@ class Turn:
     text: str
     speaker: Speaker | None      # None: filed as _noise, so not in the stream
     diar: str = "SPEAKER_00"
-    conf: float = 0.9
+    conf: float = 0.93           # Parakeet's least likely token probability per word, averaged
+    arousal: float | None = None  # owner turns only, and only those Hearsay scored
 
 
 @dataclass
@@ -60,14 +62,15 @@ class Conversation:
     turns: list[Turn]
     open: bool = False
     taps: list[str] = field(default_factory=list)
+    places: list[dict] = field(default_factory=list)
 
 
 def iso(seconds: float) -> str:
     return (T0 + timedelta(seconds=seconds)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _me(s, e, text):
-    return Turn(s, e, text, ME, "SPEAKER_00")
+def _me(s, e, text, arousal=None):
+    return Turn(s, e, text, ME, "SPEAKER_00", arousal=arousal)
 
 
 def _alice(s, e, text):
@@ -85,18 +88,18 @@ def base_conversations() -> dict[str, Conversation]:
             _me(0, 6, "Did you see the build broke again?"),
             _alice(7, 12, "Yeah, the cache key changed."),
             Turn(13, 16, "Who's got the coffee order?", anon("anon A"), "SPEAKER_02"),
-            _me(17, 25, "We should pin the cache key to the lockfile hash."),
+            _me(17, 25, "We should pin the cache key to the lockfile hash.", arousal=0.61),
             _alice(26, 30, "I can do that after lunch."),
             _me(31, 34, "Great, thanks."),
             _alice(124, 129, "Back to the release plan?"),
             _me(130, 139, "Let's cut the release Thursday and skip the beta."),
             _alice(140, 144, "Fine by me."),
             _me(145, 147, "Decided then."),
-        ]),
+        ], places=[{"name": "Office", "start": iso(0), "end": iso(147)}]),
         # A monologue, an 8 s pause, a conversation with Bob (and a noise turn), 2 minutes of silence,
         # another monologue.
         "c-mono": Conversation([
-            _me(3600, 3612, "Idea: the garden sensors could report soil moisture over LoRa."),
+            _me(3600, 3612, "Idea: the garden sensors could report soil moisture over LoRa.", arousal=0.72),
             _me(3613, 3628, "Battery life is the hard part, maybe a solar trickle charger."),
             _me(3629, 3639, "Check what the cheap ESP32 boards draw in deep sleep."),
             _me(3640, 3648, "Write that down for the weekend."),
@@ -148,6 +151,15 @@ class FixtureStream:
         conv = self.conversations[cid]
         conv.turns = [replace(t, speaker=person(name)) if t.speaker and t.speaker.label == label else t
                       for t in conv.turns]
+
+    def name_place(self, cid: str, name: str, start: float, end: float) -> None:
+        """The operator names where a conversation happened. Only the index changes."""
+        self.conversations[cid].places.append({"name": name, "start": iso(start), "end": iso(end)})
+
+    def score_affect(self, cid: str, idx: int, arousal: float | None) -> None:
+        """Hearsay (re)scores how animated I sounded. The speech doesn't change."""
+        turns = self.conversations[cid].turns
+        turns[idx] = replace(turns[idx], arousal=arousal)
 
     def split_turn(self, cid: str, idx: int, at: float, first: Turn, second: Turn) -> None:
         """Re-transcription splits one turn in two; later utterance_ids shift by one."""
@@ -202,7 +214,7 @@ class FixtureStream:
                 "text": t.text,
                 "text_confidence": t.conf,
                 "speaker_confidence": {"basis": t.speaker.basis, "owner_similarity": t.speaker.similarity},
-            })
+            } | ({"affect": {"arousal": t.arousal}} if t.arousal is not None and t.speaker.kind == "owner" else {}))
         return out
 
     def transcript_revision(self, cid: str) -> str:
@@ -222,7 +234,7 @@ class FixtureStream:
             _write_if_changed(stream_dir / name, data)
             index.append({"conversation_id": cid, "start": iso(conv.turns[0].start),
                           "end": iso(conv.turns[-1].end), "open": conv.open, "transcribed": True,
-                          "taps": conv.taps, "utterances": len(utts),
+                          "taps": conv.taps, "places": conv.places, "utterances": len(utts),
                           "revision": hashlib.sha256(data).hexdigest()[:16],
                           "transcript_revision": self.transcript_revision(cid), "file": name})
         _write_if_changed(stream_dir / "forgotten.json", json.dumps(self.forgotten, indent=2).encode())
