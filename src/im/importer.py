@@ -14,9 +14,11 @@ from datetime import datetime
 from pathlib import Path
 
 FORMAT_VERSIONS = {1}
-STAGE_VERSION = "import/stream-v1"
+STAGE_VERSION = "import/stream-v2"  # v2: affect isn't part of a segment's identity
 SCHEMA_VERSION = 2
 SEGMENT_NS = uuid.UUID("0b8f4f5e-6a43-4d1f-9a3c-2f7e9d1c5b60")
+# Annotations Hearsay can rescore without the speech changing: kept on the segment, not part of its identity.
+NOT_IDENTITY = {"utterance_id", "affect"}
 
 
 class StreamError(Exception):
@@ -38,6 +40,7 @@ class Utterance:
     is_self: bool | None
     speaker_conf: float | None
     asr_confidence: float | None
+    arousal: float | None
     input_hash: str
 
 
@@ -49,9 +52,10 @@ def parse_utterance(line: str, conversation_id: str) -> Utterance:
     rec = json.loads(line)
     if rec["conversation_id"] != conversation_id:
         raise StreamError(f"{rec['utterance_id']} is in the file for {conversation_id}")
-    content = {k: v for k, v in rec.items() if k != "utterance_id"}
+    content = {k: v for k, v in rec.items() if k not in NOT_IDENTITY}
     digest = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     speaker, conf = rec["speaker"], rec["speaker_confidence"]
+    arousal = (rec.get("affect") or {}).get("arousal")
     kind = speaker["kind"]
     if kind not in ("owner", "person", "anonymous", "stranger", "unknown"):
         raise StreamError(f"{rec['utterance_id']}: unknown speaker kind {kind!r}")
@@ -70,6 +74,7 @@ def parse_utterance(line: str, conversation_id: str) -> Utterance:
         is_self=True if kind == "owner" else None if kind == "unknown" else False,
         speaker_conf=conf["owner_similarity"],
         asr_confidence=rec["text_confidence"],
+        arousal=None if arousal is None else float(arousal),
         input_hash=digest,
     )
 
@@ -124,12 +129,12 @@ def _insert_segments(conn, utts: list[Utterance]) -> None:
         cur.executemany(
             """INSERT INTO im.source_segments (segment_id, conversation_id, started_at, ended_at, text,
                  speaker_kind, speaker_name, speaker_label, speaker_basis, is_self, speaker_conf,
-                 asr_confidence, schema_version, stage_version, input_hash)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 asr_confidence, arousal, schema_version, stage_version, input_hash)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                ON CONFLICT (segment_id) DO NOTHING""",
             [(u.segment_id, u.conversation_id, u.started_at, u.ended_at, u.text, u.speaker_kind,
               u.speaker_name, u.speaker_label, u.speaker_basis, u.is_self, u.speaker_conf,
-              u.asr_confidence, SCHEMA_VERSION, STAGE_VERSION, u.input_hash) for u in utts])
+              u.asr_confidence, u.arousal, SCHEMA_VERSION, STAGE_VERSION, u.input_hash) for u in utts])
 
 
 def _link(conn, pairs: list[tuple], method: str) -> None:
@@ -174,6 +179,10 @@ def _replace_conversation(conn, cid: str, entry: dict | None, utts: list[Utteran
             """UPDATE im.source_members SET utterance_id = %s
                WHERE conversation_id = %s AND segment_id = %s AND utterance_id <> %s""",
             [(u.utterance_id, cid, sid, u.utterance_id) for sid, u in by_id.items() if sid in old])
+        # Affect can be (re)scored without the speech changing, so it follows the latest import.
+        cur.executemany(
+            "UPDATE im.source_segments SET arousal = %s WHERE segment_id = %s AND arousal IS DISTINCT FROM %s",
+            [(u.arousal, sid, u.arousal) for sid, u in by_id.items()])
 
     if entry is None:
         conn.execute("DELETE FROM im.source_conversations WHERE conversation_id = %s", (cid,))
@@ -185,6 +194,19 @@ def _replace_conversation(conn, cid: str, entry: dict | None, utts: list[Utteran
                  transcript_revision = excluded.transcript_revision, imported_at = now()""",
             (cid, entry["revision"], entry["transcript_revision"]))
     return arrived, unmatched
+
+
+def _places(entry: dict) -> str:
+    """The index entry's places as JSON, checked: [{"name", "start", "end"}] in order."""
+    places = entry.get("places", [])
+    for p in places:
+        try:
+            ok = isinstance(p["name"], str) and _time(p["start"]) <= _time(p["end"])
+        except (KeyError, ValueError, TypeError, AttributeError):
+            ok = False
+        if not ok:
+            raise StreamError(f"{entry['conversation_id']}: bad place {p!r}")
+    return json.dumps(places, ensure_ascii=False)
 
 
 def _apply_forgotten(conn, entries: list[dict]) -> set[str]:
@@ -245,11 +267,13 @@ def import_stream(conn, stream_dir: Path) -> tuple[set[str], dict]:
     _link(conn, [(old, u.segment_id) for old, start, end in unmatched_all for u in arrived_all
                  if u.started_at < end and start < u.ended_at], "time_overlap")
 
-    # Taps live in the index, not the conversation file, so they can change without a new revision.
+    # Taps and places live in the index, not the conversation file, so they can change without a new revision.
     for cid, entry in entries.items():
-        conn.execute("""UPDATE im.source_conversations SET taps = %s::timestamptz[]
-                        WHERE conversation_id = %s AND taps IS DISTINCT FROM %s::timestamptz[]""",
-                     ([_time(t) for t in entry.get("taps", [])], cid, [_time(t) for t in entry.get("taps", [])]))
+        taps, places = [_time(t) for t in entry.get("taps", [])], _places(entry)
+        conn.execute("""UPDATE im.source_conversations SET taps = %s::timestamptz[], places = %s::jsonb
+                        WHERE conversation_id = %s
+                          AND (taps, places) IS DISTINCT FROM (%s::timestamptz[], %s::jsonb)""",
+                     (taps, places, cid, taps, places))
 
     changed |= _apply_forgotten(conn, forgotten)
     return changed, {"conversations_changed": len(changed), "segments_new": len(arrived_all),

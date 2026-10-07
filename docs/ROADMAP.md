@@ -38,8 +38,12 @@ The source is Hearsay's **utterance stream** (Hearsay slice 8, `hearsay/stream.p
 
 The authoritative description is the output contract in Hearsay's AGENTS.md. In summary:
 
-- `index.json`: `{"format_version": 1, "conversations": [...]}`. Each entry has `conversation_id`, `start`, `end`, `open`, `transcribed`, `taps`, `utterances`, `revision`, `transcript_revision` and `file`.
-- `conversations/<conversation_id>.jsonl`: one utterance per line, with `conversation_id`, `utterance_id` (`<conversation_id>:<idx>`), `start` and `end` (UTC), `speaker {kind: owner|person|anonymous|stranger|unknown, name, label}`, `text`, `text_confidence` and `speaker_confidence {basis, owner_similarity}`.
+- `index.json`: `{"format_version": 1, "conversations": [...]}`. Each entry has `conversation_id`, `start`, `end`, `open`, `transcribed`, `taps`, `places`, `utterances`, `revision`, `transcript_revision` and `file`.
+  - `places`: the places I named that the conversation happened at, in order, `[{name, start, end}]`. Empty when nowhere is named, never coordinates. Naming is retroactive, so places can appear or change later, as a new index revision.
+- `conversations/<conversation_id>.jsonl`: one utterance per line, with `conversation_id`, `utterance_id` (`<conversation_id>:<idx>`), `start` and `end` (UTC), `speaker {kind: owner|person|anonymous|stranger|unknown, name, label}`, `text`, `text_confidence`, `speaker_confidence {basis, owner_similarity}`, and on some owner turns `affect {arousal}`.
+  - `text` comes from Parakeet TDT 0.6B v3 (since 2026-10-06; it was Whisper large-v3). It's verbatim, fillers included, and speech is written in the language it was spoken in, so Spanish stays Spanish.
+  - `text_confidence` is each word's least likely token probability, averaged: about 0.93 on average. Before the switch it was WhisperX alignment scores (0.4–0.9), which survive only on superseded segments. Nothing in Idea Machine thresholds on it.
+  - `affect.arousal`: how calm (low) or animated (high) I sounded, about 0–1, from the audio alone. It's tone of voice, not sentiment. It's absent where the turn wasn't scored: short or inherited turns, and other speakers.
 - `forgotten.json`: an append-only list, never rewritten or shrunk, of `{forgotten_at, start, end, conversation_id, utterance_ids, reason}`, with IDs as they were. It's the only deletion signal: anything else that leaves the stream was restructured, not deleted.
 - Guarantees:
   - Files are written atomically, conversation files first and `index.json` last, and only when their content changes.
@@ -59,11 +63,12 @@ The authoritative description is the output contract in Hearsay's AGENTS.md. In 
 
 These tables are owned by Idea Machine and live in its own database:
 
-- `im.source_conversations(conversation_id, revision, transcript_revision, imported_at)`: what was last imported.
+- `im.source_conversations(conversation_id, revision, transcript_revision, imported_at, taps, places)`: what was last imported. `taps` and `places` come from the index and are updated in place on every run. `im show` prints an episode's places; nothing else uses them yet, and they don't go to Claude.
 - `im.source_members(conversation_id, segment_id, utterance_id)`: which segments the latest import of each conversation contains, and the `utterance_id` each has in that import.
 - `im.source_segments`: an append-only copy of every utterance version Idea Machine has seen.
-  - `segment_id` is a uuid5 over the `conversation_id` and a hash of the utterance record without its `utterance_id`. An utterance whose content is unchanged keeps its segment, even when a re-transcription renumbers it; any change to its times, speaker, text or confidences gives a new one.
-  - Field mapping: `session_id` is `conversation_id`. `is_self` is true for `owner`, NULL for `unknown`, and false otherwise. Hearsay already thresholds `owner` for precision, and NULL fails closed to not-me. `speaker_label` is name, else label, else kind. `speaker_conf` is `owner_similarity` and `asr_confidence` is `text_confidence`.
+  - `segment_id` is a uuid5 over the `conversation_id` and a hash of the utterance record without its `utterance_id` and `affect`. An utterance whose content is unchanged keeps its segment, even when a re-transcription renumbers it; any change to its times, speaker, text or confidences gives a new one.
+  - Field mapping: `session_id` is `conversation_id`. `is_self` is true for `owner`, NULL for `unknown`, and false otherwise. Hearsay already thresholds `owner` for precision, and NULL fails closed to not-me. `speaker_label` is name, else label, else kind. `speaker_conf` is `owner_similarity`, `asr_confidence` is `text_confidence`, and `arousal` is `affect.arousal`.
+  - `arousal` is an annotation, like taps: it follows the latest import in place and isn't part of the segment's identity. Re-scoring it re-derives nothing and sends nothing to Claude again. Nothing uses it yet.
 - `im.source_supersessions(old_segment_id, new_segment_id)`, written by the importer:
   - Same `utterance_id` and same `transcript_revision` but different content (e.g. a speaker was named): link old to new.
   - The transcript changed, or a conversation was split, merged or disappeared: link each old segment to the new segments that overlap it in time. Splits and merges fall out of this.

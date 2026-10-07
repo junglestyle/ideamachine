@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from im import db, fixtures, pipeline
+from im import db, fixtures, pipeline, show
 from im.config import Config, SegmentConfig
 from im.fixtures import _alice, _me
 from im.importer import StreamError
@@ -192,6 +192,60 @@ def test_unknown_format_version_fails_and_writes_nothing(pipe, cfg, stream):
     with pytest.raises(StreamError):
         run(pipe, cfg, stream)
     assert table(pipe, "SELECT count(*) FROM im.source_segments") == [(0,)]
+
+
+def _unchanged(conn):
+    """What an annotation (affect, places) mustn't touch: which segments exist and are current, and episodes."""
+    return (table(conn, "SELECT segment_id FROM im.source_segments ORDER BY 1"),
+            table(conn, "SELECT * FROM im.source_members ORDER BY 1, 2"), current_episodes(conn))
+
+
+LORA = "Idea: the garden sensors could report soil moisture over LoRa."
+
+
+def test_affect_is_kept_and_a_rescoring_rederives_nothing(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    assert table(pipe, "SELECT round(arousal::numeric, 2)::float FROM im.source_segments WHERE text = %s", LORA) \
+        == [(0.72,)]
+    assert table(pipe, "SELECT count(*) FROM im.source_segments WHERE arousal IS NOT NULL") == [(2,)]
+    sid, before = segment_of(pipe, LORA), _unchanged(pipe)
+    stream.score_affect("c-mono", 0, 0.35)
+    stream.score_affect("c-mono", 1, 0.5)
+    stream.write(stream.dir)
+    stats = run(pipe, cfg, stream)
+    assert segment_of(pipe, LORA) == sid and stats["episodes_retired"] == stats["episodes_created"] == 0
+    assert _unchanged(pipe) == before
+    assert table(pipe, "SELECT round(arousal::numeric, 2)::float FROM im.source_segments WHERE text = %s", LORA) \
+        == [(0.35,)]
+    assert table(pipe, "SELECT count(*) FROM im.source_segments WHERE arousal IS NOT NULL") == [(3,)]
+    stream.score_affect("c-mono", 0, None)  # no longer scored
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    assert table(pipe, "SELECT arousal FROM im.source_segments WHERE text = %s", LORA) == [(None,)]
+    assert_invariants(pipe)
+
+
+def test_places_follow_the_index_and_bad_ones_fail(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    assert table(pipe, "SELECT places->0->>'name' FROM im.source_conversations WHERE conversation_id = 'c-conv'") \
+        == [("Office",)]
+    assert table(pipe, "SELECT places FROM im.source_conversations WHERE conversation_id = 'c-tv'") == [([],)]
+    office = table(pipe, "SELECT episode_id::text FROM im.episodes WHERE session_id = 'c-conv' LIMIT 1")[0][0]
+    tv = table(pipe, "SELECT episode_id::text FROM im.episodes WHERE session_id = 'c-tv'")[0][0]
+    assert "place         Office" in show.show(pipe, office) and "place " not in show.show(pipe, tv)
+    before = _unchanged(pipe)
+    stream.name_place("c-mono", "Home", 3600, 3700)  # named retroactively
+    stream.name_place("c-mono", "Garden", 3700, 3837)
+    stream.write(stream.dir)
+    stats = run(pipe, cfg, stream)
+    assert stats["conversations_changed"] == 0 and _unchanged(pipe) == before
+    assert table(pipe, """SELECT array_agg(p->>'name' ORDER BY n) FROM im.source_conversations,
+                          jsonb_array_elements(places) WITH ORDINALITY AS x(p, n)
+                          WHERE conversation_id = 'c-mono'""") == [(["Home", "Garden"],)]
+    stream.conversations["c-tv"].places = [{"name": "Den", "start": fixtures.iso(7200)}]
+    stream.write(stream.dir)
+    with pytest.raises(StreamError):
+        run(pipe, cfg, stream)
 
 
 def test_missing_forgotten_list_fails(pipe, cfg, stream):
