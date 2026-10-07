@@ -126,7 +126,7 @@ def run(conn: psycopg.Connection, cfg: Config, stream_dir: Path) -> dict:
                   "labels_purged": labels_purged}
         stats |= _resegment(conn, cfg, sessions)
         _finish_run(conn, run_id, stats)
-    return stats
+    return stats | {"run_id": run_id}   # im run records the later stages on the same row
 
 
 STAGES = ("segment", "triage", "extract", "route")

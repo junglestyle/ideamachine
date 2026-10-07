@@ -59,9 +59,31 @@ def _embedder(cfg):
 
 
 def cmd_run(args) -> None:
+    """Every stage, recorded on one im.runs row, including a failure: Lattice's status line reads it (pub.runs)."""
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
-        stats = pipeline.run(conn, cfg, db.stream_dir())
+        try:
+            stats = _run_stages(conn, cfg)
+        except Exception as e:
+            partial = dict(getattr(e, "stats", {}))
+            _record_run(conn, partial.pop("run_id", None), partial | {"error": f"{type(e).__name__}: {e}"[:500]})
+            raise
+        _record_run(conn, stats.pop("run_id"), stats)
+        _print(stats)
+
+
+def _record_run(conn, run_id, stats: dict) -> None:
+    import json
+
+    if run_id is None:   # the first stage failed, and its transaction (with the row) rolled back
+        conn.execute("INSERT INTO im.runs (command, finished_at, stats) VALUES ('run', now(), %s)", (json.dumps(stats),))
+    else:
+        conn.execute("UPDATE im.runs SET finished_at = now(), stats = %s WHERE run_id = %s", (json.dumps(stats), run_id))
+
+
+def _run_stages(conn, cfg) -> dict:
+    stats = pipeline.run(conn, cfg, db.stream_dir()) | {"monthly_cap_usd": cfg.extract.monthly_cap_usd}
+    try:
         from im import feedback
 
         # Before extraction and matching, so captures I discarded in Lattice stay out of the lattice.
@@ -83,7 +105,10 @@ def cmd_run(args) -> None:
         from im import router
 
         stats["route"] = router.run_stage(conn)
-        _print(stats)
+    except Exception as e:   # keep what's known so far, including run_id, for the record
+        e.stats = stats
+        raise
+    return stats
 
 
 def _extract(conn, cfg) -> dict:
