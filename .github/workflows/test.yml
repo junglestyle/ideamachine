@@ -1,0 +1,35 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    services:
+      # Tests create and drop their own im_test database here (tests/conftest.py).
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: im_dev
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      IM_DEV_ADMIN_URL: postgresql://postgres:ci@127.0.0.1:55432/im_dev
+      IM_DATABASE_URL: postgresql://im_pipeline:ci-pipeline@127.0.0.1:55432/im_dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Create the pipeline role
+        run: psql "$IM_DEV_ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE ROLE im_pipeline LOGIN PASSWORD 'ci-pipeline'"
+      - name: Install (CPU-only torch, scikit-learn; no model weights are downloaded)
+        run: uv sync --frozen --extra models
+      - name: Test
+        run: uv run --frozen pytest -q -rs
