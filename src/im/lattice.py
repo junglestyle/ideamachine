@@ -3,7 +3,7 @@
 For each new captured item, the matcher finds the closest existing ideas by embedding and asks Claude
 whether the item is a new idea, the same as one of them, or an evolution of one. It only links, never
 merges destructively. Discarded items are skipped. Related-idea edges come from the embeddings and are
-rebuilt every run.
+rebuilt every run, and so are the ideas' positions on Lattice's map.
 """
 
 import hashlib
@@ -218,6 +218,7 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
     stats = {"matcher": version, "pending": len(items), "new": 0, "same_as": 0, "evolves": 0, "skipped": 0,
              "stopped": None}
     if not items:
+        stats["positions"] = place(conn, embedder.model_version)
         return stats
     _embed_missing(conn, embedder, "item_embeddings", "item_id", [(i[0], f"{i[5]}\n{i[4]}") for i in items])
     vecs = {r[0]: np.array(json.loads(r[1])) for r in conn.execute(
@@ -279,6 +280,7 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
                             VALUES (%s, %s, %s, %s, %s)""", (item_id, decision, idea, version, egress_id))
         stats[decision] += 1
     stats["related_links"] = relate(conn, embedder)
+    stats["positions"] = place(conn, embedder.model_version)
     return stats
 
 
@@ -302,6 +304,79 @@ def relate(conn, embedder) -> int:
                                ON CONFLICT DO NOTHING""",
                             [(ids[i], ids[j], round(w, 4), method) for i, j, w in edges])
     return len(edges)
+
+
+POSITIONS_METHOD = "pca2;placed-ideas-stay;new-near-neighbours"
+PLACE_K, PLACE_TEMP, PLACE_JITTER = 5, 0.05, 0.03
+
+
+def _pca(M: np.ndarray) -> np.ndarray:
+    if len(M) == 1:
+        return np.zeros((1, 2))
+    C = M - M.mean(axis=0)
+    _, _, Vt = np.linalg.svd(C, full_matrices=False)
+    P = C @ Vt[:2].T
+    return np.hstack([P, np.zeros((len(P), 2 - P.shape[1]))])
+
+
+def _fit_into(P: np.ndarray, limit: float = 1.0) -> np.ndarray:
+    extent = np.abs(P).max()
+    return P / extent * limit if extent > 0 else P
+
+
+def project(M: np.ndarray, prev: np.ndarray | None = None, shared: np.ndarray | None = None,
+            relayout: bool = False) -> np.ndarray:
+    """2D positions for the rows of M (unit embeddings); prev[k] is the earlier position of row shared[k].
+
+    Ideas already on the map stay exactly where they are. A new idea goes to the similarity-weighted mean of its
+    PLACE_K nearest placed ideas, nudged a little so it doesn't sit on top of one. A full PCA layout happens only
+    the first time (fewer than 3 placed ideas) or on `relayout` (a new embedding model); a relayout is rotated,
+    reflected, scaled and shifted to fit the old map as well as it can (Procrustes), so it doesn't flip.
+    Roughly within [-1, 1]: a fresh layout is scaled to fit it, and new ideas land among the old ones.
+    """
+    if prev is None or len(shared) < 3:
+        return _fit_into(_pca(M))
+    if relayout:
+        P = _pca(M)
+        A, B = P[shared], prev
+        mu_a, mu_b = A.mean(axis=0), B.mean(axis=0)
+        U, S, Wt = np.linalg.svd((A - mu_a).T @ (B - mu_b))
+        norm = ((A - mu_a) ** 2).sum()
+        P = (P - mu_a) @ (U @ Wt) * (S.sum() / norm if norm > 0 else 1.0) + mu_b
+        return P if np.abs(P).max() <= 1.25 else _fit_into(P)
+    P = np.zeros((len(M), 2))
+    P[shared] = prev
+    placed = np.zeros(len(M), dtype=bool)
+    placed[shared] = True
+    for n, i in enumerate(np.flatnonzero(~placed)):
+        sims = M[placed] @ M[i]
+        top = np.argsort(-sims)[:PLACE_K]
+        w = np.exp((sims[top] - sims[top].max()) / PLACE_TEMP)
+        angle = n * 2.399963   # the golden angle: new ideas around one neighbour fan out instead of stacking
+        P[i] = (w @ P[placed][top]) / w.sum() + PLACE_JITTER * np.array([np.cos(angle), np.sin(angle)])
+    return P
+
+
+def place(conn, model_version: str) -> int:
+    """Recompute im.idea_positions for every idea Lattice shows that has an embedding. Returns how many."""
+    rows = conn.execute(
+        """SELECT e.idea_id, e.embedding::text, p.x, p.y, p.method FROM im.idea_embeddings e
+           LEFT JOIN im.idea_positions p USING (idea_id)
+           WHERE e.model_version = %s AND e.idea_id IN (SELECT idea_id FROM pub.ideas)
+           ORDER BY e.idea_id""", (model_version,)).fetchall()
+    with conn.transaction():
+        conn.execute("DELETE FROM im.idea_positions")
+        if not rows:
+            return 0
+        M = np.vstack([np.array(json.loads(r[1])) for r in rows])
+        shared = np.array([k for k, r in enumerate(rows) if r[2] is not None], dtype=int)
+        prev = np.array([[r[2], r[3]] for r in rows if r[2] is not None]).reshape(-1, 2)
+        method = f"{POSITIONS_METHOD};embedding:{model_version}"
+        P = project(M, prev, shared, relayout=any(r[4] not in (None, method) for r in rows))
+        with conn.cursor() as cur:
+            cur.executemany("INSERT INTO im.idea_positions (idea_id, x, y, method) VALUES (%s, %s, %s, %s)",
+                            [(r[0], round(float(x), 4), round(float(y), 4), method) for r, (x, y) in zip(rows, P)])
+    return len(rows)
 
 
 def status(conn) -> dict:
