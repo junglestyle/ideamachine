@@ -99,6 +99,8 @@ def _run_stages(conn, cfg) -> dict:
             stats["triage_notes"] = notes
         if cfg.extract.enabled:
             stats["extract"] = _extract(conn, cfg)
+        # After extraction (the new items exist) and before matching and routing (a carried discard counts).
+        stats["verdicts_carried"] = feedback.carry_verdicts(conn)
         if cfg.lattice.enabled:
             stats["lattice"] = _lattice(conn, cfg)
             stats["themes"] = _themes(conn, cfg)
