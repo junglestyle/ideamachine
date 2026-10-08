@@ -61,3 +61,13 @@ def test_lattice_still_only_appends(seeded_lattice, admin):
         as_lattice(admin, "INSERT INTO pub.feedback_events (kind) VALUES ('item_keep')")   # an item event names its item
     with pytest.raises(psycopg.errors.CheckViolation):
         as_lattice(admin, "INSERT INTO pub.feedback_events (kind, item_id) VALUES ('star', %s)", item)
+
+
+def test_a_resent_verdict_is_recorded_once(seeded_lattice, admin):
+    pipe = seeded_lattice
+    (item,) = [r[0] for r in table(pipe, "SELECT item_id FROM im.items WHERE quote LIKE %s", "%coffee%")]
+    for kind in ["item_keep", "item_keep", "item_star", "item_keep"]:   # the second keep is a resend
+        as_lattice(admin, "INSERT INTO pub.feedback_events (kind, item_id) VALUES (%s, %s)", kind, item)
+    assert feedback.apply_item_feedback(pipe) == {"keep": 2, "repeat": 1, "star": 1}
+    assert table(pipe, "SELECT verdict FROM im.item_verdicts WHERE item_id = %s ORDER BY verdict_id", item) == \
+        [("keep",), ("star",), ("keep",)]
