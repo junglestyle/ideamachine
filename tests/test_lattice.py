@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import psycopg
 import pytest
 
@@ -171,3 +172,58 @@ def test_forgetting_removes_ideas_born_from_it_and_their_stars(seeded, cfg, stre
     run(seeded, cfg, stream)
     assert table(seeded, "SELECT count(*) FROM im.ideas WHERE idea_id = %s", lora) == [(0,)]
     assert table(seeded, "SELECT idea_id FROM pub.feedback_events") == [(archived,)]
+
+
+def test_projection_holds_still_as_ideas_are_added():
+    rng = np.random.default_rng(0)
+    M = rng.normal(size=(40, 16)) @ np.diag(np.linspace(3, 0.2, 16))
+    M /= np.linalg.norm(M, axis=1, keepdims=True)
+    P0 = lattice.project(M[:30])
+    assert np.abs(P0).max() == pytest.approx(1.0)
+    P1 = lattice.project(M, P0, np.arange(30))
+    assert (P1[:30] == P0).all() and np.abs(P1).max() <= 1.25   # placed ideas don't move at all
+    for i in range(30, 40):   # a new idea lands near the placed idea most like it
+        nearest = np.argmax(M[:30] @ M[i])
+        assert np.linalg.norm(P1[i] - P0[nearest]) < np.median(np.linalg.norm(P0 - P0[nearest], axis=1))
+    flipped = P0 * [-1, 1]   # a relayout keeps whatever orientation the map had
+    assert np.abs(lattice.project(M[:30], flipped, np.arange(30), relayout=True) - flipped).max() < 1e-6
+    assert lattice.project(M[:1]).tolist() == [[0.0, 0.0]]
+
+
+def test_every_shown_idea_gets_a_position_lattice_can_read(seeded_lattice, admin):
+    pipe = seeded_lattice
+    shown = {r[0] for r in table(pipe, "SELECT idea_id FROM pub.ideas")}
+    with admin.transaction():
+        admin.execute("SET LOCAL ROLE lattice_app")
+        pos = admin.execute("SELECT idea_id, x, y, method FROM pub.idea_positions").fetchall()
+    assert {r[0] for r in pos} == shown
+    assert all(abs(x) <= 1.25 and abs(y) <= 1.25 for _, x, y, _ in pos)
+    assert all(m.endswith(f"embedding:{HashEmbedder().model_version}") for *_, m in pos)
+    before = {r[0]: (r[1], r[2]) for r in pos}
+    assert lattice.place(pipe, HashEmbedder().model_version) == len(shown)
+    after = {r[0]: (r[1], r[2]) for r in table(pipe, "SELECT idea_id, x, y FROM im.idea_positions")}
+    assert all(np.allclose(after[i], before[i], atol=1e-3) for i in shown)   # same ideas: the map doesn't move
+
+
+def test_my_links_show_at_once_and_unlinking_removes_them(seeded, admin):
+    a, b, c = sorted(r[0] for r in table(seeded, "SELECT idea_id FROM pub.ideas"))
+
+    def lattice_does(sql, *args):
+        with admin.transaction():
+            admin.execute("SET LOCAL ROLE lattice_app")
+            return admin.execute(sql, args or None)
+
+    def mine():
+        return lattice_does("SELECT a, b, weight, method FROM pub.connections WHERE kind = 'mine' ORDER BY a, b"
+                            ).fetchall()
+
+    link = "INSERT INTO pub.feedback_events (kind, idea_id, other_idea_id) VALUES (%s, %s, %s)"
+    lattice_does(link, "link", b, a)
+    lattice_does(link, "link", a, b)   # the same pair, either way round
+    lattice_does(link, "link", a, c)
+    assert mine() == [(a, b, 1.0, "feedback"), (a, c, 1.0, "feedback")]
+    lattice_does(link, "unlink", c, a)
+    assert mine() == [(a, b, 1.0, "feedback")]
+    for args in [("link", a, a), ("unlink", a, None)]:
+        with pytest.raises(psycopg.errors.CheckViolation):
+            lattice_does(link, *args)
