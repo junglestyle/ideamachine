@@ -32,9 +32,11 @@ services:
     env_file: /mnt/storage/ideamachine/config/pipeline.env
     environment:
       IM_STREAM_DIR: /data/stream
+      IM_CONFIG: /config/im.toml   # e.g. extract.prompt and extract.interests; made by install/nas.sh
       TZ: America/New_York   # payloads carry local times: keep them as they were on eeyore (im pending)
     volumes:
       - /mnt/storage/hearsay/stream:/data/stream:ro
+      - /mnt/storage/ideamachine/config/im:/config:ro
     depends_on:
       db:
         condition: service_healthy

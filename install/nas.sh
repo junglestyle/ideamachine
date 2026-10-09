@@ -57,6 +57,22 @@ env_ensure "$NAS_LATTICE_ENV" LATTICE_DATABASE_URL \
     "postgresql://lattice_app:$(env_get "$NAS_DB_ENV" LATTICE_APP_PASSWORD)@db:5432/im"
 env_ensure "$NAS_LATTICE_ENV" LATTICE_TOKEN "$(openssl rand -base64 24 | tr -d '/+=')"
 
+# Idea Machine's own config: readable by the pipeline (the apps group), not secret, but personal, so not in the repo.
+mkdir -p "$NAS_CONFIG/im"
+chown "root:$APPS_GID" "$NAS_CONFIG/im"; chmod 750 "$NAS_CONFIG/im"
+if [ ! -f "$NAS_CONFIG/im/im.toml" ]; then
+    cat > "$NAS_CONFIG/im/im.toml" <<'TOML'
+# Idea Machine's config. Every key and its default is in src/im/config.py. Kept out of the repo: it can hold
+# personal details, such as extract.interests. Changing extract.prompt or extract.interests re-reads every
+# episode with Claude, so try a prompt first: im trial <prompt>.
+[extract]
+# prompt = "v1"
+# interests = ""
+TOML
+    echo "created $NAS_CONFIG/im/im.toml"
+fi
+chown "root:$APPS_GID" "$NAS_CONFIG/im/im.toml"; chmod 640 "$NAS_CONFIG/im/im.toml"
+
 say "Building images"
 git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
 IM_COMMIT="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"

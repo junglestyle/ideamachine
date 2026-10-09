@@ -122,7 +122,8 @@ def _extract(conn, cfg) -> dict:
     x = cfg.extract
     try:
         client = anthropic.Anthropic()
-        return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run)
+        return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
+                                 extract.system_prompt(x.prompt, x.interests))
     except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
         return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:  # e.g. no credentials configured at all
@@ -188,7 +189,8 @@ def cmd_pending(args) -> None:
 
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
-        pv = extract.prompt_version(cfg.extract.model, cfg.extract.effort)
+        pv = extract.prompt_version(cfg.extract.model, cfg.extract.effort,
+                                    extract.system_prompt(cfg.extract.prompt, cfg.extract.interests))
         todo = extract._pending(conn, cfg.extract.model, pv)
         done = {r[0] for r in conn.execute(
             "SELECT episode_id FROM im.extractions WHERE model = %s AND prompt_version = %s",
@@ -200,6 +202,23 @@ def cmd_pending(args) -> None:
     _print(out)
     if args.expect_none_resent and out["already_extracted_would_resend"]:
         raise SystemExit(1)
+
+
+def cmd_trial(args) -> None:
+    """Try a candidate extraction prompt on the episodes I've judged, and compare its captures with my verdicts."""
+    import anthropic
+
+    from im import extract, trial
+
+    x = config.load().extract
+    system = extract.system_prompt(args.prompt, x.interests)
+    with db.connect(db.pipeline_dsn()) as conn:
+        out = {}
+        if not args.report:
+            out["trial"] = trial.run(conn, anthropic.Anthropic(), system, x.model, x.effort, x.monthly_cap_usd,
+                                     args.limit)
+        out["report"] = trial.report(conn, extract.prompt_version(x.model, x.effort, system), x.model)
+    _print(out)
 
 
 def cmd_seed(args) -> None:
@@ -408,6 +427,11 @@ def main(argv=None) -> None:
     pe.add_argument("--expect-none-resent", action="store_true",
                     help="exit 1 if any already-extracted episode would be sent again (use after a move)")
     pe.set_defaults(func=cmd_pending)
+    tr = sub.add_parser("trial", help="try a candidate extraction prompt on episodes I've judged (sends to Claude)")
+    tr.add_argument("prompt", help="a name in extract.PROMPTS, e.g. v2")
+    tr.add_argument("--limit", type=int, help="read at most this many episodes this time")
+    tr.add_argument("--report", action="store_true", help="only report on what's been read; send nothing")
+    tr.set_defaults(func=cmd_trial)
     sd = sub.add_parser("seed", help="import an idea archive into the lattice (its clusters become pinned themes)")
     sd.add_argument("path", help="the archive, e.g. ~/.local/share/ideamachine/seeds/chatgpt-archive.md")
     sd.add_argument("--name", default="chatgpt", help="prefix for its references, e.g. chatgpt#17")

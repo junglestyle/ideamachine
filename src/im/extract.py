@@ -20,6 +20,8 @@ KINDS = ["idea", "aphorism", "joke", "observation", "project", "task", "decision
 PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-opus-4-8": (5.0, 25.0)}
 FALLBACK_MODEL = "claude-opus-4-8"
 
+# v1: the first prompt (58% of its captures kept). Its text must never change: its hash is the prompt_version every
+# extraction so far is filed under, and a new version re-reads every episode.
 SYSTEM = """You extract ideas from transcripts of my everyday speech, recorded by an always-on pendant. \
 Most of what you'll see is small talk, logistics, background noise and transcription errors. Your job is \
 to find what's worth adding to my idea archive.
@@ -51,6 +53,60 @@ confidence if something there is worth keeping, not as a reason to capture fille
 
 confidence is your estimate that I'd want the item in my archive."""
 
+# v2: revised from my discard reasons (ROADMAP Phase 2, slice 3). {interests} is config (extract.interests), kept
+# out of the repo; like the rest of the text, changing it is a new prompt_version.
+SYSTEM_V2 = """You extract ideas from transcripts of my everyday speech, recorded by an always-on pendant. \
+Most of what you'll see is small talk, logistics, background noise and transcription errors. Your job is \
+to find what's worth adding to my idea archive.
+
+What counts:
+- ideas, theories, models, hunches; half-formed is fine
+- aphorisms, compact formulations, jokes, bits, slogans, images
+- observations about people, myself or social dynamics that generalize beyond the moment
+- things I want to build, try, or look into, when there's something non-obvious in them
+Anyone's idea counts: mine, a friend's, a stranger's. Say who said it, using the speaker labels exactly as \
+they appear in the transcript ("me", "S1", "unknown"...).
+{interests}
+What doesn't count, because I've discarded these before:
+- Anything that needs the conversation to make sense. Each item must stand on its own for someone who \
+didn't hear the conversation: if the point depends on context that's in the transcript, put that context \
+in the gist; if it isn't there, skip it. Skip fragments and one-off remarks.
+- The obvious: common sense, generic advice, and routine feature ideas for the software I'm building \
+(a pendant recorder, its transcription, an idea archive and its app). A design idea counts only if it has a \
+non-obvious mechanism or tradeoff.
+- Anecdotes: what happened to someone counts only for a point that generalizes; capture the point.
+- Media: TV, radio, songs, videos, or someone reading aloud, unless someone makes a point of their own about it.
+- Tasks, decisions and plans, unless I say I want to remember them. Ordinary plans and logistics never count.
+- Greetings, small talk, filler, the same point repeated (capture it once), garbled transcription.
+
+How to capture:
+- Be faithful. Quote the distinctive wording verbatim from the transcript; fix only obvious transcription \
+errors, and say so in the gist when you did. Then state the idea plainly in one line, with whatever context \
+it needs to stand alone.
+- Don't evaluate, fact-check, moralize, soften or balance. Provocative, controversial, exaggerated or false \
+ideas are captured as ideas, not endorsed as claims.
+- Don't invent. Every item cites the numbers of the transcript lines it comes from. If the speech is too \
+garbled to be sure what was said, skip it.
+- If I say "note to self", capture what I said there.
+- The context may say I tapped the pendant. A tap usually means I wanted something kept, but taps can be \
+accidental: treat one as a reason to look closely at what I said around that time and to raise your \
+confidence if something there is worth keeping, not as a reason to capture filler.
+- Most transcripts contain nothing worth capturing. An empty list is the usual, correct answer.
+
+confidence is your estimate that I'd keep the item. I've kept a little over half of what was captured before; \
+the ones I discard most often are the kinds listed above."""
+
+PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2}
+
+
+def system_prompt(name: str = "v1", interests: str = "") -> str:
+    """The system prompt named in config. `interests` fills v2's slot; v1 has none and must stay byte-identical."""
+    text = PROMPTS[name]
+    if "{interests}" not in text:
+        return text
+    return text.replace("{interests}", f"\nMy interests, as context for what's worth a closer look (not a filter): "
+                                       f"{interests.strip()}\n" if interests.strip() else "")
+
 SCHEMA = {
     "type": "object",
     "properties": {
@@ -77,8 +133,8 @@ SCHEMA = {
 }
 
 
-def prompt_version(model: str, effort: str) -> str:
-    return hashlib.sha256(json.dumps([SYSTEM, SCHEMA, model, effort], sort_keys=True).encode()).hexdigest()[:16]
+def prompt_version(model: str, effort: str, system: str = SYSTEM) -> str:
+    return hashlib.sha256(json.dumps([system, SCHEMA, model, effort], sort_keys=True).encode()).hexdigest()[:16]
 
 
 def spent_this_month(conn) -> float:
@@ -158,11 +214,19 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
             (p.episode_id, model, pv, egress.POLICY_VERSION, p.sha256, egress_id, len(items)))
 
 
+def call(client, model: str, effort: str, system: str, text: str):
+    return client.beta.messages.create(
+        model=model, max_tokens=16000, system=system,
+        messages=[{"role": "user", "content": text}],
+        output_config={"effort": effort, "format": {"type": "json_schema", "schema": SCHEMA}},
+        betas=["server-side-fallback-2026-06-01"], fallbacks=[{"model": FALLBACK_MODEL}])
+
+
 def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "medium",
-              monthly_cap_usd: float = 20.0, limit: int | None = None) -> dict:
+              monthly_cap_usd: float = 20.0, limit: int | None = None, system: str = SYSTEM) -> dict:
     import anthropic
 
-    pv = prompt_version(model, effort)
+    pv = prompt_version(model, effort, system)
     todo = _pending(conn, model, pv)
     stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "items": 0,
              "refused": 0, "cost_usd": 0.0, "stopped": None}
@@ -171,11 +235,7 @@ def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "mediu
             stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
             break
         try:
-            r = client.beta.messages.create(
-                model=model, max_tokens=16000, system=SYSTEM,
-                messages=[{"role": "user", "content": p.text}],
-                output_config={"effort": effort, "format": {"type": "json_schema", "schema": SCHEMA}},
-                betas=["server-side-fallback-2026-06-01"], fallbacks=[{"model": FALLBACK_MODEL}])
+            r = call(client, model, effort, system, p.text)
         except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError) as e:
             _log(conn, p, model, pv, error=f"{type(e).__name__}: {e}"[:500])
             stats["stopped"] = f"API unavailable, will retry next run: {type(e).__name__}"
