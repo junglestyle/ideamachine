@@ -54,11 +54,13 @@ STUTTER_KINDS = ("repeat", "restart", "filler")
 
 def _delivery(d: dict | None) -> dict | None:
     """Hearsay's measured delivery, checked: {words_per_second, pauses, pause_seconds, stutters: [{kind, at,
-    words_per_second_before}]}. Measured, not judged: for trends in pace, not a measure of confidence."""
+    words_per_second_before}]}. Measured, not judged: for trends in pace, not a measure of confidence. A measure
+    may be null where there was nothing to time: pause_seconds when there were no pauses, words_per_second_before
+    for a stutter at the start of the turn."""
     if d is None:
         return None
     nums = (d["words_per_second"], d["pause_seconds"], *(s["words_per_second_before"] for s in d["stutters"]))
-    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in nums) \
+    if not all(x is None or isinstance(x, (int, float)) and not isinstance(x, bool) for x in nums) \
             or not isinstance(d["pauses"], int) or isinstance(d["pauses"], bool) \
             or any(s["kind"] not in STUTTER_KINDS for s in d["stutters"]):
         raise ValueError(f"bad delivery {d!r}")
