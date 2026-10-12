@@ -104,6 +104,7 @@ def _run_stages(conn, cfg) -> dict:
         if cfg.lattice.enabled:
             stats["lattice"] = _lattice(conn, cfg)
             stats["themes"] = _themes(conn, cfg)
+            stats["scores"] = _scores(conn, cfg)
         from im import router
 
         stats["route"] = router.run_stage(conn)
@@ -162,6 +163,30 @@ def _themes(conn, cfg) -> dict:
     except anthropic.AnthropicError as e:
         out["stopped"] = f"Claude unavailable: {e}"
     return out
+
+
+def _scores(conn, cfg) -> dict:
+    """Score ideas on the rubric, or say why it couldn't run; the run goes on either way."""
+    import anthropic
+
+    from im import scores
+
+    try:
+        return scores.score_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd)
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
+        return {"stopped": f"Claude credentials rejected: {e}"}
+    except anthropic.AnthropicError as e:
+        return {"stopped": f"Claude unavailable: {e}"}
+
+
+def cmd_scores(args) -> None:
+    """The top of the ranking Lattice shows (pub.idea_scores)."""
+    from im import scores
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        for score, rubric, g, n, c, o, rec, starred, title, why in scores.top(conn, args.top):
+            print(f"{score:.3f}  g{g} n{n} c{c} o{o}  rec {rec:.2f}{'  ★' if starred else ''}  {title}\n"
+                  f"       {why}")
 
 
 def cmd_themes(args) -> None:
@@ -427,6 +452,9 @@ def main(argv=None) -> None:
     pe.add_argument("--expect-none-resent", action="store_true",
                     help="exit 1 if any already-extracted episode would be sent again (use after a move)")
     pe.set_defaults(func=cmd_pending)
+    sc = sub.add_parser("scores", help="the top-ranked ideas, with their rubric scores")
+    sc.add_argument("--top", type=int, default=20)
+    sc.set_defaults(func=cmd_scores)
     tr = sub.add_parser("trial", help="try a candidate extraction prompt on episodes I've judged (sends to Claude)")
     tr.add_argument("prompt", help="a name in extract.PROMPTS, e.g. v2")
     tr.add_argument("--limit", type=int, help="read at most this many episodes this time")
