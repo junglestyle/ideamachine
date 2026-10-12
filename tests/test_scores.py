@@ -3,6 +3,7 @@
 import json
 from types import SimpleNamespace
 
+import psycopg
 import pytest
 
 from im import scores
@@ -76,3 +77,27 @@ def test_a_star_lifts_an_idea_and_a_correction_rescores_it(seeded_lattice):
 def test_the_cap_stops_scoring(seeded_lattice):
     assert scores.score_stage(seeded_lattice, FakeScorer(), monthly_cap_usd=0)["stopped"].startswith("monthly cap")
     assert table(seeded_lattice, "SELECT count(*) FROM im.idea_scores") == [(0,)]
+
+
+def test_comparisons_are_checked_and_pairs_move_on(seeded_lattice, admin):
+    pipe = seeded_lattice
+    scores.score_stage(pipe, FakeScorer())
+
+    def lattice_does(sql, *args):
+        with admin.transaction():
+            admin.execute("SET LOCAL ROLE lattice_app")
+            return admin.execute(sql, args or None)
+
+    pairs = lattice_does("SELECT idea_id, other_idea_id, reason FROM pub.compare_pairs").fetchall()
+    shown = table(pipe, "SELECT count(*) FROM pub.ideas")[0][0]
+    assert 0 < len(pairs) <= 20 and {r for *_, r in pairs} == {"never_compared"}   # nothing compared yet
+    assert len(pairs) == 2 * shown - 3   # 1 or 2 places apart in the ranking
+    a, b, _ = pairs[0]
+    compare = "INSERT INTO pub.feedback_events (kind, idea_id, other_idea_id, payload) VALUES ('idea_compare', %s, %s, %s)"
+    lattice_does(compare, b, a, json.dumps({"winner": "second", "note": "sharper"}))   # shown the other way round
+    after = lattice_does("SELECT idea_id, other_idea_id FROM pub.compare_pairs").fetchall()
+    assert (a, b) not in after and len(after) == len(pairs) - 1
+    for bad in [(a, a, {"winner": "first"}), (a, b, {"winner": "both"}), (a, b, {}), (a, None, {"winner": "tie"}),
+                (a, b, {"winner": "tie", "note": "x" * 501})]:
+        with pytest.raises(psycopg.errors.CheckViolation):
+            lattice_does(compare, bad[0], bad[1], json.dumps(bad[2]))
