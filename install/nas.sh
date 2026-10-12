@@ -56,6 +56,8 @@ fi
 env_ensure "$NAS_LATTICE_ENV" LATTICE_DATABASE_URL \
     "postgresql://lattice_app:$(env_get "$NAS_DB_ENV" LATTICE_APP_PASSWORD)@db:5432/im"
 env_ensure "$NAS_LATTICE_ENV" LATTICE_TOKEN "$(openssl rand -base64 24 | tr -d '/+=')"
+# The tunnel for Lattice's public MCP listener (below). Always present, so compose can load; empty until it's used.
+touch "$NAS_CONFIG/cloudflared.env"; chmod 600 "$NAS_CONFIG/cloudflared.env"
 
 # Idea Machine's own config: readable by the pipeline (the apps group), not secret, but personal, so not in the repo.
 mkdir -p "$NAS_CONFIG/im"
@@ -127,6 +129,28 @@ else
     echo "No Tailscale container found. Publish it by hand: tailscale serve --bg --https=$LATTICE_HTTPS_PORT http://127.0.0.1:8790"
 fi
 
+say "Public MCP listener for claude.ai (Lattice's docs/public-mcp.md)"
+LATTICE_PUBLIC_URL="$(env_get "$NAS_LATTICE_ENV" LATTICE_PUBLIC_URL)"
+if [ -n "$LATTICE_PUBLIC_URL" ]; then
+    if [ -z "$(env_get "$NAS_CONFIG/cloudflared.env" TUNNEL_TOKEN)" ]; then
+        # Manual: Cloudflare dashboard -> Zero Trust -> Networks -> Tunnels -> the tunnel -> its install command.
+        read -rsp "Cloudflare tunnel token for $LATTICE_PUBLIC_URL (input hidden): " key; echo
+        env_ensure "$NAS_CONFIG/cloudflared.env" TUNNEL_TOKEN "$key"
+    fi
+    "${COMPOSE[@]}" --profile public up -d cloudflared
+    code="000"
+    for _ in $(seq 30); do
+        code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8791/.well-known/oauth-authorization-server)"
+        [ "$code" != 000 ] && break
+        sleep 1
+    done
+    [ "$code" != 000 ] || die "Lattice's public listener isn't answering on 127.0.0.1:8791"
+    echo "on: $LATTICE_PUBLIC_URL/mcp (the WAF rules and connecting: Lattice's docs/public-mcp.md)"
+else
+    "${COMPOSE[@]}" --profile public rm -sf cloudflared >/dev/null 2>&1 || true
+    echo "off (set LATTICE_PUBLIC_URL in $NAS_LATTICE_ENV to turn it on)"
+fi
+
 say "Hourly run at :45 and nightly backups (TrueNAS cron jobs)"
 # :45: after Hearsay's transcription (:00, on eeyore) and reprocess (:30). flock skips a run while one is going.
 cron_ensure "ideamachine run" 45 "*" \
@@ -144,4 +168,5 @@ Idea Machine runs hourly at :45 (log: $NAS_LOGS/run.log). One run now, to see it
 Lattice: $LATTICE_URL
     token: $(env_get "$NAS_LATTICE_ENV" LATTICE_TOKEN)
     (in Safari on the phone: open it, log in, Share -> Add to Home Screen)
+Public MCP for claude.ai: ${LATTICE_PUBLIC_URL:-off}${LATTICE_PUBLIC_URL:+/mcp}
 EOF

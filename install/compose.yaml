@@ -41,8 +41,10 @@ services:
       db:
         condition: service_healthy
 
-  # Loopback only: tailscale serve publishes it to the tailnet over HTTPS. Never the LAN, never 0.0.0.0, never
-  # tailscale funnel: evidence quotes include other people's words.
+  # Loopback only: tailscale serve publishes the app (8790) to the tailnet over HTTPS. Never the LAN, never 0.0.0.0,
+  # never tailscale funnel: evidence quotes include other people's words. The one exception is the MCP listener
+  # (8791), which Lattice opens only when LATTICE_PUBLIC_URL is set: cloudflared publishes it to the internet for
+  # claude.ai, behind OAuth and Anthropic's address range (Lattice's docs/public-mcp.md).
   lattice:
     build: /mnt/storage/ideamachine/lattice
     image: lattice
@@ -54,7 +56,19 @@ services:
       TZ: America/New_York
     ports:
       - "127.0.0.1:8790:8790"
+      - "127.0.0.1:8791:8791"   # the public MCP listener; only cloudflared talks to it
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Publishes only Lattice's MCP listener (Lattice's docs/public-mcp.md). Outbound-only: opens no ports. Started by
+  # install/nas.sh only when lattice.env sets LATTICE_PUBLIC_URL; the token is root-only.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.3
+    container_name: lattice-tunnel
+    profiles: ["public"]
+    command: tunnel --no-autoupdate run
+    env_file: /mnt/storage/ideamachine/config/cloudflared.env   # TUNNEL_TOKEN=...
+    network_mode: host   # to reach 127.0.0.1:8791
     restart: unless-stopped
