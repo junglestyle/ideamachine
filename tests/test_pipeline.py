@@ -234,9 +234,10 @@ def test_delivery_is_kept_and_a_remeasurement_rederives_nothing(pipe, cfg, strea
     assert table(pipe, wps, BATTERY) == [(3.6,)]
     assert table(pipe, "SELECT count(*) FROM im.source_segments WHERE delivery IS NOT NULL") == [(1,)]
     sid, before = segment_of(pipe, BATTERY), _unchanged(pipe)
-    stream.measure_delivery("c-mono", 1, {"words_per_second": 2.9, "pauses": 0, "pause_seconds": 0, "stutters": []})
+    stream.measure_delivery("c-mono", 1, {"words_per_second": 2.9, "pauses": 0, "pause_seconds": None, "stutters": []})
     stream.measure_delivery("c-mono", 0, {"words_per_second": 2.5, "pauses": 2, "pause_seconds": 1.5, "stutters": [
-        {"kind": "filler", "at": fixtures.iso(3601), "words_per_second_before": 2.4}]})
+        {"kind": "filler", "at": fixtures.iso(3600), "words_per_second_before": None},   # nothing to time before it
+        {"kind": "repeat", "at": fixtures.iso(3601), "words_per_second_before": 2.4}]})
     stream.write(stream.dir)
     stats = run(pipe, cfg, stream)
     assert segment_of(pipe, BATTERY) == sid and stats["episodes_retired"] == stats["episodes_created"] == 0
@@ -246,6 +247,11 @@ def test_delivery_is_kept_and_a_remeasurement_rederives_nothing(pipe, cfg, strea
         == [("filler",)]
     stream.measure_delivery("c-mono", 0, {"words_per_second": 2.5, "pauses": 2, "pause_seconds": 1.5, "stutters": [
         {"kind": "mumble", "at": fixtures.iso(3601), "words_per_second_before": 2.4}]})
+    stream.write(stream.dir)
+    with pytest.raises(StreamError):
+        run(pipe, cfg, stream)
+    stream.measure_delivery("c-mono", 0, {"words_per_second": "fast", "pauses": 0, "pause_seconds": None,
+                                          "stutters": []})
     stream.write(stream.dir)
     with pytest.raises(StreamError):
         run(pipe, cfg, stream)
