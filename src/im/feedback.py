@@ -46,11 +46,12 @@ def apply_item_feedback(conn) -> dict:
 CARRY_MIN_SCORE = 0.4   # calibrated on the 2026-10-06 re-transcription: same captures scored >= 0.44, others <= 0.3
 CARRY_METHOD = f"segment-descent;quote-containment>={CARRY_MIN_SCORE}"
 MIN_WORDS = 4
-FILLERS = {"uh", "um", "er", "ah", "hmm", "mm"}
+FILLERS = {"uh", "um", "er", "ah", "eh", "hmm", "mm"}
 
 
 def _words(text: str) -> list[str]:
-    return [w for w in re.findall(r"[a-z0-9]+", text.lower().replace("'", "").replace("’", "")) if w not in FILLERS]
+    # Letters and digits in any script: Hearsay writes Spanish as Spanish.
+    return [w for w in re.findall(r"[^\W_]+", text.lower().replace("'", "").replace("’", "")) if w not in FILLERS]
 
 
 def quote_score(a: str, b: str) -> float:

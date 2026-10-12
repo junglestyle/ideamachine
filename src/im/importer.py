@@ -14,11 +14,11 @@ from datetime import datetime
 from pathlib import Path
 
 FORMAT_VERSIONS = {1}
-STAGE_VERSION = "import/stream-v2"  # v2: affect isn't part of a segment's identity
+STAGE_VERSION = "import/stream-v3"  # v2: affect isn't part of a segment's identity; v3: nor is delivery
 SCHEMA_VERSION = 2
 SEGMENT_NS = uuid.UUID("0b8f4f5e-6a43-4d1f-9a3c-2f7e9d1c5b60")
 # Annotations Hearsay can rescore without the speech changing: kept on the segment, not part of its identity.
-NOT_IDENTITY = {"utterance_id", "affect"}
+NOT_IDENTITY = {"utterance_id", "affect", "delivery"}
 
 
 class StreamError(Exception):
@@ -41,11 +41,30 @@ class Utterance:
     speaker_conf: float | None
     asr_confidence: float | None
     arousal: float | None
+    delivery: dict | None
     input_hash: str
 
 
 def _time(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+STUTTER_KINDS = ("repeat", "restart", "filler")
+
+
+def _delivery(d: dict | None) -> dict | None:
+    """Hearsay's measured delivery, checked: {words_per_second, pauses, pause_seconds, stutters: [{kind, at,
+    words_per_second_before}]}. Measured, not judged: for trends in pace, not a measure of confidence."""
+    if d is None:
+        return None
+    nums = (d["words_per_second"], d["pause_seconds"], *(s["words_per_second_before"] for s in d["stutters"]))
+    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in nums) \
+            or not isinstance(d["pauses"], int) or isinstance(d["pauses"], bool) \
+            or any(s["kind"] not in STUTTER_KINDS for s in d["stutters"]):
+        raise ValueError(f"bad delivery {d!r}")
+    for s in d["stutters"]:
+        _time(s["at"])
+    return d
 
 
 def parse_utterance(line: str, conversation_id: str) -> Utterance:
@@ -75,6 +94,7 @@ def parse_utterance(line: str, conversation_id: str) -> Utterance:
         speaker_conf=conf["owner_similarity"],
         asr_confidence=rec["text_confidence"],
         arousal=None if arousal is None else float(arousal),
+        delivery=_delivery(rec.get("delivery")),
         input_hash=digest,
     )
 
@@ -116,6 +136,10 @@ def read_forgotten(stream_dir: Path) -> list[dict]:
     return entries
 
 
+def _json(d: dict | None) -> str | None:
+    return None if d is None else json.dumps(d, sort_keys=True)
+
+
 def _members(conn, conversation_id: str) -> dict:
     rows = conn.execute(
         """SELECT m.segment_id, m.utterance_id, s.started_at, s.ended_at
@@ -129,12 +153,13 @@ def _insert_segments(conn, utts: list[Utterance]) -> None:
         cur.executemany(
             """INSERT INTO im.source_segments (segment_id, conversation_id, started_at, ended_at, text,
                  speaker_kind, speaker_name, speaker_label, speaker_basis, is_self, speaker_conf,
-                 asr_confidence, arousal, schema_version, stage_version, input_hash)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 asr_confidence, arousal, delivery, schema_version, stage_version, input_hash)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                ON CONFLICT (segment_id) DO NOTHING""",
             [(u.segment_id, u.conversation_id, u.started_at, u.ended_at, u.text, u.speaker_kind,
               u.speaker_name, u.speaker_label, u.speaker_basis, u.is_self, u.speaker_conf,
-              u.asr_confidence, u.arousal, SCHEMA_VERSION, STAGE_VERSION, u.input_hash) for u in utts])
+              u.asr_confidence, u.arousal, _json(u.delivery), SCHEMA_VERSION, STAGE_VERSION, u.input_hash)
+             for u in utts])
 
 
 def _link(conn, pairs: list[tuple], method: str) -> None:
@@ -179,10 +204,11 @@ def _replace_conversation(conn, cid: str, entry: dict | None, utts: list[Utteran
             """UPDATE im.source_members SET utterance_id = %s
                WHERE conversation_id = %s AND segment_id = %s AND utterance_id <> %s""",
             [(u.utterance_id, cid, sid, u.utterance_id) for sid, u in by_id.items() if sid in old])
-        # Affect can be (re)scored without the speech changing, so it follows the latest import.
+        # Affect and delivery can be (re)measured without the speech changing, so they follow the latest import.
         cur.executemany(
-            "UPDATE im.source_segments SET arousal = %s WHERE segment_id = %s AND arousal IS DISTINCT FROM %s",
-            [(u.arousal, sid, u.arousal) for sid, u in by_id.items()])
+            """UPDATE im.source_segments SET arousal = %s, delivery = %s::jsonb WHERE segment_id = %s
+               AND (arousal, delivery) IS DISTINCT FROM (%s, %s::jsonb)""",
+            [(u.arousal, _json(u.delivery), sid, u.arousal, _json(u.delivery)) for sid, u in by_id.items()])
 
     if entry is None:
         conn.execute("DELETE FROM im.source_conversations WHERE conversation_id = %s", (cid,))
