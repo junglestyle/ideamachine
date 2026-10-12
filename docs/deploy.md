@@ -46,11 +46,20 @@ On the phone, open that address in Safari, log in, then Share → Add to Home Sc
 `git pull` in both clones, then re-run `install/nas.sh`. It's idempotent: existing secrets are kept, images are
 rebuilt, migrations applied.
 
+## Lattice's MCP endpoint for claude.ai (optional)
+
+Off unless `lattice.env` sets `LATTICE_PUBLIC_URL`. Then `install/nas.sh` asks once for the Cloudflare tunnel
+token (kept in `config/cloudflared.env`) and starts the `cloudflared` container, which publishes only Lattice's MCP
+listener (127.0.0.1:8791). Removing the line and re-running `install/nas.sh` stops it. The Cloudflare side (the
+tunnel's hostname, two WAF rules) and how to add the connector are in Lattice's `docs/public-mcp.md`. Read its
+"How it's protected" first: this is the one thing reachable from the internet.
+
 ## Where things are
 
 | What | Where |
 |---|---|
-| Secrets | `/mnt/storage/ideamachine/config/` (`db.env`, `pipeline.env`, `lattice.env`; root only) |
+| Secrets | `/mnt/storage/ideamachine/config/` (`db.env`, `pipeline.env`, `lattice.env`, `cloudflared.env`; root only) |
+| Config | `/mnt/storage/ideamachine/config/im/im.toml` (e.g. `extract.interests`; read by the run container) |
 | Database | `/mnt/storage/ideamachine/pg` |
 | Nightly dumps (14 days) | `/mnt/storage/ideamachine/backups/` |
 | Logs | `/mnt/storage/ideamachine/logs/run.log`, `backup.log` |
