@@ -109,3 +109,6 @@ def test_quote_score_reads_past_fillers_and_excerpts():
     assert feedback.quote_score("Most of the battles are playing it cool.",
                                 "If I see a bartender freaking out I think this place sucks.") < 0.3
     assert feedback.quote_score("", "anything") == 0.0
+    # Spanish stays Spanish, accents included: "mañana" is one word, not "ma" and "ana".
+    assert feedback.quote_score("Mañana empezamos con el diseño", "eh, mañana empezamos con el diseño nuevo") == 1.0
+    assert feedback.quote_score("mañana diseño", "ma ana dise o") < 0.4

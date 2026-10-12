@@ -225,6 +225,32 @@ def test_affect_is_kept_and_a_rescoring_rederives_nothing(pipe, cfg, stream):
     assert_invariants(pipe)
 
 
+BATTERY = "Battery life is the hard part, maybe a solar trickle charger."
+
+
+def test_delivery_is_kept_and_a_remeasurement_rederives_nothing(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    wps = "SELECT (delivery->>'words_per_second')::float FROM im.source_segments WHERE text = %s"
+    assert table(pipe, wps, BATTERY) == [(3.6,)]
+    assert table(pipe, "SELECT count(*) FROM im.source_segments WHERE delivery IS NOT NULL") == [(1,)]
+    sid, before = segment_of(pipe, BATTERY), _unchanged(pipe)
+    stream.measure_delivery("c-mono", 1, {"words_per_second": 2.9, "pauses": 0, "pause_seconds": 0, "stutters": []})
+    stream.measure_delivery("c-mono", 0, {"words_per_second": 2.5, "pauses": 2, "pause_seconds": 1.5, "stutters": [
+        {"kind": "filler", "at": fixtures.iso(3601), "words_per_second_before": 2.4}]})
+    stream.write(stream.dir)
+    stats = run(pipe, cfg, stream)
+    assert segment_of(pipe, BATTERY) == sid and stats["episodes_retired"] == stats["episodes_created"] == 0
+    assert _unchanged(pipe) == before
+    assert table(pipe, wps, BATTERY) == [(2.9,)]
+    assert table(pipe, "SELECT delivery->'stutters'->0->>'kind' FROM im.source_segments WHERE text = %s", LORA) \
+        == [("filler",)]
+    stream.measure_delivery("c-mono", 0, {"words_per_second": 2.5, "pauses": 2, "pause_seconds": 1.5, "stutters": [
+        {"kind": "mumble", "at": fixtures.iso(3601), "words_per_second_before": 2.4}]})
+    stream.write(stream.dir)
+    with pytest.raises(StreamError):
+        run(pipe, cfg, stream)
+
+
 def test_places_follow_the_index_and_bad_ones_fail(pipe, cfg, stream):
     run(pipe, cfg, stream)
     assert table(pipe, "SELECT places->0->>'name' FROM im.source_conversations WHERE conversation_id = 'c-conv'") \

@@ -5,8 +5,8 @@ turns as transcribed. Turns filed as _noise (speaker None) count toward
 utterance numbering and transcript_revision but are left out of the stream,
 as in Hearsay. FixtureStream's methods apply the corrections Hearsay makes
 after the fact: naming a speaker, re-transcribing, filing a turn as noise,
-splitting or merging conversations, naming a place, rescoring affect, and
-forgetting.
+splitting or merging conversations, naming a place, rescoring affect,
+measuring delivery, and forgetting.
 
 Writes only to directories it created (marked with MARKER), so it can never
 overwrite a real stream.
@@ -55,6 +55,7 @@ class Turn:
     diar: str = "SPEAKER_00"
     conf: float = 0.93           # Parakeet's least likely token probability per word, averaged
     arousal: float | None = None  # owner turns only, and only those Hearsay scored
+    delivery: dict | None = None  # owner turns only, where Hearsay measured it
 
 
 @dataclass
@@ -100,7 +101,9 @@ def base_conversations() -> dict[str, Conversation]:
         # another monologue.
         "c-mono": Conversation([
             _me(3600, 3612, "Idea: the garden sensors could report soil moisture over LoRa.", arousal=0.72),
-            _me(3613, 3628, "Battery life is the hard part, maybe a solar trickle charger."),
+            replace(_me(3613, 3628, "Battery life is the hard part, maybe a solar trickle charger."),
+                    delivery={"words_per_second": 3.6, "pauses": 1, "pause_seconds": 0.8, "stutters": [
+                        {"kind": "restart", "at": iso(3615), "words_per_second_before": 3.9}]}),
             _me(3629, 3639, "Check what the cheap ESP32 boards draw in deep sleep."),
             _me(3640, 3648, "Write that down for the weekend."),
             _bob(3656, 3660, "Are you talking to yourself again?"),
@@ -161,6 +164,11 @@ class FixtureStream:
         turns = self.conversations[cid].turns
         turns[idx] = replace(turns[idx], arousal=arousal)
 
+    def measure_delivery(self, cid: str, idx: int, delivery: dict | None) -> None:
+        """Hearsay (re)measures how I spoke. The speech doesn't change."""
+        turns = self.conversations[cid].turns
+        turns[idx] = replace(turns[idx], delivery=delivery)
+
     def split_turn(self, cid: str, idx: int, at: float, first: Turn, second: Turn) -> None:
         """Re-transcription splits one turn in two; later utterance_ids shift by one."""
         turns = self.conversations[cid].turns
@@ -214,7 +222,8 @@ class FixtureStream:
                 "text": t.text,
                 "text_confidence": t.conf,
                 "speaker_confidence": {"basis": t.speaker.basis, "owner_similarity": t.speaker.similarity},
-            } | ({"affect": {"arousal": t.arousal}} if t.arousal is not None and t.speaker.kind == "owner" else {}))
+            } | ({"affect": {"arousal": t.arousal}} if t.arousal is not None and t.speaker.kind == "owner" else {})
+              | ({"delivery": t.delivery} if t.delivery is not None and t.speaker.kind == "owner" else {}))
         return out
 
     def transcript_revision(self, cid: str) -> str:
