@@ -138,13 +138,17 @@ if [ -n "$LATTICE_PUBLIC_URL" ]; then
         env_ensure "$NAS_CONFIG/cloudflared.env" TUNNEL_TOKEN "$key"
     fi
     "${COMPOSE[@]}" --profile public up -d cloudflared
+    # From Anthropic's range but without a token, /mcp must ask for one (401): the listener is up and checks auth.
     code="000"
     for _ in $(seq 30); do
-        code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8791/.well-known/oauth-authorization-server)"
-        [ "$code" != 000 ] && break
+        code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'CF-Connecting-IP: 160.79.104.1' \
+                http://127.0.0.1:8791/mcp)"
+        [ "$code" = 401 ] && break
         sleep 1
     done
-    [ "$code" != 000 ] || die "Lattice's public listener isn't answering on 127.0.0.1:8791"
+    [ "$code" = 401 ] || die "Lattice's public listener on 127.0.0.1:8791 answered $code, not 401 (is LATTICE_PUBLIC_URL
+    in $NAS_LATTICE_ENV, and Lattice up to date?)"
+    echo "the public listener answers (401 without a token)"
     echo "on: $LATTICE_PUBLIC_URL/mcp (the WAF rules and connecting: Lattice's docs/public-mcp.md)"
 else
     "${COMPOSE[@]}" --profile public rm -sf cloudflared >/dev/null 2>&1 || true
