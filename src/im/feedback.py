@@ -77,8 +77,13 @@ def carry_verdicts(conn) -> dict:
     A retired item's verdict can go to a current item whose source segments descend from the verdict's segments
     (through supersession links) and whose quote matches (`quote_score`). Matches are one-to-one, best first. A new
     item I've already decided on keeps my verdict. Either way the old item is settled and never carried again; one
-    with no match yet is tried again on later runs (e.g. its episode hasn't been read by Claude yet).
+    with no match yet is tried again on later runs. It counts as `waiting` while some episode its speech went to
+    hasn't been read by Claude yet, else as `not_captured_again`: Claude read that speech again and captured
+    nothing like it, so only a new prompt could still carry it.
     """
+    descendants = """WITH RECURSIVE d(n, seg) AS (
+             SELECT * FROM unnest(%s::int[], %s::uuid[])
+             UNION SELECT d.n, x.new_segment_id FROM d JOIN im.source_supersessions x ON x.old_segment_id = d.seg)"""
     rows = conn.execute(
         """SELECT v.item_id, v.verdict_id, v.segment_ids, v.quote, i.kind FROM im.item_verdicts v
            LEFT JOIN im.items i USING (item_id)
@@ -93,13 +98,11 @@ def carry_verdicts(conn) -> dict:
         g["items"].add(item_id)
         g["verdicts"].append(verdict_id)
     if not groups:
-        return {"carried": 0, "already_decided": 0, "waiting": 0}
+        return {"carried": 0, "already_decided": 0, "waiting": 0, "not_captured_again": 0}
     keys = list(groups)
     pairs = [(n, seg) for n, (_, segs) in enumerate(keys) for seg in segs]
     cands = conn.execute(
-        """WITH RECURSIVE d(n, seg) AS (
-             SELECT * FROM unnest(%s::int[], %s::uuid[])
-             UNION SELECT d.n, x.new_segment_id FROM d JOIN im.source_supersessions x ON x.old_segment_id = d.seg)
+        descendants + """
            SELECT DISTINCT d.n, i.item_id, i.quote, i.kind,
                   EXISTS (SELECT 1 FROM im.item_verdicts v WHERE v.item_id = i.item_id)
                     OR EXISTS (SELECT 1 FROM pub.feedback_events f WHERE f.item_id = i.item_id)
@@ -134,4 +137,11 @@ def carry_verdicts(conn) -> dict:
                        VALUES (%s, %s, %s, %s, %s)""",
                     [(old, item_id, -neg_score, not decided, CARRY_METHOD) for old in g["items"]])
             stats["already_decided" if decided else "carried"] += 1
-    return stats | {"waiting": len(groups) - len(done)}
+    left = [n for n in range(len(keys)) if n not in done]
+    unread = {r[0] for r in conn.execute(
+        descendants + """
+           SELECT DISTINCT d.n FROM d JOIN im.episode_segments es ON es.segment_id = d.seg
+           JOIN im.episodes e ON e.episode_id = es.episode_id AND e.current
+           WHERE d.n = ANY(%s) AND NOT EXISTS (SELECT 1 FROM im.extractions x WHERE x.episode_id = e.episode_id)""",
+        ([n for n, _ in pairs], [s for _, s in pairs], left))} if left else set()
+    return stats | {"waiting": len(unread), "not_captured_again": len(left) - len(unread)}
