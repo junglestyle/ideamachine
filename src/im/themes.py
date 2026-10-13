@@ -4,8 +4,11 @@
   the set of themes changes.
 - The proposer, once enough ideas fit no theme, asks Claude to group them into new themes. These arrive unpinned
   (`origin = 'clustered'`) and stay proposals until I pin, rename or reject them.
-- My theme feedback (pin, unpin, rename, reject) arrives as events in pub.feedback_events, from Lattice or the CLI,
-  and is applied here. Rejected names are never proposed again.
+- My theme feedback (pin, unpin, rename, reject, merge, split, filing or unfiling one idea) arrives as events in
+  pub.feedback_events, from Lattice or the CLI, and applies the moment it's inserted (a trigger running
+  im.apply_theme_event, migration 024). Rejected names, and proposals I merged away, are never proposed again. An
+  idea I unfiled is never filed into that theme again, and re-filing never removes a placement I made.
+- A theme without a description (one I split off) gets one from Claude on the run, since the filer reads them.
 """
 
 import hashlib
@@ -38,6 +41,18 @@ ideas that fit none of the existing themes. Group ideas that genuinely share a s
 each with at least {MIN_GROUP} ideas, a short name in the style of the existing ones, and a one-line description. \
 Leave ideas that don't group naturally out of every theme; don't force them. Don't propose anything close to an \
 existing theme or a rejected name. Don't evaluate the ideas."""
+
+DESCRIBE_SYSTEM = """You describe themes in my idea lattice. For each theme you get its name and some of its \
+ideas. Write a one-line description of what the theme covers, in the style of a short catalogue entry, so a \
+filer can tell which new ideas belong in it. Don't evaluate the ideas."""
+
+DESCRIBE_SCHEMA = {
+    "type": "object",
+    "properties": {"themes": {"type": "array", "items": {
+        "type": "object", "properties": {"theme": {"type": "integer"}, "description": {"type": "string"}},
+        "required": ["theme", "description"], "additionalProperties": False}}},
+    "required": ["themes"], "additionalProperties": False,
+}
 
 PROPOSE_SCHEMA = {
     "type": "object",
@@ -144,7 +159,10 @@ def file_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
         got = {a["idea"]: a["themes"] for a in (answer or {"assignments": []})["assignments"]}
         with conn.transaction():
             for n, (idea_id, _, _) in enumerate(batch, 1):
-                picks = [by_letter[L] for L in dict.fromkeys(got.get(n, [])) if L in by_letter][:MAX_THEMES_PER_IDEA]
+                blocked = {b for (b,) in conn.execute(
+                    "SELECT theme_id FROM im.idea_theme_blocks WHERE idea_id = %s", (idea_id,))}
+                picks = [by_letter[L] for L in dict.fromkeys(got.get(n, []))
+                         if L in by_letter and by_letter[L] not in blocked][:MAX_THEMES_PER_IDEA]
                 for theme_id in picks:
                     conn.execute("""INSERT INTO im.idea_themes (idea_id, theme_id, origin) VALUES (%s, %s, 'assigned')
                                     ON CONFLICT DO NOTHING""", (idea_id, theme_id))
@@ -201,42 +219,57 @@ def propose_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
 
 # --- My feedback ------------------------------------------------------------------------------------------
 
-THEME_KINDS = ("pin_theme", "unpin_theme", "rename_theme", "reject_theme")
+THEME_KINDS = ("pin_theme", "unpin_theme", "rename_theme", "reject_theme", "merge_theme", "split_theme", "file_idea",
+               "unfile_idea")
 
 
 def apply_feedback(conn) -> dict:
-    """Apply theme events not applied yet, in order. Other kinds wait for the slices that use them."""
+    """Apply theme events not applied yet, in order. New events apply on insert (the trigger); this catches any
+    inserted before it existed. Both go through im.apply_theme_event."""
     done: dict = {}
     rows = conn.execute(
-        """SELECT f.event_id, f.kind, f.theme_id, f.payload FROM pub.feedback_events f
+        """SELECT f.event_id FROM pub.feedback_events f
            WHERE f.kind = ANY(%s) AND NOT EXISTS (SELECT 1 FROM im.feedback_applied a WHERE a.event_id = f.event_id)
            ORDER BY f.event_id""", (list(THEME_KINDS),)).fetchall()
-    for event_id, kind, theme_id, payload in rows:
+    for (event_id,) in rows:
         with conn.transaction():
-            row = conn.execute("SELECT name, origin, pinned FROM im.themes WHERE theme_id = %s", (theme_id,)).fetchone()
-            if row is None:
-                result = "no such theme"
-            elif kind == "pin_theme":
-                conn.execute("UPDATE im.themes SET pinned = true WHERE theme_id = %s", (theme_id,))
-                result = "pinned"
-            elif kind == "unpin_theme":
-                conn.execute("UPDATE im.themes SET pinned = false WHERE theme_id = %s", (theme_id,))
-                result = "unpinned"
-            elif kind == "rename_theme":
-                name = (payload or {}).get("name", "").strip()
-                if name:
-                    conn.execute("UPDATE im.themes SET name = %s WHERE theme_id = %s", (name, theme_id))
-                result = "renamed" if name else "no name given"
-            else:  # reject_theme: only proposals; pinned themes and the archive's are mine
-                if row[1] == "clustered" and not row[2]:
-                    conn.execute("INSERT INTO im.theme_rejections (name) VALUES (%s) ON CONFLICT DO NOTHING", (row[0],))
-                    conn.execute("DELETE FROM im.themes WHERE theme_id = %s", (theme_id,))
-                    result = "rejected"
-                else:
-                    result = "not rejected: only unpinned proposals can be"
-            conn.execute("INSERT INTO im.feedback_applied (event_id, result) VALUES (%s, %s)", (event_id, result))
+            (result,) = conn.execute(
+                """INSERT INTO im.feedback_applied (event_id, result)
+                   SELECT f.event_id, im.apply_theme_event(f) FROM pub.feedback_events f WHERE f.event_id = %s
+                   RETURNING result""", (event_id,)).fetchone()
             done[result] = done.get(result, 0) + 1
     return done
+
+
+def describe_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
+    """Give themes without a description (ones I split off) one, from their name and up to 12 of their ideas."""
+    from im.extract import spent_this_month
+
+    todo = conn.execute("SELECT theme_id, name FROM im.themes WHERE description IS NULL ORDER BY created_at").fetchall()
+    stats = {"pending": len(todo), "described": 0, "stopped": None}
+    if not todo:
+        return stats
+    if spent_this_month(conn) >= monthly_cap_usd:
+        stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
+        return stats
+    blocks, ideas = [], []
+    for n, (theme_id, name) in enumerate(todo, 1):
+        rows = conn.execute("""SELECT d.idea_id, d.title FROM pub.ideas d JOIN im.idea_themes it USING (idea_id)
+                               WHERE it.theme_id = %s ORDER BY d.n_evidence DESC, d.title LIMIT 12""",
+                            (theme_id,)).fetchall()
+        ideas += [r[0] for r in rows]
+        blocks.append(f"{n}. {name}\n" + ("\n".join(f"   - {t}" for _, t in rows) or "   (no ideas yet)"))
+    text = "Themes:\n" + "\n".join(blocks)
+    answer, r = _call(client, DESCRIBE_SYSTEM, DESCRIBE_SCHEMA, text)
+    _log(conn, text, f"themes-describe:{version(DESCRIBE_SYSTEM, DESCRIBE_SCHEMA, MODEL, EFFORT)}", ideas, r)
+    with conn.transaction():
+        for t in (answer or {"themes": []})["themes"]:
+            desc = t["description"].strip()[:300]
+            if 1 <= t["theme"] <= len(todo) and desc:
+                stats["described"] += conn.execute(
+                    "UPDATE im.themes SET description = %s WHERE theme_id = %s AND description IS NULL",
+                    (desc, todo[t["theme"] - 1][0])).rowcount
+    return stats
 
 
 def find(conn, ref: str):

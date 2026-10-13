@@ -157,6 +157,7 @@ def _themes(conn, cfg) -> dict:
     out = {"feedback": themes.apply_feedback(conn)}
     try:
         client = anthropic.Anthropic()
+        out["describe"] = themes.describe_stage(conn, client, cfg.extract.monthly_cap_usd)   # the filer reads them
         out["file"] = themes.file_stage(conn, client, cfg.extract.monthly_cap_usd)
         out["propose"] = themes.propose_stage(conn, client, cfg.extract.monthly_cap_usd)
     except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:

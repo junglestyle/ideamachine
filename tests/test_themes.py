@@ -82,20 +82,38 @@ def test_proposals_need_enough_loose_ideas_and_skip_small_groups(lat):
     assert themes.propose_stage(lat, claude)["unseen"] == 0  # everything has been considered once
 
 
-def test_feedback_pins_renames_and_rejects_proposals_only(lat):
+def results(conn):
+    return [r for (r,) in table(conn, """SELECT a.result FROM im.feedback_applied a
+                                         JOIN pub.feedback_events f USING (event_id)
+                                         WHERE f.kind LIKE '%%theme%%' OR f.kind LIKE '%%file_idea'
+                                         ORDER BY a.event_id""")]
+
+
+def test_feedback_pins_renames_and_rejects_proposals_only_at_once(lat):
     gadgets = lat.execute("INSERT INTO im.themes (name, origin) VALUES ('Gadgets', 'clustered') RETURNING theme_id"
                           ).fetchone()[0]
     archive = themes.find(lat, "models")
     themes.record(lat, "reject_theme", archive)
     themes.record(lat, "rename_theme", gadgets, {"name": "Builds and gadgets"})
     themes.record(lat, "pin_theme", gadgets)
-    assert themes.apply_feedback(lat) == {"not rejected: only unpinned proposals can be": 1, "renamed": 1, "pinned": 1}
-    assert themes.apply_feedback(lat) == {}
+    themes.record(lat, "rename_theme", gadgets, {"name": "jokes"})   # another theme's name
+    assert results(lat) == ["not rejected: only unpinned proposals can be", "renamed", "pinned", "name taken"]
+    assert themes.apply_feedback(lat) == {}   # nothing left for the run
     assert table(lat, "SELECT pinned FROM im.themes WHERE name = 'Builds and gadgets'") == [(True,)]
     other = lat.execute("INSERT INTO im.themes (name, origin) VALUES ('Nope', 'clustered') RETURNING theme_id"
                         ).fetchone()[0]
     themes.record(lat, "reject_theme", other)
-    assert themes.apply_feedback(lat) == {"rejected": 1}
+    assert results(lat)[-1] == "rejected"
     assert table(lat, "SELECT name FROM im.theme_rejections") == [("Nope",)]
     with pytest.raises(ValueError):
         themes.find(lat, "zzz")
+
+
+def test_events_from_before_the_trigger_apply_on_the_run(lat, admin):
+    theme = themes.find(lat, "jokes")
+    with admin.transaction():
+        admin.execute("SET LOCAL session_replication_role = replica")   # no triggers: as before migration 024
+        admin.execute("INSERT INTO pub.feedback_events (kind, theme_id) VALUES ('unpin_theme', %s)", (theme,))
+    assert results(lat) == []
+    assert themes.apply_feedback(lat) == {"unpinned": 1}
+    assert table(lat, "SELECT pinned FROM im.themes WHERE theme_id = %s", theme) == [(False,)]
