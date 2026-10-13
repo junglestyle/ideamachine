@@ -39,20 +39,20 @@ def test_a_verdict_follows_its_capture_to_the_new_episode(pipe, cfg, stream):
     ((old, _),) = current_items(pipe)
     extract.decide(pipe, old, "discard", "already on the list")
     pipe.execute("UPDATE im.item_verdicts SET how = 'audit' WHERE item_id = %s", (old,))
-    assert feedback.carry_verdicts(pipe) == {"carried": 0, "already_decided": 0, "waiting": 0}
+    assert feedback.carry_verdicts(pipe) == {"carried": 0, "already_decided": 0, "waiting": 0, "not_captured_again": 0}
 
     retranscribe(pipe, cfg, stream, claude)
     ((new, quote),) = current_items(pipe)
     assert new != old and quote == "I think we should move off the managed database."
     assert [r[0] for r in extract.review_items(pipe)] == [new]
-    assert feedback.carry_verdicts(pipe) == {"carried": 1, "already_decided": 0, "waiting": 0}
+    assert feedback.carry_verdicts(pipe) == {"carried": 1, "already_decided": 0, "waiting": 0, "not_captured_again": 0}
     assert not extract.review_items(pipe)
     (copy,) = table(pipe, """SELECT n.verdict, n.note, n.how, n.decided_at = o.decided_at, n.quote,
                                     n.carried_from = o.verdict_id
                              FROM im.item_verdicts n JOIN im.item_verdicts o ON o.item_id = %s
                              WHERE n.item_id = %s""", old, new)
     assert copy == ("discard", "already on the list", "audit", True, quote, True)
-    assert feedback.carry_verdicts(pipe) == {"carried": 0, "already_decided": 0, "waiting": 0}  # settled once
+    assert feedback.carry_verdicts(pipe) == {"carried": 0, "already_decided": 0, "waiting": 0, "not_captured_again": 0}  # settled once
 
     # And on again: the copy is a verdict like any other.
     stream.conversations["c-edits"].turns[2] = _me(10810.5, 10816.5, quote)   # re-transcribed again: new times
@@ -74,7 +74,7 @@ def test_my_own_verdict_on_the_new_item_stands(pipe, cfg, stream):
     retranscribe(pipe, cfg, stream, claude)
     ((new, _),) = current_items(pipe)
     extract.decide(pipe, new, "star")
-    assert feedback.carry_verdicts(pipe) == {"carried": 0, "already_decided": 1, "waiting": 0}
+    assert feedback.carry_verdicts(pipe) == {"carried": 0, "already_decided": 1, "waiting": 0, "not_captured_again": 0}
     assert table(pipe, "SELECT verdict FROM im.item_verdicts WHERE item_id = %s", new) == [("star",)]
 
 
@@ -83,9 +83,13 @@ def test_a_different_capture_of_the_same_speech_isnt_carried(pipe, cfg, stream):
     extract.run_stage(pipe, FakeClaude(capture(DATABASE)))
     ((old, _),) = current_items(pipe)
     extract.decide(pipe, old, "keep")
+    CORRECTIONS["split a turn"][0](stream)
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)   # the new episode isn't read yet
+    assert feedback.carry_verdicts(pipe) == {"carried": 0, "already_decided": 0, "waiting": 1, "not_captured_again": 0}
     reworded = lambda text: [dict(i, quote="hosting costs") for i in capture(DATABASE)(text)]  # noqa: E731
-    retranscribe(pipe, cfg, stream, FakeClaude(reworded))
-    assert feedback.carry_verdicts(pipe) == {"carried": 0, "already_decided": 0, "waiting": 1}
+    extract.run_stage(pipe, FakeClaude(reworded))
+    assert feedback.carry_verdicts(pipe) == {"carried": 0, "already_decided": 0, "waiting": 0, "not_captured_again": 1}
     assert len(extract.review_items(pipe)) == 1
 
 
