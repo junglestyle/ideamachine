@@ -105,6 +105,7 @@ def _run_stages(conn, cfg) -> dict:
             stats["lattice"] = _lattice(conn, cfg)
             stats["themes"] = _themes(conn, cfg)
             stats["scores"] = _scores(conn, cfg)
+            stats["sensitivity"] = _sensitivity(conn, cfg)
             stats["digest"] = _digest(conn, cfg)
         from im import router
 
@@ -175,6 +176,20 @@ def _scores(conn, cfg) -> dict:
 
     try:
         return scores.score_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd)
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
+        return {"stopped": f"Claude credentials rejected: {e}"}
+    except anthropic.AnthropicError as e:
+        return {"stopped": f"Claude unavailable: {e}"}
+
+
+def _sensitivity(conn, cfg) -> dict:
+    """Tag what demo mode hides, or say why it couldn't; the run goes on either way."""
+    import anthropic
+
+    from im import sensitivity
+
+    try:
+        return sensitivity.tag_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd)
     except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
         return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:
