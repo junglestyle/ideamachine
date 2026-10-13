@@ -9,6 +9,7 @@ NAS_CONFIG="$NAS_ROOT/config"
 NAS_PG="$NAS_ROOT/pg"
 NAS_LOGS="$NAS_ROOT/logs"
 NAS_BACKUPS="$NAS_ROOT/backups"
+NAS_VOCAB="$NAS_ROOT/vocab"   # my vocabulary file, written by the run, read by Hearsay (read-only mount)
 NAS_LATTICE_REPO="$NAS_ROOT/lattice"
 NAS_DB_ENV="$NAS_CONFIG/db.env"
 NAS_PIPELINE_ENV="$NAS_CONFIG/pipeline.env"
