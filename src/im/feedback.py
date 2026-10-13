@@ -15,6 +15,11 @@ import re
 ITEM_KINDS = {"item_keep": "keep", "item_discard": "discard", "item_star": "star"}
 
 
+def _how(payload: dict) -> str:
+    """Lattice marks a keep made without reading {"bulk": true}, and a spot check {"audit": true}."""
+    return "bulk" if payload.get("bulk") is True else "audit" if payload.get("audit") is True else "one"
+
+
 def apply_item_feedback(conn) -> dict:
     done: dict = {}
     rows = conn.execute(
@@ -24,17 +29,18 @@ def apply_item_feedback(conn) -> dict:
     for event_id, kind, item_id, payload in rows:
         verdict = ITEM_KINDS[kind]
         note = ((payload or {}).get("note") or "").strip()[:500] or None
+        how = _how(payload or {})
         with conn.transaction():
             latest = conn.execute(
-                """SELECT verdict, note FROM im.item_verdicts WHERE item_id = %s
+                """SELECT verdict, note, how FROM im.item_verdicts WHERE item_id = %s
                    ORDER BY decided_at DESC, verdict_id DESC LIMIT 1""", (item_id,)).fetchone()
-            if latest == (verdict, note):   # e.g. Lattice resent a queued event whose response was lost
+            if latest == (verdict, note, how):   # e.g. Lattice resent a queued event whose response was lost
                 result = "repeat"
             else:
                 inserted = conn.execute(
-                    """INSERT INTO im.item_verdicts (item_id, segment_ids, quote, verdict, note)
-                       SELECT item_id, source_segment_ids, quote, %s, %s FROM im.items WHERE item_id = %s""",
-                    (verdict, note, item_id)).rowcount
+                    """INSERT INTO im.item_verdicts (item_id, segment_ids, quote, verdict, note, how)
+                       SELECT item_id, source_segment_ids, quote, %s, %s, %s FROM im.items WHERE item_id = %s""",
+                    (verdict, note, how, item_id)).rowcount
                 result = verdict if inserted else "no such item"
             conn.execute("INSERT INTO im.feedback_applied (event_id, result) VALUES (%s, %s)", (event_id, result))
         done[result] = done.get(result, 0) + 1
@@ -116,8 +122,10 @@ def carry_verdicts(conn) -> dict:
             g = groups[keys[n]]
             if not decided:
                 conn.execute(
-                    """INSERT INTO im.item_verdicts (item_id, segment_ids, quote, verdict, note, decided_at, carried_from)
-                       SELECT i.item_id, i.source_segment_ids, i.quote, v.verdict, v.note, v.decided_at, v.verdict_id
+                    """INSERT INTO im.item_verdicts (item_id, segment_ids, quote, verdict, note, how, decided_at,
+                                                    carried_from)
+                       SELECT i.item_id, i.source_segment_ids, i.quote, v.verdict, v.note, v.how, v.decided_at,
+                              v.verdict_id
                        FROM im.item_verdicts v, im.items i WHERE v.verdict_id = ANY(%s) AND i.item_id = %s
                        ORDER BY v.decided_at, v.verdict_id""", (g["verdicts"], item_id))
             with conn.cursor() as cur:

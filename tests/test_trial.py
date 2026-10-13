@@ -48,5 +48,9 @@ def test_a_trial_compares_the_candidate_with_my_verdicts(pipe, cfg, stream):
     assert r["skipped_discards"] == ["Who's got the coffee order?"]
     assert r["unjudged_captures"] == ["idea: We should pin the cache key to the lockfile hash."]
 
+    # A keep in bulk wasn't read: it isn't a judgment to compare a prompt against.
+    pipe.execute("UPDATE im.item_verdicts SET how = 'bulk' WHERE verdict = 'keep'")
+    assert [v for vs in trial.judged(pipe).values() for v, *_ in vs] == ["discard"]
+
     assert trial.run(pipe, candidate, v2)["read"] == 0   # read once per payload
     assert trial.run(pipe, candidate, extract.system_prompt("v2", "x"), monthly_cap_usd=0)["stopped"]
