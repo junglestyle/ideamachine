@@ -1,8 +1,9 @@
 """Surfacing: rank ideas by signals that don't rest on my keep/discard tags (ROADMAP Phase 2, slice 3).
 
 My tags are noisy: judging the same capture twice, I agreed with myself 64% of the time. So the ranking leans on a
-fixed rubric Claude applies to each idea, how often an idea recurs, and my stars, and pub.idea_scores combines
-them. The rubric asks what an idea is worth to someone who doesn't know me, not whether I'd keep it.
+fixed rubric Claude applies to each idea, whether I've developed the idea, and my stars, and pub.idea_scores
+combines them, weighted by my pairwise comparisons (migration 025). The rubric asks what an idea is worth to
+someone who doesn't know me, not whether I'd keep it.
 """
 
 import hashlib

@@ -67,9 +67,9 @@ def test_the_run_embeds_places_ranks_and_digests_it(seeded_lattice, admin):
     assert table(pipe, "SELECT count(*) FROM pub.connections WHERE kind = 'related' AND %s IN (a, b)", idea) == [(1,)]
 
     scores.score_stage(pipe, FakeScorer())
-    (score, rubric, recurrence), = table(pipe, "SELECT score::float, rubric::float, recurrence::float "
-                                               "FROM pub.idea_scores WHERE idea_id = %s", idea)
-    assert recurrence == 0 and score == pytest.approx(0.7 * rubric + 0.1)   # adding it counts like a star
+    (score, rubric, developed), = table(pipe, "SELECT score::float, rubric::float, developed "
+                                              "FROM pub.idea_scores WHERE idea_id = %s", idea)
+    assert developed and score == pytest.approx(0.65 * rubric + 0.25)   # an idea I added counts as developed
 
     claude = FakeDigester()
     digest.digest_stage(pipe, claude, week=WEEK)
