@@ -41,6 +41,9 @@ def _purge_tombstoned(conn) -> tuple[set[str], int]:
                       SELECT 1 FROM im.idea_evidence ev JOIN im.items i USING (item_id)
                       JOIN im.source_tombstones t ON t.segment_id = ANY(i.source_segment_ids)
                       WHERE ev.idea_id = d.idea_id AND ev.relation = 'origin')""")
+    # A digest may paraphrase forgotten speech anywhere in its text, so the whole digest goes.
+    conn.execute("""DELETE FROM im.digests g WHERE EXISTS (
+                      SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(g.segment_ids))""")
     conn.execute("""DELETE FROM im.item_verdicts v WHERE EXISTS (
                       SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(v.segment_ids))""")
     # What was sent can't be recalled, but the local copy of the text goes; the segment IDs stay so
