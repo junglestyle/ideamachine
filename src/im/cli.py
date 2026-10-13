@@ -105,6 +105,7 @@ def _run_stages(conn, cfg) -> dict:
             stats["lattice"] = _lattice(conn, cfg)
             stats["themes"] = _themes(conn, cfg)
             stats["scores"] = _scores(conn, cfg)
+            stats["digest"] = _digest(conn, cfg)
         from im import router
 
         stats["route"] = router.run_stage(conn)
@@ -177,6 +178,36 @@ def _scores(conn, cfg) -> dict:
         return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
+
+
+def _digest(conn, cfg, week=None, again=False) -> dict:
+    """Write last week's digest if it isn't written yet, or say why it couldn't; the run goes on either way."""
+    import anthropic
+
+    from im import digest
+
+    try:
+        return digest.digest_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd, week, again)
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
+        return {"stopped": f"Claude credentials rejected: {e}"}
+    except anthropic.AnthropicError as e:
+        return {"stopped": f"Claude unavailable: {e}"}
+
+
+def cmd_digest(args) -> None:
+    """Print a weekly digest (the latest by default); --write writes it first, --again rewrites it."""
+    from datetime import date, timedelta
+
+    from im import digest
+
+    week = date.fromisoformat(args.week) if args.week else None
+    if week:
+        week -= timedelta(days=week.weekday())   # its Monday
+    with db.connect(db.pipeline_dsn()) as conn:
+        if args.write or args.again:
+            week = week or digest.last_week()
+            print(json.dumps(_digest(conn, config.load(), week, args.again), default=str))
+        print(digest.show(conn, week))
 
 
 def cmd_scores(args) -> None:
@@ -455,6 +486,11 @@ def main(argv=None) -> None:
     sc = sub.add_parser("scores", help="the top-ranked ideas, with their rubric scores")
     sc.add_argument("--top", type=int, default=20)
     sc.set_defaults(func=cmd_scores)
+    dg = sub.add_parser("digest", help="the weekly digest: what the lattice gained, synthesized by Claude")
+    dg.add_argument("--week", help="any date in the week (default: the latest digest, or last week with --write)")
+    dg.add_argument("--write", action="store_true", help="write the week's digest if it isn't written (sends to Claude)")
+    dg.add_argument("--again", action="store_true", help="rewrite the week's digest (sends to Claude)")
+    dg.set_defaults(func=cmd_digest)
     tr = sub.add_parser("trial", help="try a candidate extraction prompt on episodes I've judged (sends to Claude)")
     tr.add_argument("prompt", help="a name in extract.PROMPTS, e.g. v2")
     tr.add_argument("--limit", type=int, help="read at most this many episodes this time")
