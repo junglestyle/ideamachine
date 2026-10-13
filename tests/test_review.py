@@ -86,3 +86,5 @@ def test_review_says_how_each_verdict_was_made(seeded_lattice, admin):
     assert feedback.apply_item_feedback(pipe) == {"discard": 1, "keep": len(rest) + 1, "repeat": 1}
     hows = table(pipe, "SELECT item_id, how FROM im.item_verdicts ORDER BY verdict_id")
     assert hows == [(spot, "audit"), *[(i, "bulk") for i in rest], (rest[0], "one")]
+    shown = dict(as_lattice(admin, "SELECT item_id, how FROM pub.evidence WHERE item_id = ANY(%s)", [spot, *rest]))
+    assert shown == {spot: "audit", rest[0]: "one", **{i: "bulk" for i in rest[1:]}}   # the latest verdict's
