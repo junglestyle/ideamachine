@@ -18,12 +18,13 @@ KEPT = ("keep", "star")
 
 
 def judged(conn) -> dict:
-    """Current episodes with captures I've decided on: episode_id -> [(verdict, quote, segment_ids)], latest verdict."""
+    """Current episodes with captures I've decided on: episode_id -> [(verdict, quote, segment_ids)], latest verdict.
+    A keep in bulk wasn't read, so it isn't a judgment to compare against: those captures count as undecided."""
     out: dict = {}
     for eid, verdict, quote, segs in conn.execute(
             """SELECT i.episode_id, v.verdict, i.quote, i.source_segment_ids
                FROM im.items i JOIN im.episodes e USING (episode_id)
-               JOIN LATERAL (SELECT verdict FROM im.item_verdicts WHERE item_id = i.item_id
+               JOIN LATERAL (SELECT verdict FROM im.item_verdicts WHERE item_id = i.item_id AND how <> 'bulk'
                              ORDER BY decided_at DESC, verdict_id DESC LIMIT 1) v ON true
                WHERE e.current ORDER BY e.started_at, i.item_id"""):
         out.setdefault(eid, []).append((verdict, quote, set(segs)))

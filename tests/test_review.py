@@ -71,3 +71,18 @@ def test_a_resent_verdict_is_recorded_once(seeded_lattice, admin):
     assert feedback.apply_item_feedback(pipe) == {"keep": 2, "repeat": 1, "star": 1}
     assert table(pipe, "SELECT verdict FROM im.item_verdicts WHERE item_id = %s ORDER BY verdict_id", item) == \
         [("keep",), ("star",), ("keep",)]
+
+
+def test_review_says_how_each_verdict_was_made(seeded_lattice, admin):
+    pipe = seeded_lattice
+    queue = as_lattice(admin, "SELECT item_id FROM pub.review_items ORDER BY confidence, item_id")
+    spot, *rest = [r[0] for r in queue]
+    event = "INSERT INTO pub.feedback_events (kind, item_id, payload) VALUES (%s, %s, %s)"
+    as_lattice(admin, event, "item_discard", spot, json.dumps({"audit": True}))
+    for i in rest:
+        as_lattice(admin, event, "item_keep", i, json.dumps({"bulk": True}))
+    as_lattice(admin, event, "item_keep", rest[0], json.dumps({"bulk": True}))   # a resend
+    as_lattice(admin, event, "item_keep", rest[0], json.dumps({}))   # then read and kept on its own: not a repeat
+    assert feedback.apply_item_feedback(pipe) == {"discard": 1, "keep": len(rest) + 1, "repeat": 1}
+    hows = table(pipe, "SELECT item_id, how FROM im.item_verdicts ORDER BY verdict_id")
+    assert hows == [(spot, "audit"), *[(i, "bulk") for i in rest], (rest[0], "one")]

@@ -38,6 +38,7 @@ def test_a_verdict_follows_its_capture_to_the_new_episode(pipe, cfg, stream):
     extract.run_stage(pipe, claude)
     ((old, _),) = current_items(pipe)
     extract.decide(pipe, old, "discard", "already on the list")
+    pipe.execute("UPDATE im.item_verdicts SET how = 'audit' WHERE item_id = %s", (old,))
     assert feedback.carry_verdicts(pipe) == {"carried": 0, "already_decided": 0, "waiting": 0}
 
     retranscribe(pipe, cfg, stream, claude)
@@ -46,10 +47,11 @@ def test_a_verdict_follows_its_capture_to_the_new_episode(pipe, cfg, stream):
     assert [r[0] for r in extract.review_items(pipe)] == [new]
     assert feedback.carry_verdicts(pipe) == {"carried": 1, "already_decided": 0, "waiting": 0}
     assert not extract.review_items(pipe)
-    (copy,) = table(pipe, """SELECT n.verdict, n.note, n.decided_at = o.decided_at, n.quote, n.carried_from = o.verdict_id
+    (copy,) = table(pipe, """SELECT n.verdict, n.note, n.how, n.decided_at = o.decided_at, n.quote,
+                                    n.carried_from = o.verdict_id
                              FROM im.item_verdicts n JOIN im.item_verdicts o ON o.item_id = %s
                              WHERE n.item_id = %s""", old, new)
-    assert copy == ("discard", "already on the list", True, quote, True)
+    assert copy == ("discard", "already on the list", "audit", True, quote, True)
     assert feedback.carry_verdicts(pipe) == {"carried": 0, "already_decided": 0, "waiting": 0}  # settled once
 
     # And on again: the copy is a verdict like any other.
