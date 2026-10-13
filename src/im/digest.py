@@ -16,7 +16,8 @@ KINDS = ("recurring", "convergence", "sleeper", "project", "outside_value")
 
 SYSTEM = """You write my weekly digest from my idea lattice: ideas captured from my conversations and notes, \
 matched together over time, grouped into themes and ranked. You get the ideas said this week, the top of the \
-ranking for context, the links between them, and what I did this week (stars, links, comparisons). Write 3 to 7 \
+ranking for context, ideas I added myself (the strongest signal of what I care about), the links between them, \
+and what I did this week (stars, links, comparisons). Write 3 to 7 \
 points, each one of these kinds:
 - recurring: an idea or cluster I keep coming back to, and what that might mean.
 - convergence: separate ideas, often from different themes or conversations, that point at the same thing.
@@ -72,6 +73,15 @@ def _said(conn, start: datetime, end: datetime) -> list[tuple]:
            ORDER BY w.n DESC, s.score DESC NULLS LAST, d.idea_id""", (start, end)).fetchall()
 
 
+def _added(conn, start: datetime, end: datetime) -> list[tuple]:
+    """Ideas I added myself during the week."""
+    return conn.execute(
+        """SELECT d.idea_id, d.title, d.statement, d.themes, 0, d.n_evidence, d.first_said, s.score, d.starred
+           FROM pub.ideas d LEFT JOIN pub.idea_scores s USING (idea_id)
+           WHERE d.origin = 'mine' AND d.created_at >= %s AND d.created_at < %s
+           ORDER BY d.created_at, d.idea_id""", (start, end)).fetchall()
+
+
 def _top(conn, exclude: list) -> list[tuple]:
     return conn.execute(
         """SELECT d.idea_id, d.title, d.statement, d.themes, 0, d.n_evidence, d.first_said, s.score, d.starred
@@ -100,8 +110,9 @@ def payload(conn, week: date) -> tuple[str, list]:
     """The text Claude reads for the week, and the idea ids in the order it numbers them."""
     start, end = _period(week)
     said = _said(conn, start, end)
-    top = _top(conn, [r[0] for r in said])
-    ideas = said + top
+    added = [r for r in _added(conn, start, end) if r[0] not in {s[0] for s in said}]
+    top = _top(conn, [r[0] for r in said + added])
+    ideas = said + added + top
     num = {r[0]: n for n, r in enumerate(ideas, 1)}
     links = conn.execute(
         """SELECT a, b, kind FROM pub.connections WHERE a = ANY(%s) AND b = ANY(%s) ORDER BY a, b""",
@@ -125,6 +136,8 @@ def payload(conn, week: date) -> tuple[str, list]:
             activity.append(f"preferred {num[better]} over {num[worse]}")
     text = [f"Week of {week:%Y-%m-%d} to {week + timedelta(days=6):%Y-%m-%d}.", "",
             f"Said this week ({len(said)} ideas):", *(_line(num[r[0]], r) for r in said), "",
+            *([f"Added by me this week ({len(added)} ideas):", *(_line(num[r[0]], r) for r in added), ""]
+              if added else []),
             "Top of the ranking, not said this week:", *(_line(num[r[0]], r) for r in top)]
     if links:
         text += ["", "Links: " + "; ".join(f"{num[a]}-{num[b]} ({k})" for a, b, k in links)]
@@ -145,7 +158,7 @@ def digest_stage(conn, client, monthly_cap_usd: float = 20.0, week: date | None 
     start, end = _period(week)
     text, ids = payload(conn, week)
     pv = prompt_version()
-    if not _said(conn, start, end):
+    if not _said(conn, start, end) and not _added(conn, start, end):
         answer, segs = {"summary": "Nothing new was said this week.", "points": []}, []
     else:
         if spent_this_month(conn) >= monthly_cap_usd:

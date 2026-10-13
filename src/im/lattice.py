@@ -217,7 +217,8 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
     items = _pending_items(conn)
     stats = {"matcher": version, "pending": len(items), "new": 0, "same_as": 0, "evolves": 0, "skipped": 0,
              "stopped": None}
-    if not items:
+    if not items:   # ideas I added or corrected still need embedding, relating and placing
+        stats["related_links"] = relate(conn, embedder)
         stats["positions"] = place(conn, embedder.model_version)
         return stats
     _embed_missing(conn, embedder, "item_embeddings", "item_id", [(i[0], f"{i[5]}\n{i[4]}") for i in items])
@@ -385,6 +386,7 @@ def status(conn) -> dict:
         "ideas": q("SELECT count(*) FROM pub.ideas"),
         "archive": q("SELECT count(*) FROM pub.ideas WHERE origin = 'archive'"),
         "captured": q("SELECT count(*) FROM pub.ideas WHERE origin = 'captured'"),
+        "added_by_me": q("SELECT count(*) FROM pub.ideas WHERE origin = 'mine'"),
         "with_more_than_one_evidence": q("SELECT count(*) FROM pub.ideas WHERE n_evidence > 1"),
         "connections": dict(conn.execute("SELECT kind, count(*) FROM pub.connections GROUP BY kind").fetchall()),
         "unmatched_items": len(_pending_items(conn)),
