@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/ideamachine-mark-dark.svg">
+    <img src="docs/assets/ideamachine-mark-light.svg" alt="Idea Machine" width="120">
+  </picture>
+</p>
+
 [![tests](https://github.com/junglestyle/ideamachine/actions/workflows/test.yml/badge.svg)](https://github.com/junglestyle/ideamachine/actions/workflows/test.yml)
 
 # Idea Machine
