@@ -73,5 +73,5 @@ Setup, commands and configuration: [docs/install.md](docs/install.md). Deploying
 
 ## Status
 
-Single-user; runs hourly on a home NAS; 89 tests (pytest, against a throwaway Postgres); roadmap in
+Single-user; runs hourly on a home NAS, from its NVMe pool; 89 tests (pytest, against a throwaway Postgres); roadmap in
 [docs/ROADMAP.md](docs/ROADMAP.md).
