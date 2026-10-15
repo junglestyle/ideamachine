@@ -1,19 +1,28 @@
 # Idea Machine on TrueNAS (install/nas.sh): Postgres, the hourly pipeline run, and Lattice.
+# Hearsay's stream path comes from install/.env, which install/nas.sh writes (it's on whichever pool Hearsay is on).
 name: ideamachine
+
+# Container output goes to the journal (on the boot pool), not to files on the data disks:
+#   journalctl -t ideamachine-db, -t lattice, -t lattice-tunnel
+x-logging: &logging
+  driver: journald
+  options:
+    tag: "{{.Name}}"
 
 services:
   # Internal only: no host port. Admin access: docker compose -f ... exec db psql -U postgres -d im
   db:
     image: pgvector/pgvector:pg16
     container_name: ideamachine-db
+    logging: *logging
     # The apps user, like the other containers: the image's own postgres uid (999) is `netdata` on TrueNAS, which
     # would let the monitoring agent read the database files. The image supports any uid that owns the data dir.
     user: "568:568"
-    env_file: /mnt/storage/ideamachine/config/db.env
+    env_file: /mnt/fast/ideamachine/config/db.env
     environment:
       POSTGRES_DB: im
     volumes:
-      - /mnt/storage/ideamachine/pg:/var/lib/postgresql/data
+      - /mnt/fast/ideamachine/pg:/var/lib/postgresql/data
       - ../dev/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres", "-d", "im"]
@@ -27,18 +36,19 @@ services:
     build: ..
     image: ideamachine
     profiles: ["tools"]
+    logging: *logging   # the cron job also sends this output to the journal, as -t ideamachine-run
     init: true   # forwards stop signals: Python as PID 1 ignores them
     user: "568:568"
-    env_file: /mnt/storage/ideamachine/config/pipeline.env
+    env_file: /mnt/fast/ideamachine/config/pipeline.env
     environment:
       IM_STREAM_DIR: /data/stream
       IM_CONFIG: /config/im.toml   # e.g. extract.prompt and extract.interests; made by install/nas.sh
       IM_VOCAB_PATH: /vocab/vocab.json   # my vocabulary, for Hearsay to read (src/im/vocab.py)
       TZ: America/New_York   # payloads carry local times: keep them as they were on eeyore (im pending)
     volumes:
-      - /mnt/storage/hearsay/stream:/data/stream:ro
-      - /mnt/storage/ideamachine/config/im:/config:ro
-      - /mnt/storage/ideamachine/vocab:/vocab
+      - ${HEARSAY_STREAM:?no install/.env; run install/nas.sh}:/data/stream:ro
+      - /mnt/fast/ideamachine/config/im:/config:ro
+      - /mnt/fast/ideamachine/vocab:/vocab
     depends_on:
       db:
         condition: service_healthy
@@ -48,12 +58,13 @@ services:
   # (8791), which Lattice opens only when LATTICE_PUBLIC_URL is set: cloudflared publishes it to the internet for
   # claude.ai, behind OAuth and Anthropic's address range (Lattice's docs/public-mcp.md).
   lattice:
-    build: /mnt/storage/ideamachine/lattice
+    build: /mnt/fast/repos/lattice   # admin's clone
     image: lattice
     container_name: lattice
+    logging: *logging
     init: true
     user: "568:568"
-    env_file: /mnt/storage/ideamachine/config/lattice.env
+    env_file: /mnt/fast/ideamachine/config/lattice.env
     environment:
       TZ: America/New_York
     ports:
@@ -69,8 +80,9 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:2026.9.3
     container_name: lattice-tunnel
+    logging: *logging
     profiles: ["public"]
     command: tunnel --no-autoupdate run
-    env_file: /mnt/storage/ideamachine/config/cloudflared.env   # TUNNEL_TOKEN=...
+    env_file: /mnt/fast/ideamachine/config/cloudflared.env   # TUNNEL_TOKEN=...
     network_mode: host   # to reach 127.0.0.1:8791
     restart: unless-stopped
