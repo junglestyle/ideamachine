@@ -18,15 +18,8 @@ Idea Machine reads the speaker-attributed utterances that Hearsay publishes in i
 
 ## 2. Principles applied
 
-| Principle | How it shows up |
-|---|---|
-| Egress is a logged, versioned policy | What leaves the box is decided by `im.egress.POLICY_VERSION` (currently policy B: everyone's words, speakers pseudonymized; decision 0004) and every request is logged with the segment IDs it carried. |
-| Raw is immutable | Idea Machine reads Hearsay's stream read-only and never writes to it. Its own copy of the stream (`im.source_*`) is append-only: corrections become superseding rows (§3), never updates. Forgetting is the one exception, and it deletes for real (§3). |
-| Derived is re-derivable | Every derived row carries `schema_version`, `stage_version` (code/heuristic), and `model` + `model_version` + `prompt_version` where relevant, plus `input_hash`. Each stage supports `im reset --stage X`. |
-| Cheap models route, never drop | Triage writes labels and a route. No stage deletes or hides segments. "Noise" is a label, not a filter. |
-| Traceability | Every episode, label, span, link and synthesized object stores the `segment_id`s it came from. |
-| Eval before trust | Each automated tier has to beat its exit threshold on the hand-labeled set before its output drives anything. |
-| Human labels are not derived | Labels live in their own table, anchored to segment IDs rather than episode IDs, so they survive episode re-derivation. When a segment is superseded, its labels follow the supersession links to the current segments, so a correction never orphans a label. |
+The rules the design keeps (raw is immutable, derived is re-derivable, eval before trust and the rest) are in
+[standards.md](standards.md#invariants).
 
 **Stack assumptions** (not questioned, change if wrong): Python; Idea Machine's own Postgres 16 + pgvector (Hearsay has no Postgres) with schema `im`; and a single container on TrueNAS, run by a timer, with Hearsay's stream directory mounted read-only. Extraction is Claude and embeddings are a small CPU model, so nothing needs eeyore's GPU; a local model, if one comes back, can run on eeyore as a worker the way Hearsay's transcription does. Production is the NAS (`docs/deploy.md`, 2026-10-06), on its NVMe pool since 2026-10-15 so the spinning disks can idle; eeyore is for development.
 
