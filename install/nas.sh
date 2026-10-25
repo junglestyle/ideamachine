@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TrueNAS SCALE: datasets, secrets, images, Postgres, Lattice, the hourly run and nightly backups.
+# TrueNAS SCALE: datasets, secrets, images, Postgres, Lattice, the run as a corral kind, and nightly backups.
 # Run as root (sudo) from admin's clone in /mnt/fast/repos. Safe to re-run; also how updates are deployed.
 #
 # Everything lives on the NVMe pool (fast/ideamachine). Before 2026-10-15 it was on storage/ideamachine: when fast
@@ -248,14 +248,36 @@ else
     echo "off (set LATTICE_PUBLIC_URL in $NAS_LATTICE_ENV to turn it on)"
 fi
 
-say "Hourly run at :45 and nightly backups (TrueNAS cron jobs, output to the journal)"
-# :45: after Hearsay's transcription (:00, on eeyore) and reprocess (:30). flock skips a run while one is going.
-# No % in either command: cron would treat it as a newline.
+say "The run on corral's NAS worker (github.com/junglestyle/corral)"
+# Hearsay enqueues ideamachine.run at the end of its pipeline, once the stream has new turns. Corral is set up from
+# its own repo; this adds the kind to its worker.
+systemctl is-active -q corral-worker && [ -f "$NAS_CORRAL_DIR/worker.toml" ] \
+    || die "no corral worker running from $NAS_CORRAL_DIR. Set up corral's server and NAS worker (docs/running.md in
+junglestyle/corral, examples/system-worker.sh there), then re-run."
+grep -q '"nas"' "$NAS_CORRAL_DIR/worker.toml" \
+    || die "the corral worker in $NAS_CORRAL_DIR/worker.toml doesn't offer \"nas\"; add it to offers, then re-run"
+mkdir -p "$NAS_CORRAL_DIR/kinds.d"
+# Blocking flock, so a run started by hand delays the job instead of failing it. systemd-cat keeps its output under
+# journalctl -t ideamachine-run.
+if write_if_changed "$NAS_CORRAL_DIR/kinds.d/ideamachine.toml" <<EOF
+# Written by ideamachine's install/nas.sh on every run.
+[kinds."ideamachine.run"]
+argv = ["systemd-cat", "-t", "ideamachine-run", "flock", "$RUN_LOCK", $(printf '"%s", ' "${COMPOSE[@]}")"run", "--rm", "-T", "run"]
+EOF
+then
+    systemctl restart corral-worker
+    echo "kinds updated, worker restarted"
+fi
+echo "kinds in $NAS_CORRAL_DIR/kinds.d/ideamachine.toml"
+cron_delete "ideamachine run"   # the hourly run at :45, before corral
+
+say "Nightly backups (TrueNAS cron job, output to the journal)"
+# RUN_JOB isn't scheduled: it's the run as the worker does it, with the outcome in the journal, for verifying below.
+# flock skips a run while one is going. No % in either command: cron would treat it as a newline.
 RUN_JOB="( (flock -n -E 75 $RUN_LOCK ${COMPOSE[*]} run --rm -T run </dev/null || echo \"run did not finish: exit \$? (75: skipped, the last run was still going)\") 2>&1 | logger -t ideamachine-run )"
 # Your labels, verdicts, stars and pins are the irreplaceable part. Two weeks of nightly dumps, written whole or not
 # at all; fast is snapshotted at 4:00 and replicated to storage, so each night's dump is in that night's copy.
 BACKUP_JOB="( (f=$NAS_BACKUPS/im-\$(date -I).dump; ${COMPOSE[*]} exec -T db pg_dump -U postgres -d im -Fc > \$f.part && mv \$f.part \$f && ls -l \$f && find $NAS_BACKUPS -name 'im-*.dump' -mtime +14 -delete || echo \"backup failed: exit \$?\") 2>&1 | logger -t ideamachine-backup )"
-cron_ensure "ideamachine run" 45 "*" "$RUN_JOB"
 cron_ensure "ideamachine backup" 15 3 "$BACKUP_JOB"
 echo "logs: journalctl -t ideamachine-run, journalctl -t ideamachine-backup"
 
@@ -264,8 +286,8 @@ since="$(date +%s)"
 docker exec "$DB_CONTAINER" pg_isready -q -U postgres -d im || die "the database isn't up"
 echo "database: up, $(row_counts | awk -F'|' '{n += $2} END {print NR " tables, " n " rows"}')"
 
-# The cron jobs' own commands, as cron runs them (sh, output to the journal).
-flock "$RUN_LOCK" true   # let a run cron started finish first
+# The run and the backup cron job's command, as sh runs them, output to the journal.
+flock "$RUN_LOCK" true   # let a run the worker started finish first
 sh -c "$RUN_JOB"
 sleep 1
 run_out="$(journalctl -q -t ideamachine-run --since "@$since" -o cat)"
@@ -295,7 +317,8 @@ fi
 
 say "Done"
 cat <<EOF
-Idea Machine runs hourly at :45 (log: journalctl -t ideamachine-run). One run now, to see it work:
+Idea Machine runs when Hearsay's pipeline enqueues it on corral (log: journalctl -t ideamachine-run). One run now,
+to see it work:
     sudo ${COMPOSE[*]} run --rm run
 Hearsay's stream: $HEARSAY_STREAM ($HEARSAY_STREAM_WHY)
 Lattice: $LATTICE_URL
