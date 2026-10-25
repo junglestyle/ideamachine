@@ -25,6 +25,8 @@ HEARSAY_STREAM_STORAGE="/mnt/storage/hearsay/stream"
 LATTICE_HTTPS_PORT=8444
 DB_CONTAINER=ideamachine-db
 RUN_LOCK=/run/ideamachine-run.lock
+# Corral's NAS worker (github.com/junglestyle/corral, examples/system-worker.sh there) runs from here.
+NAS_CORRAL_DIR="/mnt/fast/corral"
 APPS_UID=568
 APPS_GID=568
 COMPOSE=(docker compose -f "$REPO_DIR/install/compose.yaml")
@@ -75,6 +77,23 @@ print(json.dumps({"user": "root", "command": sys.argv[1], "description": sys.arg
         midclt call cronjob.update "$id" "$payload" >/dev/null
         echo "up to date: $description (job $id)"
     fi
+}
+
+cron_delete() {
+    local id
+    id="$(cron_id "$1")"
+    [ -n "$id" ] || return 0
+    midclt call cronjob.delete "$id" >/dev/null
+    echo "removed: $1 (job $id)"
+}
+
+# Writes stdin to FILE only if that changes it, and says whether it did, so a re-run doesn't restart a worker for
+# nothing.
+write_if_changed() {
+    local file="$1" content
+    content="$(cat)"
+    [ -f "$file" ] && [ "$(cat "$file")" = "$content" ] && return 1
+    printf '%s\n' "$content" > "$file"
 }
 
 cron_disable() {  # leaves the job in place, switched off; cron_ensure switches it back on

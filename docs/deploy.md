@@ -1,7 +1,9 @@
 # Deploying to the NAS
 
 Idea Machine and Lattice run on TrueNAS SCALE next to Hearsay (ROADMAP §1 stack assumptions):
-- Postgres, the hourly pipeline run (cron, :45) and Lattice run in Docker.
+- Postgres, the pipeline run and Lattice run in Docker. The run is a kind on [corral](https://github.com/junglestyle/corral)'s
+  NAS worker: Hearsay enqueues it at the end of its pipeline, once the stream has new turns. Set up corral's server
+  and NAS worker (in `/mnt/fast/corral`, corral's `examples/system-worker.sh`) before `install/nas.sh`.
 - The data lives in the `fast/ideamachine` dataset, on the NVMe pool, so the spinning disks in `storage` can idle.
   `fast` is snapshotted nightly at 4:00 and replicated to `storage/fast-replica`.
 - The clones live in `/mnt/fast/repos` (dataset `fast/repos`), owned by `admin`. Clone and pull as admin, never
@@ -39,7 +41,7 @@ On the NAS again: `sudo /mnt/fast/repos/ideamachine/install/nas.sh`. It does the
 - checks that nothing already sent to Claude would be sent again (`im pending --expect-none-resent`; this catches
   a time zone that differs from eeyore's);
 - starts Lattice and publishes it with `tailscale serve`;
-- registers the hourly run and nightly backups;
+- adds the run to corral's NAS worker and registers nightly backups;
 - checks that it all works (below) and prints Lattice's address and login token.
 
 On the phone, open that address in Safari, log in, then Share → Add to Home Screen. Finally, on eeyore:
@@ -85,10 +87,10 @@ Hearsay mounts `/mnt/fast/ideamachine/vocab` read-only for my vocabulary (Hearsa
 ## Updates
 
 As admin, `git pull` in both clones, then `sudo /mnt/fast/repos/ideamachine/install/nas.sh`. It's idempotent:
-existing secrets are kept, images are rebuilt, migrations applied, the cron jobs rewritten.
+existing secrets are kept, images are rebuilt, migrations applied, the worker's kind and the backup cron job
+rewritten.
 
-Every time, it ends by checking that it all works: Postgres is up; one run, through the cron job's own command,
-finishes; one backup, the same way, writes a readable dump to `backups/`; Lattice answers on 127.0.0.1:8790 and,
+Every time, it ends by checking that it all works: Postgres is up; one run finishes; one backup, the same way, writes a readable dump to `backups/`; Lattice answers on 127.0.0.1:8790 and,
 through `tailscale serve`, at the tailnet address on 8444. So each re-run also does a run and a backup.
 
 ## Lattice's MCP endpoint for claude.ai (optional)
