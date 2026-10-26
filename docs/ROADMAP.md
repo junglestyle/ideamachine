@@ -21,11 +21,11 @@ Idea Machine reads the speaker-attributed utterances that Hearsay publishes in i
 The rules the design keeps (raw is immutable, derived is re-derivable, eval before trust and the rest) are in
 [standards.md](standards.md#invariants).
 
-**Stack assumptions** (not questioned, change if wrong): Python; Idea Machine's own Postgres 16 + pgvector (Hearsay has no Postgres) with schema `im`; and a single container on TrueNAS, run by a timer, with Hearsay's stream directory mounted read-only. Extraction is Claude and embeddings are a small CPU model, so nothing needs eeyore's GPU; a local model, if one comes back, can run on eeyore as a worker the way Hearsay's transcription does. Production is the NAS (`docs/deploy.md`, 2026-10-06), on its NVMe pool since 2026-10-15 so the spinning disks can idle; eeyore is for development.
+**Stack assumptions** (not questioned, change if wrong): Python; Idea Machine's own Postgres 16 + pgvector (Hearsay has no Postgres) with schema `im`; and a single container on the NAS, which corral's NAS worker runs as the last step of the chain Hearsay enqueues, with Hearsay's stream directory mounted read-only. Extraction is Claude and embeddings are a small CPU model, so nothing needs a GPU host. A local model, if one comes back, can run on the GPU host as a corral worker, the way Hearsay's transcription does. Production is the NAS ([deploy.md](deploy.md)); the dev machine is for development.
 
 ## 3. Hearsay → Idea Machine data contract
 
-The source is Hearsay's **utterance stream** (Hearsay slice 8, `hearsay/stream.py`), read-only. Hearsay rewrites it after every hourly reprocess into `/mnt/fast/hearsay/stream/` (`/mnt/storage/hearsay/stream/` until Hearsay moves to the NVMe pool; `install/nas.sh` picks). Idea Machine needs no Hearsay database and no access to Hearsay's internals.
+The source is Hearsay's **utterance stream** (Hearsay slice 8, `hearsay/stream.py`), read-only. Hearsay rewrites it after every reprocess into `/mnt/fast/hearsay/stream/` (`/mnt/storage/hearsay/stream/` until Hearsay moves to the NVMe pool; `install/nas.sh` picks). Idea Machine needs no Hearsay database and no access to Hearsay's internals.
 
 ### 3.1 What Hearsay publishes
 
@@ -75,7 +75,7 @@ These tables are owned by Idea Machine and live in its own database:
 1. Read its file and check the file's hash matches the revision. If it doesn't, Hearsay was mid-write, so skip the conversation until the next run.
 2. Compare with the previous version and write new segments and supersession links.
 
-Conversations that left the index lose their members, and are handled as restructures unless the forgotten list covers them. Open conversations are imported like the rest (the 15-minute target needs them), so their episodes are re-derived each hour while they grow. That's cheap for the heuristic stages; Claude only re-runs when the egress payload hash changes (§6). After the import, segmentation runs exactly as built in Phase 1 step 1, finding stale episodes by anti-joining against `im.current_segments`.
+Conversations that left the index lose their members, and are handled as restructures unless the forgotten list covers them. Open conversations are imported like the rest (the 15-minute target needs them), so their episodes are re-derived on each run while they grow. That's cheap for the heuristic stages; Claude only re-runs when the egress payload hash changes (§6). After the import, segmentation runs exactly as built in Phase 1 step 1, finding stale episodes by anti-joining against `im.current_segments`.
 
 ### 3.4 Forgetting
 
@@ -261,6 +261,6 @@ _What's left from here: the leak test and local gists, if a stricter policy is e
 | **LLM output is re-derivable but not reproducible** | A re-run changes objects I'd already acted on | Keep old object versions instead of blowing them away by default, and diff them on re-run. |
 | **Schema churn:** derived tables change often early on | Migrations become a tax, and labels get orphaned | Derived tables are disposable: drop and rebuild, rather than migrating data. Only `labels`, `projects` and later `proposals` get careful migrations. Labels anchor to segment IDs, never to derived IDs. |
 | **Contract drift with Hearsay** | Ingest breaks silently | The importer refuses unknown `format_version`s and fails a run on any utterance that doesn't parse, rather than skipping it. Fixtures follow Hearsay's `stream.py` format, and are re-checked when Hearsay changes it. |
-| **Supersession churn:** naming a speaker rewrites every conversation they're in, and growing conversations are re-transcribed hourly | Mass re-derivation, and the Claude tier re-spends | Re-derivation is incremental by `input_hash`. Synthesis re-runs only when the *egress payload* hash changes, not on any upstream change. |
+| **Supersession churn:** naming a speaker rewrites every conversation they're in, and growing conversations are re-transcribed as they grow | Mass re-derivation, and the Claude tier re-spends | Re-derivation is incremental by `input_hash`. Synthesis re-runs only when the *egress payload* hash changes, not on any upstream change. |
 | **Privacy leak through gists or the scrub** | Other people's words or identities reach the API | Fail-closed attribution, the leak test in CI, payload logging for audit, and a policy module that can be tightened plus re-derived. |
 | **Heuristic segmentation is wrong for long multi-party conversations** | Triage and synthesis see muddled episodes | Measured in the Phase 1 exit criteria. If it fails, add the simplest fix (topic-shift via embedding distance between windows) before adding any model. |
