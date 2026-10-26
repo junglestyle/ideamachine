@@ -26,21 +26,18 @@ What the pipeline keeps true, whatever the stage:
   everyone's words, speakers pseudonymized; [decision 0004](decisions/0004-claude-extraction.md)), and every request
   is logged with the segment IDs it carried.
 
-## Jungle Style
+## Dependencies
 
 - Lean on Postgres before writing your own: `im run`'s import, purge and segmentation share one transaction,
   embeddings live in pgvector, and roles draw the boundaries (`im_pipeline` owns `im.*`; `lattice_app` reads `pub` and
   only appends feedback).
 
-## Zen
+## Structure
 
 - One way in for each kind of feedback: `im ideas --review` and Lattice's verdict events land in the same
   `im.item_verdicts`, and `im themes` inserts the same `pub.feedback_events` Lattice does.
-
-## Pragmatic Programmer
-
-- Orthogonality: Idea Machine reads Hearsay only through its file stream, and Lattice reads Idea Machine only through
-  the views in schema `pub`.
+- Idea Machine reads Hearsay only through its file stream, and Lattice reads Idea Machine only through the views in
+  schema `pub`.
 
 ## Testing
 
@@ -53,20 +50,22 @@ What the pipeline keeps true, whatever the stage:
 
 ## Running it
 
-- `make check` runs everything CI runs except the org standards check. The tests need the database env vars from `.env.example`; without them the
-  database tests skip. Setup and configuration live in [install.md](install.md), deployment in
-  [deploy.md](deploy.md) and `install/nas.sh`.
-- `make standards` checks [org-standards.md](org-standards.md) and each topic's copy against the org's current
-  files, so a hand edit, a stale copy, or a copy whose topic isn't in `.org-standards` fails. It needs the network,
-  so it isn't part of `make check`; CI runs it as its own job. `make sync-standards` refreshes the copies; to follow
-  another topic, add it to `.org-standards` and run it.
+- The tests need the database env vars from `.env.example`; without them the database tests skip. Setup and
+  configuration live in [install.md](install.md), deployment in [deploy.md](deploy.md) and `install/nas.sh`.
+
+## Docs
+
+- Overrides the org rule's ADRs in `docs/stack.md`: each decision is its own file in [decisions/](decisions/), with what
+  was measured.
 
 ## Known deviations
 
-Where Idea Machine doesn't follow the [Python standards](org-standards-python.md) yet. These are debt to pay down, not
-overrides: each one should go.
+Where Idea Machine doesn't follow the org standards yet. These are debt to pay down, not overrides: each one should go.
 
 - `make check` runs pytest only. Ruff and mypy aren't configured or run.
 - The `Dockerfile` installs uv with `pip`.
 - Dependencies: `laya==0.3.23` is pinned exactly without a comment naming the break.
 - Data modeling: `im.fixtures.Conversation` is a mutable `@dataclass`.
+- Dependencies: Postgres 16 is one of [ROADMAP §2](ROADMAP.md#2-principles-applied)'s stack assumptions, "not
+  questioned", and no decision says what it gives.
+- Privacy: `IM_VOCAB_PATH` isn't in `.env.example`. `install/compose.yaml` sets it, and `im.vocab` reads it.
