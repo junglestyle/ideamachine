@@ -1,8 +1,9 @@
 # Coding standards
 
-Idea Machine follows the [org standards](org-standards.md), an unchanged copy of
-[junglestyle's](https://github.com/junglestyle/.github/blob/main/code-standards/README.md). This file adds
-Idea Machine's own rules and examples. Where it differs from an org rule, it says so, and it wins.
+Idea Machine follows the [org standards](org-standards.md) and the org's [Python standards](org-standards-python.md),
+unchanged copies of [junglestyle's](https://github.com/junglestyle/.github/tree/main/code-standards). `.org-standards`
+lists the topics it copies beyond the general one. This file adds Idea Machine's own rules and examples. Where it
+differs from an org rule, it says so, and it wins.
 
 ## Invariants
 
@@ -52,9 +53,20 @@ What the pipeline keeps true, whatever the stage:
 
 ## Running it
 
-- `make check` runs everything CI runs except the org standards diff. The tests need the database env vars from `.env.example`; without them the
+- `make check` runs everything CI runs except the org standards check. The tests need the database env vars from `.env.example`; without them the
   database tests skip. Setup and configuration live in [install.md](install.md), deployment in
   [deploy.md](deploy.md) and `install/nas.sh`.
-- `make standards` diffs [org-standards.md](org-standards.md) against the org's current file, so a hand edit or a
-  stale copy fails. It needs the network, so it isn't part of `make check`; CI runs it as its own job.
-  `make sync-standards` refreshes the copy.
+- `make standards` checks [org-standards.md](org-standards.md) and each topic's copy against the org's current
+  files, so a hand edit, a stale copy, or a copy whose topic isn't in `.org-standards` fails. It needs the network,
+  so it isn't part of `make check`; CI runs it as its own job. `make sync-standards` refreshes the copies; to follow
+  another topic, add it to `.org-standards` and run it.
+
+## Known deviations
+
+Where Idea Machine doesn't follow the [Python standards](org-standards-python.md) yet. These are debt to pay down, not
+overrides: each one should go.
+
+- `make check` runs pytest only. Ruff and mypy aren't configured or run.
+- The `Dockerfile` installs uv with `pip`.
+- Dependencies: `laya==0.3.23` is pinned exactly without a comment naming the break.
+- Data modeling: `im.fixtures.Conversation` is a mutable `@dataclass`.
