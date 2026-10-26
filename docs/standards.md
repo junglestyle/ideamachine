@@ -52,8 +52,9 @@ What the pipeline keeps true, whatever the stage:
 
 ## Running it
 
-- `make check` runs everything CI runs. The tests need the database env vars from `.env.example`; without them the
+- `make check` runs everything CI runs except the org standards diff. The tests need the database env vars from `.env.example`; without them the
   database tests skip. Setup and configuration live in [install.md](install.md), deployment in
   [deploy.md](deploy.md) and `install/nas.sh`.
-- `make check` also diffs [org-standards.md](org-standards.md) against the org's current file, so it needs the
-  network, and a hand edit or a stale copy fails. `make sync-standards` refreshes it.
+- `make standards` diffs [org-standards.md](org-standards.md) against the org's current file, so a hand edit or a
+  stale copy fails. It needs the network, so it isn't part of `make check`; CI runs it as its own job.
+  `make sync-standards` refreshes the copy.
