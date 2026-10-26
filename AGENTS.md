@@ -10,4 +10,4 @@ Read before changing behavior:
 - [Installing and running](docs/install.md): setup, commands, configuration and how `im run` works
 - [Deploying to the NAS](docs/deploy.md)
 
-`make check` runs everything CI runs.
+`make check` runs everything CI runs, except the org standards check: `make standards` (needs the network).
