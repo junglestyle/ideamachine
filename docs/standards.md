@@ -1,8 +1,8 @@
 # Coding standards
 
 Idea Machine follows the [org standards](org-standards.md), an unchanged copy of
-[junglestyle's](https://github.com/junglestyle/.github/blob/main/STANDARDS.md). This file adds Idea Machine's own
-rules and examples. Where it differs from an org rule, it says so, and it wins.
+[junglestyle's](https://github.com/junglestyle/.github/blob/main/code-standards/README.md). This file adds
+Idea Machine's own rules and examples. Where it differs from an org rule, it says so, and it wins.
 
 ## Invariants
 
