@@ -84,8 +84,8 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
   workstation's hostname.
 - Privacy: the NAS layout (`/mnt/fast/ideamachine/...`) is committed, and nothing here overrides the org rule for it, as
   hearsay's and lattice's standards do.
-- Docs: there's no `docs/SPEC.md`. What Idea Machine is meant to do is in [ROADMAP.md](ROADMAP.md)'s §1–3, beside the
-  build order.
+- Docs: V2's roadmap is `docs/ROADMAP-v2.md`, not `docs/ROADMAP.md`, because code comments cite V1's
+  [ROADMAP.md](ROADMAP.md) by section. V1's spec stays in its §1–3; V2's is [SPEC.md](SPEC.md).
 - Deployment repos: between them, [deploy.md](deploy.md) and [ROADMAP.md](ROADMAP.md) name `/mnt/fast/...` paths and
   the `fast/ideamachine` and `fast/repos` datasets, and deploy.md names Lattice's `tailscale serve` port, 8444. These
   facts belong in a future `ideamachine-deployment` repo.
