@@ -1,5 +1,7 @@
 # Idea Machine Roadmap
 
+_V1's roadmap, frozen at tag `v1` (2026-10-27). Code comments cite its sections, so it stays here unchanged. V2's plan and spec are in [ROADMAP-v2.md](ROADMAP-v2.md)._
+
 _Status: draft, 2026-10-01. Idea Machine reads Hearsay's utterance stream (§3). Hearsay has delivered the stream changes Idea Machine asked for; the forget command itself comes with Hearsay slice 12. Phase 1 steps 1–4 (stream import, segmentation, projects registry, labeling, and triage with Laya and the fallback) are built. What's left of Phase 1 needs real labels._
 
 ## 1. Scope
