@@ -67,16 +67,18 @@ Target: `import/stream-v4`, where segment id = `uuid5(conversation | sha256(conv
 
 1. **Code, behind tests first.** A fixture test where naming a speaker produces zero new segments, zero new episodes and zero requests. A second where a naming that changes pseudonyms produces exactly one new extraction. Then the importer change. `said_by` stops being stored as a name (today it's the local label, `007_extraction.sql:32`, mapped back at `extract.py:215`) and is derived at read time from the speaker annotation on the item's cited segments, with `items.said_by_segment_id` naming which one. Once naming no longer re-derives anything, a stored name would go stale. A stored request pseudonym won't work either, because S1 only means something inside one request.
 2. **Pre-flight.** Sync every Lattice device so no offline feedback is queued. `pg_dump` the database. Run the [validation snapshot](#validation) and save its output.
-3. **One-off migration, one transaction, append-only.** For each current segment, compute its v4 id and insert the v4 row (`ON CONFLICT DO NOTHING`: v3 versions that differ only in speaker collapse into one). Point `im.source_members` at the v4 ids. Write a supersession link from each v3 row to its v4 row with method `rekey`. No existing row is updated or deleted.
-4. **Normal `im run`.** Every episode re-derives (all segment ids changed) and the old ones retire. Extraction finds byte-identical payloads, so v1.1 reuses every read and carries every match: expect **0 requests, $0**. `carry_verdicts` follows the `rekey` links and carries every verdict by quote (score 1.0, the quotes are identical). Labels resolve forward the same way.
+3. **The migration is the importer's first run.** As built, there's no separate script: the stream-v4 importer re-reads every conversation that still has segments an older importer keyed, whatever its revision. Each old segment links to the new one with the same start, end and text, with method `rekey`; v3 versions that differ only in speaker collapse into one v4 row. `im.source_members` points at the v4 ids. No existing segment row is updated or deleted. It runs inside the normal `im run` transaction, so a failure leaves nothing behind.
+4. **That same `im run`.** Every episode re-derives (all segment ids changed) and the old ones retire. Extraction finds byte-identical payloads, so v1.1 reuses every read and carries every match: expect **0 requests, $0**. `carry_verdicts` follows the `rekey` links and carries every verdict by quote (score 1.0, the quotes are identical). Labels resolve forward the same way.
 5. **Validate**, then compare against the pre-flight snapshot.
 6. Do steps 2–5 on a restored copy of the production dump locally before doing them for real.
 
 **Observed bug the pre-flight works around:** `carry_verdicts` settles a retired item once (`verdict_carries` primary key). A verdict that arrives later on that item, such as a queued offline event, is never carried (`feedback.py:92`). That's true today for any churn. M2's observation ids fix it properly; for M1, drain the queues first.
 
+**Episode identity, added while building.** An episode's id now also covers how its speakers would be pseudonymized (`segment.py`, through `egress.pseudonyms`). Without that, a naming that changes the pseudonyms (merging two voices, relabeling the owner) would leave the episode in place with a changed payload, and extraction would replace its items in place. Deleting an item cascades to its feedback events, which are ledger. With it, such a naming makes a new episode, the old one retires with its items, and verdicts carry as they do for any re-derivation. A naming that keeps the pseudonyms changes nothing but the label.
+
 ## Validation
 
-The migration passes only if every check below holds after step 4. Each one is a query in a snapshot script (to write: `m1/relink_check.sql`), run before and after, with the outputs diffed.
+The migration passes only if every check below holds after step 4. Each one is a query in the snapshot script [relink_check.sql](m1/relink_check.sql), run before and after, with the outputs diffed.
 
 | Check | Pass when |
 | --- | --- |
