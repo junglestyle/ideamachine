@@ -1,7 +1,7 @@
 """Idea extraction with Claude (docs/decisions/0004-claude-extraction.md).
 
 Each current episode goes out once per model / prompt / privacy policy, and again only if what would be
-sent changed. Claude returns items anchored to transcript line numbers; they're mapped back to segment
+sent changed. A payload already read on another episode isn't sent again: its items are reused. Claude returns items anchored to transcript line numbers; they're mapped back to segment
 IDs and to who said them locally. Every request is logged in im.egress_log, and a monthly budget stops the
 stage before it's exceeded.
 """
@@ -167,6 +167,32 @@ def _pending(conn, model: str, pv: str) -> list:
     return out
 
 
+def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict]] | None:
+    """An earlier read of this exact payload on another episode: its egress id and items, mapped onto this one.
+
+    Naming a speaker re-derives the episode but sends the same pseudonymized text, so there's nothing new to read.
+    Lines map by position and speakers through the pseudonym both payloads share. None if there's no such read."""
+    row = conn.execute(
+        """SELECT episode_id, egress_id FROM im.extractions
+           WHERE input_hash = %s AND model = %s AND prompt_version = %s AND privacy_policy_version = %s
+             AND episode_id <> %s ORDER BY created_at DESC LIMIT 1""",
+        (p.sha256, model, pv, egress.POLICY_VERSION, p.episode_id)).fetchone()
+    if row is None:
+        return None
+    old = egress.build(conn, row[0])
+    if old.sha256 != p.sha256:
+        return None
+    line = {sid: n for n, sid in enumerate(old.segment_ids)}
+    alias = {label: pseudo for pseudo, label in old.speakers.items()}
+    rows = conn.execute(
+        """SELECT kind, said_by, quote, gist, themes, confidence, source_segment_ids FROM im.items
+           WHERE episode_id = %s AND model = %s AND prompt_version = %s AND privacy_policy_version = %s
+           ORDER BY item_id""", (row[0], model, pv, egress.POLICY_VERSION)).fetchall()
+    return row[1], [{"kind": k, "said_by": p.speakers.get(alias.get(by), by), "quote": q, "gist": g, "themes": t,
+                     "confidence": c, "source_segment_ids": [p.segment_ids[line[s]] for s in segs]}
+                    for k, by, q, g, t, c, segs in rows]
+
+
 def _log(conn, p: egress.Payload, model: str, pv: str, **fields) -> int:
     cols = ["episode_id", "segment_ids", "model", "prompt_version", "privacy_policy_version", "payload",
             "payload_sha256"] + list(fields)
@@ -228,9 +254,14 @@ def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "mediu
 
     pv = prompt_version(model, effort, system)
     todo = _pending(conn, model, pv)
-    stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "items": 0,
+    stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "reused": 0, "items": 0,
              "refused": 0, "cost_usd": 0.0, "stopped": None}
     for p in todo[:limit] if limit else todo:
+        if reused := _reuse(conn, p, model, pv):
+            _save(conn, p, model, pv, *reused)
+            stats["reused"] += 1
+            stats["items"] += len(reused[1])
+            continue
         if spent_this_month(conn) >= monthly_cap_usd:
             stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
             break

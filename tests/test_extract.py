@@ -83,6 +83,25 @@ def test_only_changed_episodes_go_out_again(pipe, cfg, stream):
     assert extract.run_stage(pipe, claude)["read"] == 1
 
 
+def test_naming_a_speaker_reuses_the_read_instead_of_sending_it_again(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    claude = FakeClaude(coffee_item)
+    extract.run_stage(pipe, claude)
+    sent = len(claude.calls)
+    stream.name_speaker("c-conv", "anon A", "Carol")
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    stats = extract.run_stage(pipe, claude, monthly_cap_usd=0)  # reuse costs nothing, so the cap doesn't stop it
+    assert len(claude.calls) == sent and stats["read"] == 0 and stats["reused"] >= 1 and stats["items"] == 1
+    (said_by, segs, egress_id), = table(pipe, """SELECT said_by, source_segment_ids, egress_id FROM im.items
+                                              JOIN im.episodes USING (episode_id) WHERE current""")
+    assert said_by == "Carol"
+    assert table(pipe, "SELECT text FROM im.source_segments WHERE segment_id = %s", segs[0]) == [(COFFEE,)]
+    assert table(pipe, "SELECT count(*) FROM im.egress_log WHERE egress_id = %s", egress_id) == [(1,)]
+    assert extract.run_stage(pipe, claude)["reused"] == 0  # settled: nothing pending
+    assert_invariants(pipe)
+
+
 def test_budget_cap_refusals_and_outages(pipe, cfg, stream):
     run(pipe, cfg, stream)
     assert extract.run_stage(pipe, FakeClaude(), monthly_cap_usd=0)["stopped"].startswith("monthly cap")
