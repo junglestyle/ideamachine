@@ -78,5 +78,5 @@ Setup, commands and configuration: [docs/install.md](docs/install.md). Deploying
 
 ## Status
 
-Single-user; runs on a home NAS whenever Hearsay's stream has new turns, from its NVMe pool; 89 tests (pytest, against a throwaway Postgres); V2 plan in
-[docs/ROADMAP-v2.md](docs/ROADMAP-v2.md) (V1's in [docs/ROADMAP.md](docs/ROADMAP.md)).
+Single-user; runs on a home NAS whenever Hearsay's stream has new turns, from its NVMe pool; 89 tests (pytest, against a throwaway Postgres); V2 in
+[docs/SPEC.md](docs/SPEC.md) and [docs/ROADMAP-v2.md](docs/ROADMAP-v2.md) (V1's in [docs/ROADMAP.md](docs/ROADMAP.md)).
