@@ -1,9 +1,11 @@
 # Coding standards
 
-Idea Machine follows the [org standards](org-standards.md) and the org's [Python standards](org-standards-python.md),
-unchanged copies of [junglestyle's](https://github.com/junglestyle/.github/tree/main/code-standards). `.org-standards`
-lists the topics it copies beyond the general one. This file adds Idea Machine's own rules and examples. Where it
-differs from an org rule, it says so, and it wins.
+Idea Machine follows the [org standards](org-standards.md) and the org's standards for
+[Python](org-standards-python.md), [SQL](org-standards-sql.md), [containers](org-standards-containers.md) and
+[shell scripts](org-standards-shell.md), unchanged copies of
+[junglestyle's](https://github.com/junglestyle/.github/tree/main/code-standards). `.org-standards` lists the topics it
+copies beyond the general one. This file adds Idea Machine's own rules and examples. Where it differs from an org rule,
+it says so, and it wins.
 
 ## Invariants
 
@@ -69,3 +71,16 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
 - Dependencies: Postgres 16 is one of [ROADMAP §2](ROADMAP.md#2-principles-applied)'s stack assumptions, "not
   questioned", and no decision says what it gives.
 - Privacy: `IM_VOCAB_PATH` isn't in `.env.example`. `install/compose.yaml` sets it, and `im.vocab` reads it.
+- SQL: `pub.review_items` picks an item's idea with `LIMIT 1` and no `ORDER BY` (`010_review.sql`,
+  `011_corrections.sql`), and an item can belong to several ideas.
+- SQL: `pipeline.run` sets `REPEATABLE READ` on the connection, so the later stages of `im run` inherit it.
+- Data modeling: closed sets are literals with a `CHECK`, not `StrEnum`s.
+- Containers: `python:3.13-slim` doesn't name the Debian release.
+- Containers: `compose.yaml` (the dev database) has no top-level `name:`.
+- Shell: `dev/init/10-roles.sh`, `dev/pull-stream.sh` and `dev/systemd/install.sh` start with `#!/bin/bash`.
+- Shell: `install/lib.sh` doesn't start with `# shellcheck shell=bash`.
+- Shell: `make check` doesn't run shellcheck, which reports 19 findings.
+- Privacy: 14 files, among them `install/compose.yaml`, `dev/pull-stream.sh` and `src/im/backends.py`, name the
+  workstation's hostname.
+- Privacy: the NAS layout (`/mnt/fast/ideamachine/...`) is committed, and nothing here overrides the org rule for it, as
+  hearsay's and lattice's standards do.
