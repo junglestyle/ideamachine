@@ -29,7 +29,8 @@ and event-sourced human input are what V2 needs, and they stay.
 V1's non-goals ([ROADMAP §1](ROADMAP.md#non-goals)) still hold, except "a UI inside Idea Machine". Added for V2:
 
 - **A second datastore.** No Neo4j, SQLite or Redis. The graph is tables in the existing Postgres; graph algorithms
-  run in Python per run and their results are stored.
+  run in Python per run and their results are stored. [Decision 0006](decisions/0006-graph-in-postgres.md) says what
+  that shapes in the data and the code, and when to look again.
 - **A model deciding promotion.** Models produce signals; a query decides.
 - **Typing every pair.** Embeddings nominate pairs; nothing runs over n².
 - **On-demand synthesis.** Weekly digest points are the syntheses.
