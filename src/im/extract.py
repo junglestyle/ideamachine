@@ -186,7 +186,8 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict
     line = {sid: n for n, sid in enumerate(old.segment_ids)}
     alias = {label: pseudo for pseudo, label in old.speakers.items()}
     rows = conn.execute(
-        """SELECT item_id, kind, said_by, quote, gist, themes, confidence, source_segment_ids FROM im.items
+        """SELECT item_id, kind, w.said_by, quote, gist, themes, confidence, source_segment_ids
+           FROM im.items JOIN im.item_said_by w USING (item_id)
            WHERE episode_id = %s AND model = %s AND prompt_version = %s AND privacy_policy_version = %s
            ORDER BY item_id""", (row[0], model, pv, egress.POLICY_VERSION)).fetchall()
     return row[1], [{"from_item_id": i, "kind": k, "said_by": p.speakers.get(alias.get(by), by), "quote": q,
@@ -241,15 +242,19 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
         conn.execute("""DELETE FROM im.items WHERE episode_id = %s AND model = %s AND prompt_version = %s
                         AND privacy_policy_version = %s""", (p.episode_id, model, pv, egress.POLICY_VERSION))
         for i, it in enumerate(items):
+            # said_by_segment_id: the first cited segment the speaker said, so a later rename reaches the item.
             conn.execute(
                 """INSERT INTO im.items (item_id, episode_id, kind, said_by, quote, gist, themes, confidence,
                      source_segment_ids, egress_id, model, prompt_version, privacy_policy_version,
-                     schema_version, stage_version, input_hash)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                     schema_version, stage_version, input_hash, said_by_segment_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                     (SELECT u.seg FROM unnest(%s::uuid[]) WITH ORDINALITY AS u(seg, n)
+                      JOIN im.source_segments s ON s.segment_id = u.seg
+                      WHERE s.speaker_label = %s ORDER BY u.n LIMIT 1))""",
                 (_item_id(p, model, pv, i),
                  p.episode_id, it["kind"], it["said_by"], it["quote"], it["gist"], it["themes"], it["confidence"],
                  it["source_segment_ids"], egress_id, model, pv, egress.POLICY_VERSION, SCHEMA_VERSION,
-                 STAGE_VERSION, p.sha256))
+                 STAGE_VERSION, p.sha256, it["source_segment_ids"], it["said_by"]))
         conn.execute(
             """INSERT INTO im.extractions (episode_id, model, prompt_version, privacy_policy_version, input_hash,
                  egress_id, n_items) VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -322,9 +327,9 @@ def forgotten_sent(conn) -> list[tuple]:
 def review_items(conn) -> list[tuple]:
     """Items on current episodes I haven't decided on yet: most confident first."""
     return conn.execute(
-        """SELECT i.item_id, i.kind, i.said_by, i.quote, i.gist, i.themes, i.confidence, i.source_segment_ids,
+        """SELECT i.item_id, i.kind, w.said_by, i.quote, i.gist, i.themes, i.confidence, i.source_segment_ids,
                   e.started_at, e.episode_id
-           FROM im.items i JOIN im.episodes e USING (episode_id)
+           FROM im.items i JOIN im.item_said_by w USING (item_id) JOIN im.episodes e USING (episode_id)
            WHERE e.current AND NOT EXISTS (SELECT 1 FROM im.item_verdicts v WHERE v.item_id = i.item_id)
              AND NOT EXISTS (SELECT 1 FROM pub.feedback_events f WHERE f.item_id = i.item_id)
            ORDER BY i.confidence DESC, e.started_at DESC""").fetchall()
@@ -333,8 +338,8 @@ def review_items(conn) -> list[tuple]:
 def discards(conn) -> list[tuple]:
     """Items I discarded (latest verdict), with my note and the prompt that captured them, newest first."""
     return conn.execute(
-        """SELECT i.kind, i.said_by, i.quote, i.gist, i.confidence, v.decided_at, v.note, i.model, i.prompt_version
-           FROM im.items i JOIN LATERAL (
+        """SELECT i.kind, w.said_by, i.quote, i.gist, i.confidence, v.decided_at, v.note, i.model, i.prompt_version
+           FROM im.items i JOIN im.item_said_by w USING (item_id) JOIN LATERAL (
              SELECT verdict, note, decided_at FROM im.item_verdicts WHERE item_id = i.item_id
              ORDER BY decided_at DESC LIMIT 1) v ON v.verdict = 'discard'
            ORDER BY v.decided_at DESC""").fetchall()

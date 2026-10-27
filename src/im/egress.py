@@ -30,6 +30,18 @@ class Payload:
         return hashlib.sha256(self.text.encode()).hexdigest()
 
 
+def pseudonyms(speakers) -> dict:
+    """Local speaker label -> pseudonym, for (label, kind) pairs in transcript order: "me", "unknown", and S1,
+    S2... in order of first appearance. Episode identity depends on this too (segment.py), so an episode is
+    re-derived exactly when what would be sent about who spoke changes."""
+    alias: dict = {}
+    for label, kind in speakers:
+        if label not in alias:
+            alias[label] = ("me" if kind == "owner" else "unknown" if kind == "unknown"
+                            else f"S{sum(1 for a in alias.values() if a.startswith('S')) + 1}")
+    return alias
+
+
 def build(conn, episode_id) -> Payload:
     rows = conn.execute(
         """SELECT s.segment_id, s.speaker_label, s.speaker_kind, s.text, s.started_at, s.ended_at
@@ -45,13 +57,8 @@ def build(conn, episode_id) -> Payload:
              AND t BETWEEN e.started_at - interval '30 seconds' AND e.ended_at + interval '30 seconds'""",
         (episode_id,)).fetchone()[0]
 
-    alias: dict = {}   # local label -> pseudonym
-    lines = []
-    for n, (_, label, kind, text, _, _) in enumerate(rows, 1):
-        if label not in alias:
-            alias[label] = ("me" if kind == "owner" else "unknown" if kind == "unknown"
-                            else f"S{sum(1 for a in alias.values() if a.startswith('S')) + 1}")
-        lines.append(f"[{n}] {alias[label]}: {text}")
+    alias = pseudonyms((label, kind) for _, label, kind, *_ in rows)
+    lines = [f"[{n}] {alias[label]}: {text}" for n, (_, label, _, text, _, _) in enumerate(rows, 1)]
 
     start: datetime = min(r[4] for r in rows).astimezone()
     end: datetime = max(r[5] for r in rows).astimezone()
