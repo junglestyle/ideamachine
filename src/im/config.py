@@ -8,7 +8,7 @@ import os
 import tomllib
 from dataclasses import dataclass, fields
 
-HEURISTIC = "heuristic-2"
+HEURISTIC = "heuristic-3"  # 3: episode identity covers how its speakers would be pseudonymized
 
 
 @dataclass(frozen=True)

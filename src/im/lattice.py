@@ -171,10 +171,10 @@ def _idea_matrix(conn, embedder) -> tuple[list, np.ndarray]:
 def _pending_items(conn) -> list[tuple]:
     """Items on current episodes not matched yet, oldest first, with my latest verdict."""
     return conn.execute(
-        """SELECT i.item_id, i.episode_id, i.kind, i.said_by, i.quote, i.gist, i.source_segment_ids,
+        """SELECT i.item_id, i.episode_id, i.kind, w.said_by, i.quote, i.gist, i.source_segment_ids,
                   (SELECT v.verdict FROM im.item_verdicts v WHERE v.item_id = i.item_id
                    ORDER BY v.decided_at DESC LIMIT 1)
-           FROM im.items i JOIN im.episodes e USING (episode_id)
+           FROM im.items i JOIN im.item_said_by w USING (item_id) JOIN im.episodes e USING (episode_id)
            WHERE e.current AND NOT EXISTS (SELECT 1 FROM im.item_matches m WHERE m.item_id = i.item_id)
            ORDER BY e.started_at, i.item_id""").fetchall()
 

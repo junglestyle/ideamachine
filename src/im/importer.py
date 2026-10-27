@@ -14,11 +14,16 @@ from datetime import datetime
 from pathlib import Path
 
 FORMAT_VERSIONS = {1}
-STAGE_VERSION = "import/stream-v3"  # v2: affect isn't part of a segment's identity; v3: nor is delivery
+STAGE_VERSION = "import/stream-v4"  # v2: affect isn't part of a segment's identity; v3: nor is delivery;
+                                     # v4: nor who spoke or how sure Hearsay is (docs/design/m1-segment-identity.md)
 SCHEMA_VERSION = 2
 SEGMENT_NS = uuid.UUID("0b8f4f5e-6a43-4d1f-9a3c-2f7e9d1c5b60")
-# Annotations Hearsay can rescore without the speech changing: kept on the segment, not part of its identity.
-NOT_IDENTITY = {"utterance_id", "affect", "delivery"}
+# Annotations Hearsay can change without the speech changing: kept on the segment, not part of its identity.
+# A segment is its conversation, start, end and text.
+NOT_IDENTITY = {"utterance_id", "affect", "delivery", "speaker", "speaker_confidence", "text_confidence"}
+# Updated in place on a kept segment when the stream says otherwise (naming a voice, relabeling the owner).
+SPEAKER_FIELDS = ("speaker_kind", "speaker_name", "speaker_label", "speaker_basis", "is_self", "speaker_conf",
+                  "asr_confidence")
 
 
 class StreamError(Exception):
@@ -144,10 +149,17 @@ def _json(d: dict | None) -> str | None:
 
 def _members(conn, conversation_id: str) -> dict:
     rows = conn.execute(
-        """SELECT m.segment_id, m.utterance_id, s.started_at, s.ended_at
+        """SELECT m.segment_id, m.utterance_id, s.started_at, s.ended_at, s.text, s.stage_version
            FROM im.source_members m JOIN im.source_segments s USING (segment_id)
            WHERE m.conversation_id = %s""", (conversation_id,)).fetchall()
     return {r[0]: r[1:] for r in rows}
+
+
+def _stale(conn) -> set[str]:
+    """Conversations with current segments an older importer keyed: re-read them, whatever their revision."""
+    return {r[0] for r in conn.execute(
+        """SELECT DISTINCT m.conversation_id FROM im.source_members m JOIN im.source_segments s USING (segment_id)
+           WHERE s.stage_version <> %s""", (STAGE_VERSION,))}
 
 
 def _insert_segments(conn, utts: list[Utterance]) -> None:
@@ -173,7 +185,7 @@ def _link(conn, pairs: list[tuple], method: str) -> None:
 
 
 def _replace_conversation(conn, cid: str, entry: dict | None, utts: list[Utterance], stored) -> tuple:
-    """Make `utts` the conversation's members. Returns (arrived, unmatched gone) for overlap linking."""
+    """Make `utts` the conversation's members. Returns (arrived, unmatched gone, relabeled) for overlap linking."""
     by_id = {}
     for u in utts:
         by_id.setdefault(u.segment_id, u)  # identical content twice collapses to one segment
@@ -185,14 +197,19 @@ def _replace_conversation(conn, cid: str, entry: dict | None, utts: list[Utteran
     # Same transcript, same utterance_id, different content (e.g. a speaker was named).
     same_transcript = entry is not None and stored is not None and stored[1] == entry["transcript_revision"]
     arrived_by_uid = {u.utterance_id: u for u in arrived}
+    arrived_by_speech = {(u.started_at, u.ended_at, u.text): u for u in arrived}
     unmatched = []
-    id_links = []
-    for sid, (uid, start, end) in gone.items():
-        if same_transcript and uid in arrived_by_uid:
+    id_links, rekeys = [], []
+    for sid, (uid, start, end, text, stage) in gone.items():
+        if stage != STAGE_VERSION and (start, end, text) in arrived_by_speech:
+            # The same speech under an older importer's key.
+            rekeys.append((sid, arrived_by_speech[start, end, text].segment_id))
+        elif same_transcript and uid in arrived_by_uid:
             id_links.append((sid, arrived_by_uid[uid].segment_id))
         else:
             unmatched.append((sid, start, end))
     _link(conn, id_links, "utterance_id")
+    _link(conn, rekeys, "rekey")
 
     if gone:
         conn.execute("DELETE FROM im.source_members WHERE conversation_id = %s AND segment_id = ANY(%s)",
@@ -211,6 +228,16 @@ def _replace_conversation(conn, cid: str, entry: dict | None, utts: list[Utteran
             """UPDATE im.source_segments SET arousal = %s, delivery = %s::jsonb WHERE segment_id = %s
                AND (arousal, delivery) IS DISTINCT FROM (%s, %s::jsonb)""",
             [(u.arousal, _json(u.delivery), sid, u.arousal, _json(u.delivery)) for sid, u in by_id.items()])
+    # So does who spoke. A change here can move episode boundaries or what would be sent, so it counts as a change.
+    relabeled = 0
+    cols = ", ".join(SPEAKER_FIELDS)
+    for sid, u in by_id.items():
+        if sid in old:
+            vals = tuple(getattr(u, f) for f in SPEAKER_FIELDS)
+            relabeled += conn.execute(
+                f"""UPDATE im.source_segments SET ({cols}) = ROW({", ".join(["%s"] * len(vals))})
+                    WHERE segment_id = %s AND ({cols}) IS DISTINCT FROM ({", ".join(["%s"] * len(vals))})""",
+                (*vals, sid, *vals)).rowcount
 
     if entry is None:
         conn.execute("DELETE FROM im.source_conversations WHERE conversation_id = %s", (cid,))
@@ -221,7 +248,7 @@ def _replace_conversation(conn, cid: str, entry: dict | None, utts: list[Utteran
                ON CONFLICT (conversation_id) DO UPDATE SET revision = excluded.revision,
                  transcript_revision = excluded.transcript_revision, imported_at = now()""",
             (cid, entry["revision"], entry["transcript_revision"]))
-    return arrived, unmatched
+    return arrived, unmatched, relabeled > 0
 
 
 def _places(entry: dict) -> str:
@@ -273,21 +300,22 @@ def import_stream(conn, stream_dir: Path) -> tuple[set[str], dict]:
     stored = {r[0]: (r[1], r[2]) for r in conn.execute(
         "SELECT conversation_id, revision, transcript_revision FROM im.source_conversations")}
 
+    stale = _stale(conn)
     changed, arrived_all, unmatched_all, raced = set(), [], [], 0
     for cid, entry in entries.items():
-        if cid in stored and stored[cid][0] == entry["revision"]:
+        if cid in stored and stored[cid][0] == entry["revision"] and cid not in stale:
             continue
         utts = [] if entry["file"] is None else read_conversation(stream_dir, entry)
         if utts is None:
             raced += 1
             continue
-        arrived, unmatched = _replace_conversation(conn, cid, entry, utts, stored.get(cid))
-        if arrived or unmatched:
+        arrived, unmatched, relabeled = _replace_conversation(conn, cid, entry, utts, stored.get(cid))
+        if arrived or unmatched or relabeled:
             changed.add(cid)
         arrived_all += arrived
         unmatched_all += unmatched
     for cid in stored.keys() - entries.keys():
-        arrived, unmatched = _replace_conversation(conn, cid, None, [], stored[cid])
+        arrived, unmatched, _ = _replace_conversation(conn, cid, None, [], stored[cid])
         changed.add(cid)
         unmatched_all += unmatched
 

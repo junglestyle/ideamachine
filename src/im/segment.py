@@ -8,6 +8,10 @@
 Both rules only look inside a gap block, so a correction can only move
 boundaries in the block it lands in.
 Speakers fail closed: only is_self = true (Hearsay's owner) counts as me.
+
+An episode's id covers its segments and how its speakers would be pseudonymized when it's sent
+(egress.pseudonyms). Naming a voice changes neither, so it re-derives nothing; merging two voices or
+relabeling the owner changes what would be sent, so the episode is a new one and is read again.
 """
 
 import hashlib
@@ -16,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from im.config import SegmentConfig
+from im.egress import pseudonyms
 
 EPISODE_NS = uuid.UUID("6f1c2b0e-9d7a-4c55-8e0e-3b1f5c8a2d41")
 
@@ -28,6 +33,7 @@ class Seg:
     started_at: datetime
     ended_at: datetime
     speaker_label: str
+    speaker_kind: str
     is_self: bool | None
     speaker_conf: float | None
 
@@ -103,8 +109,10 @@ def segment(segs: list[Seg], cfg: SegmentConfig) -> list[Episode]:
     for block in _gap_blocks(ordered, cfg):
         for part in _mode_cuts(block, cfg):
             h = input_hash(s.segment_id for s in part)
+            alias = pseudonyms((s.speaker_label, s.speaker_kind) for s in part)
+            who = ",".join(alias[s.speaker_label] for s in part)
             episodes.append(Episode(
-                episode_id=uuid.uuid5(EPISODE_NS, f"{cfg.stage_version}|{h}"),
+                episode_id=uuid.uuid5(EPISODE_NS, f"{cfg.stage_version}|{h}|{who}"),
                 input_hash=h,
                 segments=tuple(part),
                 self_segments=sum(is_me(s, cfg) for s in part),

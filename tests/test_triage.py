@@ -69,7 +69,7 @@ def test_only_new_episodes_are_triaged_after_a_correction(pipe, cfg, stream):
     run(pipe, cfg, stream)
     b = KeywordBackend()
     triage.run_stage(pipe, b)
-    stream.name_speaker("c-conv", "anon A", "Carol")
+    stream.name_speaker("c-conv", "anon A", "Alice")   # merge voices: one episode re-derives
     stream.write(stream.dir)
     run(pipe, cfg, stream)
     assert triage.run_stage(pipe, b)["triaged"] == 1
