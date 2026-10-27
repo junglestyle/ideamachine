@@ -88,6 +88,12 @@ def test_naming_a_speaker_reuses_the_read_instead_of_sending_it_again(pipe, cfg,
     claude = FakeClaude(coffee_item)
     extract.run_stage(pipe, claude)
     sent = len(claude.calls)
+    (old_item,), = table(pipe, "SELECT item_id FROM im.items")
+    (idea,), = table(pipe, """INSERT INTO im.ideas (title, statement, origin) VALUES ('Coffee', 'Who orders it', 'captured')
+                              RETURNING idea_id""")
+    pipe.execute("INSERT INTO im.item_matches (item_id, decision, idea_id, judged_by) VALUES (%s, 'new', %s, 'test')",
+                 (old_item, idea))
+    pipe.execute("INSERT INTO im.idea_evidence VALUES (%s, %s, 'origin', 'test')", (idea, old_item))
     stream.name_speaker("c-conv", "anon A", "Carol")
     stream.write(stream.dir)
     run(pipe, cfg, stream)
@@ -98,6 +104,10 @@ def test_naming_a_speaker_reuses_the_read_instead_of_sending_it_again(pipe, cfg,
     assert said_by == "Carol"
     assert table(pipe, "SELECT text FROM im.source_segments WHERE segment_id = %s", segs[0]) == [(COFFEE,)]
     assert table(pipe, "SELECT count(*) FROM im.egress_log WHERE egress_id = %s", egress_id) == [(1,)]
+    # the matcher's decision came along: the capture isn't matched again and the idea still has current evidence
+    assert table(pipe, """SELECT m.decision, m.idea_id, ev.relation FROM im.items i JOIN im.episodes e USING (episode_id)
+                          JOIN im.item_matches m USING (item_id) JOIN im.idea_evidence ev USING (item_id)
+                          WHERE e.current""") == [("new", idea, "origin")]
     assert extract.run_stage(pipe, claude)["reused"] == 0  # settled: nothing pending
     assert_invariants(pipe)
 
