@@ -13,7 +13,7 @@ Idea Machine reads the speaker-attributed utterances that Hearsay publishes in i
 - **Agent automation.** The proposals table and approved agent work are out of early scope (see Phase 5).
 - **Event infrastructure.** No Kafka, NATS or queues. One consumer polls one directory.
 - **A memory framework as the core.** No Mem0, Cognee or similar. Plain tables plus pgvector.
-- **A UI inside Idea Machine.** Presentation is a separate app, Lattice (§3.5), reading a published contract.
+- ~~**A UI inside Idea Machine.**~~ Reversed for V2 by [decision 0005](decisions/0005-presentation-inside-idea-machine.md): presentation and the MCP server move into `src/im/web`. Until cutover, Lattice (§3.5) stays the UI.
 - **Multi-user or hosted deployment.** One user, one TrueNAS box.
 
 ## 2. Principles applied
