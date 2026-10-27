@@ -171,7 +171,8 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict
     """An earlier read of this exact payload on another episode: its egress id and items, mapped onto this one.
 
     Naming a speaker re-derives the episode but sends the same pseudonymized text, so there's nothing new to read.
-    Lines map by position and speakers through the pseudonym both payloads share. None if there's no such read."""
+    Lines map by position and speakers through the pseudonym both payloads share. Each item remembers the one it
+    was copied from (`from_item_id`), so its match can come along too. None if there's no such read."""
     row = conn.execute(
         """SELECT episode_id, egress_id FROM im.extractions
            WHERE input_hash = %s AND model = %s AND prompt_version = %s AND privacy_policy_version = %s
@@ -185,12 +186,13 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict
     line = {sid: n for n, sid in enumerate(old.segment_ids)}
     alias = {label: pseudo for pseudo, label in old.speakers.items()}
     rows = conn.execute(
-        """SELECT kind, said_by, quote, gist, themes, confidence, source_segment_ids FROM im.items
+        """SELECT item_id, kind, said_by, quote, gist, themes, confidence, source_segment_ids FROM im.items
            WHERE episode_id = %s AND model = %s AND prompt_version = %s AND privacy_policy_version = %s
            ORDER BY item_id""", (row[0], model, pv, egress.POLICY_VERSION)).fetchall()
-    return row[1], [{"kind": k, "said_by": p.speakers.get(alias.get(by), by), "quote": q, "gist": g, "themes": t,
-                     "confidence": c, "source_segment_ids": [p.segment_ids[line[s]] for s in segs]}
-                    for k, by, q, g, t, c, segs in rows]
+    return row[1], [{"from_item_id": i, "kind": k, "said_by": p.speakers.get(alias.get(by), by), "quote": q,
+                     "gist": g, "themes": t, "confidence": c,
+                     "source_segment_ids": [p.segment_ids[line[s]] for s in segs]}
+                    for i, k, by, q, g, t, c, segs in rows]
 
 
 def _log(conn, p: egress.Payload, model: str, pv: str, **fields) -> int:
@@ -217,6 +219,23 @@ def _items(p: egress.Payload, raw: list[dict]) -> list[dict]:
     return out
 
 
+def _item_id(p: egress.Payload, model: str, pv: str, i: int) -> uuid.UUID:
+    return uuid.uuid5(ITEM_NS, f"{p.episode_id}|{model}|{pv}|{egress.POLICY_VERSION}|{p.sha256}|{i}")
+
+
+def _carry_matches(conn, p: egress.Payload, model: str, pv: str, items: list[dict]) -> None:
+    """Reused items keep the matcher's decision on the items they were copied from: the same capture isn't judged
+    (or paid for) twice, and can't turn into a second idea."""
+    for i, it in enumerate(items):
+        new = _item_id(p, model, pv, i)
+        conn.execute("""INSERT INTO im.item_matches (item_id, decision, idea_id, judged_by, egress_id)
+                        SELECT %s, decision, idea_id, judged_by, egress_id FROM im.item_matches WHERE item_id = %s
+                        ON CONFLICT DO NOTHING""", (new, it["from_item_id"]))
+        conn.execute("""INSERT INTO im.idea_evidence (idea_id, item_id, relation, judged_by)
+                        SELECT idea_id, %s, relation, judged_by FROM im.idea_evidence WHERE item_id = %s
+                        ON CONFLICT DO NOTHING""", (new, it["from_item_id"]))
+
+
 def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: list[dict]) -> None:
     with conn.transaction():
         conn.execute("""DELETE FROM im.items WHERE episode_id = %s AND model = %s AND prompt_version = %s
@@ -227,7 +246,7 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
                      source_segment_ids, egress_id, model, prompt_version, privacy_policy_version,
                      schema_version, stage_version, input_hash)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                (uuid.uuid5(ITEM_NS, f"{p.episode_id}|{model}|{pv}|{egress.POLICY_VERSION}|{p.sha256}|{i}"),
+                (_item_id(p, model, pv, i),
                  p.episode_id, it["kind"], it["said_by"], it["quote"], it["gist"], it["themes"], it["confidence"],
                  it["source_segment_ids"], egress_id, model, pv, egress.POLICY_VERSION, SCHEMA_VERSION,
                  STAGE_VERSION, p.sha256))
@@ -259,6 +278,7 @@ def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "mediu
     for p in todo[:limit] if limit else todo:
         if reused := _reuse(conn, p, model, pv):
             _save(conn, p, model, pv, *reused)
+            _carry_matches(conn, p, model, pv, reused[1])
             stats["reused"] += 1
             stats["items"] += len(reused[1])
             continue
