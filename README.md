@@ -18,6 +18,11 @@ before. [Lattice](https://github.com/junglestyle/lattice) shows the result. Most
 talk, so most of the work is deciding what deserves attention, and measuring whether a cheap model can
 decide that before trusting it to.
 
+> **Versions.** `v1` is the proof of concept as it ran, before the V2 refactor. To run it, check out `v1.1`:
+> V1 plus one fix, so naming a speaker no longer sends an unchanged transcript back to Claude
+> ([#10](https://github.com/junglestyle/ideamachine/pull/10)). `main` is moving to V2
+> ([decision 0005](docs/decisions/0005-presentation-inside-idea-machine.md)).
+
 ```mermaid
 flowchart LR
     H["Hearsay<br/>attributed transcripts<br/>(read-only file stream)"] --> I
