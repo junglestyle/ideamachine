@@ -303,12 +303,13 @@ def cmd_trial(args) -> None:
 
     x = config.load().extract
     system = extract.system_prompt(args.prompt, x.interests)
+    model, effort = args.model or x.model, args.effort or x.effort
+    cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
     with db.connect(db.pipeline_dsn()) as conn:
         out = {}
         if not args.report:
-            out["trial"] = trial.run(conn, anthropic.Anthropic(), system, x.model, x.effort, x.monthly_cap_usd,
-                                     args.limit)
-        out["report"] = trial.report(conn, extract.prompt_version(x.model, x.effort, system), x.model)
+            out["trial"] = trial.run(conn, anthropic.Anthropic(), system, model, effort, cap, args.limit)
+        out["report"] = trial.report(conn, extract.prompt_version(model, effort, system), model)
     _print(out)
 
 
@@ -530,6 +531,9 @@ def main(argv=None) -> None:
     tr.add_argument("prompt", help="a name in extract.PROMPTS, e.g. v2")
     tr.add_argument("--limit", type=int, help="read at most this many episodes this time")
     tr.add_argument("--report", action="store_true", help="only report on what's been read; send nothing")
+    tr.add_argument("--model", help="the candidate model, e.g. claude-sonnet-5-5 (default: the configured one)")
+    tr.add_argument("--effort", help="the candidate's effort (default: the configured one)")
+    tr.add_argument("--monthly-cap-usd", type=float, help="stop before the month's spend passes this (default: config)")
     tr.set_defaults(func=cmd_trial)
     sd = sub.add_parser("seed", help="import an idea archive into the lattice (its clusters become pinned themes)")
     sd.add_argument("path", help="the archive, e.g. ~/.local/share/ideamachine/seeds/chatgpt-archive.md")

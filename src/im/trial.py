@@ -106,7 +106,17 @@ def report(conn, prompt_version: str, model: str = "claude-opus-5-5") -> dict:
         unjudged += [f"{it['kind']}: {it['quote']}" for it in new]
     found = n["kept_found"] + n["discarded_found"]
     rate = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
+    # What the candidate cost on these episodes, against the live extraction's read of the same ones (B3).
+    cost, live = conn.execute(
+        """SELECT sum(g.cost_usd), sum((SELECT sum(lg.cost_usd) FROM im.extractions x
+                                       JOIN im.egress_log lg USING (egress_id) WHERE x.episode_id = t.episode_id))
+           FROM im.prompt_trials t JOIN im.egress_log g USING (egress_id)
+           WHERE t.prompt_version = %s AND t.model = %s AND t.episode_id = ANY(%s)""",
+        (prompt_version, model, [eid for eid, _ in trials if eid in mine])).fetchone()
     return {"prompt_version": prompt_version, "episodes": len(trials)} | n | {
+        "cost_usd": round(float(cost), 4) if cost is not None else None,
+        "live_cost_usd": round(float(live), 4) if live is not None else None,
+        "cost_vs_live": rate(float(cost or 0), float(live or 0)),
         "keep_rate_before": rate(n["kept"], n["kept"] + n["discarded"]),
         "keep_rate_on_judged": rate(n["kept_found"], found),
         "keep_rate_if_unjudged_are_discards": rate(n["kept_found"], found + n["unjudged"]),
