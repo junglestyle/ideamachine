@@ -3,7 +3,7 @@
 Idea Machine and Lattice run on TrueNAS SCALE next to Hearsay (ROADMAP §1 stack assumptions):
 - Postgres, the pipeline run and Lattice run in Docker. The run is a kind on [corral](https://github.com/junglestyle/corral)'s
   NAS worker: Hearsay enqueues it at the end of its pipeline, once the stream has new turns. Set up corral's server
-  and NAS worker (in `/mnt/fast/corral`, corral's `examples/system-worker.sh`) before `install/nas.sh`.
+  and NAS worker (in `/mnt/fast/corral-worker`, deployed from the infra repo) before `install/nas.sh`.
 - The data lives in the `fast/ideamachine` dataset, on the NVMe pool, so the spinning disks in `storage` can idle.
   `fast` is snapshotted nightly at 4:00 and replicated to `storage/fast-replica`.
 - The clones live in `/mnt/fast/repos` (dataset `fast/repos`), owned by `admin`. Clone and pull as admin, never
