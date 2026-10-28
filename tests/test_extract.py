@@ -8,7 +8,7 @@ import anthropic
 import httpx2
 import pytest
 
-from im import egress, extract, importer, router
+from im import egress, extract, feedback, importer, router
 
 from helpers import assert_invariants, episodes_with_text, run, table
 from test_label import script
@@ -137,6 +137,28 @@ def test_reuse_after_a_rekey_sends_nothing(pipe, cfg, stream, monkeypatch):
     assert len(claude.calls) == sent and stats["read"] == 0 and stats["reused"] == 9 and stats["items"] == 1
     assert table(pipe, """SELECT w.said_by FROM im.items i JOIN im.item_said_by w USING (item_id)
                           JOIN im.episodes e USING (episode_id) WHERE e.current""") == [("anon A",)]
+    assert_invariants(pipe)
+
+
+def test_reuse_keeps_each_duplicate_captures_own_verdict(pipe, cfg, stream, monkeypatch):
+    # Claude sometimes captures the same line twice; quote matching alone would carry only one of the verdicts.
+    twice = lambda text: coffee_item(text) * 2  # noqa: E731
+    with monkeypatch.context() as m:
+        m.setattr(importer, "STAGE_VERSION", "import/stream-v3")
+        m.setattr(importer, "NOT_IDENTITY", {"utterance_id", "affect", "delivery"})
+        run(pipe, cfg, stream)
+        extract.run_stage(pipe, FakeClaude(twice))
+    a, b = (r[0] for r in table(pipe, "SELECT item_id FROM im.items ORDER BY item_id"))
+    extract.decide(pipe, a, "keep")
+    extract.decide(pipe, b, "discard")
+    run(pipe, cfg, stream)
+    extract.run_stage(pipe, FakeClaude(twice), monthly_cap_usd=0)
+    feedback.carry_verdicts(pipe)
+    assert sorted(table(pipe, """SELECT (SELECT v.verdict FROM im.item_verdicts v WHERE v.item_id = i.item_id
+                                         ORDER BY v.decided_at DESC, v.verdict_id DESC LIMIT 1)
+                                 FROM im.items i JOIN im.episodes e USING (episode_id) WHERE e.current""")) == \
+        [("discard",), ("keep",)]
+    assert table(pipe, "SELECT method, count(*) FROM im.verdict_carries GROUP BY 1") == [("reuse", 2)]
     assert_invariants(pipe)
 
 
