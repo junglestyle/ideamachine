@@ -12,7 +12,7 @@ Each one leaves the system working and Lattice usable until M6.
 | M0 | Freeze V1 | `v1` tagged on all three repos; Lattice feature-frozen; [decision 0005](decisions/0005-presentation-inside-idea-machine.md) | done |
 | v1.1 | Stop re-spending on unchanged payloads | A naming change sends nothing to Claude and re-matches nothing ([#10](https://github.com/junglestyle/ideamachine/pull/10)) | done |
 | M1 | Stable segment identity | Naming produces no new segments or episodes, and no requests unless the pseudonymized payload changed; extractions per current episode ≤ 1.05; every verdict reachable, every item cites current segments, `pub.ideas` unchanged | [design](design/m1-segment-identity.md) |
-| M2 | One observation per capture; status, promotions, edge evidence | B5 passes; `pub.ideas` returns the same ids; Lattice works unchanged | at M2 |
+| M2 | One observation per capture; me / not-me layers; status, promotions, edge evidence | B5 passes; `pub.ideas` returns the same ids; Lattice works unchanged | at M2 |
 | M3 | Promotion rule as a run stage | Operator reviews 50 promotions via comparison; agreement ≥ 75% | at M3 |
 | M4 | Jev for match decisions and edge typing, behind versioned `judged_by` | B1 and B4 pass; no rise in duplicate ideas | at M4 |
 | M5 | Lenses; MCP server moves here | Connector works unchanged against the new endpoint; 5 canonical lenses judged useful | at M5 |
@@ -48,3 +48,7 @@ model (B3).
    changed the pseudonymized payload 35%.
 2. What N makes two observations in one conversation independent?
 3. Which statuses can the operator set directly, and does a manual promotion pin the idea against the rule?
+4. An idea from my speech and from someone else's on the same point: one idea of mine with heard support, or a
+   `heard` idea linked to mine? (M2 design.)
+5. Syntheses that emanate: are they the weekly digest points ([SPEC §1](SPEC.md#non-goals) rules out on-demand
+   synthesis), or a stage of their own?

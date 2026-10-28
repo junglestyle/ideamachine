@@ -11,6 +11,19 @@ deterministic rule over stored signals. Edges between ideas say how they relate 
 cite the evidence for it. **Lenses** show the graph from one idea or theme outward. Presentation and the MCP server
 move into this repo ([decision 0005](decisions/0005-presentation-inside-idea-machine.md)), and Lattice is archived.
 
+### Layers
+
+Who said it decides what an idea can become (2026-10-28, mine). Attribution is me / not me: Hearsay stopped naming
+anyone else, and a turn whose speaker is `unknown` counts as not me, so nothing unattributed can emanate.
+
+- **Not me:** what other people said. Low-level webbing and weighting: it links to my ideas and adds weight to them,
+  but it never emanates and never enters review. Status `heard`.
+- **Me:** the pool of ideas from my own speech. An idea emanates (is promoted) when it's good enough, or through a
+  synthesis of several that emanates.
+- **Anchors:** canonical ideas, entered by hand or flagged canonical. They carry the primary weight, attract ideas,
+  and help them emanate.
+- **Lenses:** topic overlays on the graph. They show it and change nothing.
+
 It's a refactor of V1, not a rewrite: the ledger (`im.source_*`, `im.items`, `im.egress_log`), versioned inference
 and event-sourced human input are what V2 needs, and they stay.
 
@@ -63,16 +76,17 @@ Proposed shapes. Each is settled in its milestone's design doc, and every new ta
 | Segment identity | `uuid5(conversation, start, end, text)`; speaker fields become annotations. Old ids link forward through `im.source_supersessions` (method `rekey`) | M1 |
 | Observation | `items.observation_id`: one capture of one stretch of speech. Items group by segment descent plus `quote_score >= 0.4`. Verdicts fold onto it (latest wins) | M2 |
 | Independent support | Distinct conversations, or one conversation at least N minutes apart. Never distinct items | M2 |
-| Idea status | `ideas.status`: `canonical` (archive and mine), `promoted`, `provisional`, `merged`, `rejected` | M2 |
+| Idea status | `ideas.status`: `canonical` (anchors: archive, mine, or flagged), `promoted`, `provisional`, `heard` (not me), `merged`, `rejected` | M2 |
 | Promotion history | `im.promotions`: idea, from and to status, rule version, the signals it read, when | M2 |
 | Edges | `im.idea_links` gains `supports`, `contradicts`, `extends` beside `evolves`, `related`, `archive`, plus `evidence_item_ids`, `confidence`, and `method` with the model version, so a rerun can be diffed | M2, M4 |
 | Lens cache | `im.lens_cache(seed, graph_version, result)` | M5 |
 
 ## 4. Promotion
 
-A run stage evaluates a rule over stored signals and writes `status` plus a `promotions` row when it changes. The
-starting rule (from the architecture review, **not yet validated**): at least two independent observations or a link
-to a canonical idea; rubric generality or outside value of 3 or more; not discarded, not merged. M3 tunes the
+A run stage evaluates a rule over stored signals and writes `status` plus a `promotions` row when it changes. Only
+my ideas are candidates; `heard` ideas only add weight to the ideas they link to. The starting rule (from the
+architecture review, **not yet validated**): at least two independent observations of mine or a link to an anchor;
+rubric generality or outside value of 3 or more; not discarded, not merged. M3 tunes the
 thresholds against operator review, and the rule is versioned like any stage.
 
 ## 5. Edge typing (Jev)
