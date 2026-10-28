@@ -12,7 +12,8 @@ CFG = SegmentConfig(gap_s=60, mode_gap_s=5, min_monologue_s=30)
 
 def seg(n, start, dur, me, conf=0.9, label=None):
     return Seg(uuid.uuid5(uuid.NAMESPACE_OID, str(n)), "s", "test", T0 + timedelta(seconds=start),
-               T0 + timedelta(seconds=start + dur), label or ("A" if me else "B"), me, conf)
+               T0 + timedelta(seconds=start + dur), label or ("A" if me else "B"),
+               "owner" if me else "person", me, conf)
 
 
 def shape(eps):

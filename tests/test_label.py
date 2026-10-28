@@ -58,7 +58,7 @@ def test_next_episode_balances_episode_kinds(pipe, cfg, stream):
     assert len(seen) == 9 and label.next_episode(pipe) is None
 
 
-@pytest.mark.parametrize("name", ["name a speaker", "split a turn", "split a conversation",
+@pytest.mark.parametrize("name", ["merge voices", "split a turn", "split a conversation",
                                   "merge conversations", "file as noise"])
 def test_labels_follow_corrections(pipe, cfg, stream, name):
     run(pipe, cfg, stream)

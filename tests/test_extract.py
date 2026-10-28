@@ -8,7 +8,7 @@ import anthropic
 import httpx2
 import pytest
 
-from im import egress, extract, router
+from im import egress, extract, importer, router
 
 from helpers import assert_invariants, episodes_with_text, run, table
 from test_label import script
@@ -83,7 +83,7 @@ def test_only_changed_episodes_go_out_again(pipe, cfg, stream):
     assert extract.run_stage(pipe, claude)["read"] == 1
 
 
-def test_naming_a_speaker_reuses_the_read_instead_of_sending_it_again(pipe, cfg, stream):
+def test_naming_a_speaker_sends_nothing_and_renames_the_capture(pipe, cfg, stream):
     run(pipe, cfg, stream)
     claude = FakeClaude(coffee_item)
     extract.run_stage(pipe, claude)
@@ -97,18 +97,46 @@ def test_naming_a_speaker_reuses_the_read_instead_of_sending_it_again(pipe, cfg,
     stream.name_speaker("c-conv", "anon A", "Carol")
     stream.write(stream.dir)
     run(pipe, cfg, stream)
-    stats = extract.run_stage(pipe, claude, monthly_cap_usd=0)  # reuse costs nothing, so the cap doesn't stop it
-    assert len(claude.calls) == sent and stats["read"] == 0 and stats["reused"] >= 1 and stats["items"] == 1
-    (said_by, segs, egress_id), = table(pipe, """SELECT said_by, source_segment_ids, egress_id FROM im.items
-                                              JOIN im.episodes USING (episode_id) WHERE current""")
-    assert said_by == "Carol"
-    assert table(pipe, "SELECT text FROM im.source_segments WHERE segment_id = %s", segs[0]) == [(COFFEE,)]
-    assert table(pipe, "SELECT count(*) FROM im.egress_log WHERE egress_id = %s", egress_id) == [(1,)]
-    # the matcher's decision came along: the capture isn't matched again and the idea still has current evidence
-    assert table(pipe, """SELECT m.decision, m.idea_id, ev.relation FROM im.items i JOIN im.episodes e USING (episode_id)
-                          JOIN im.item_matches m USING (item_id) JOIN im.idea_evidence ev USING (item_id)
-                          WHERE e.current""") == [("new", idea, "origin")]
-    assert extract.run_stage(pipe, claude)["reused"] == 0  # settled: nothing pending
+    stats = extract.run_stage(pipe, claude)
+    assert len(claude.calls) == sent and stats["read"] == stats["reused"] == 0   # same episode, same payload
+    assert table(pipe, "SELECT item_id FROM im.items JOIN im.episodes USING (episode_id) WHERE current") == \
+        [(old_item,)]
+    # the capture now says who spoke by their new name, and its match and evidence never moved
+    assert table(pipe, "SELECT said_by FROM pub.evidence WHERE item_id = %s", old_item) == [("Carol",)]
+    assert table(pipe, "SELECT said_by FROM im.items WHERE item_id = %s", old_item) == [("anon A",)]  # as recorded
+    assert table(pipe, "SELECT decision, idea_id FROM im.item_matches WHERE item_id = %s", old_item) == \
+        [("new", idea)]
+    assert_invariants(pipe)
+
+
+def test_merging_voices_reads_that_episode_again(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    claude = FakeClaude(coffee_item)
+    extract.run_stage(pipe, claude)
+    sent = len(claude.calls)
+    stream.name_speaker("c-conv", "anon A", "Alice")   # S2 is S1: what would be sent changed
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    assert extract.run_stage(pipe, claude)["read"] == 1 and len(claude.calls) == sent + 1
+    assert "[3] S1: Who's got the coffee order?" in claude.calls[-1]["messages"][0]["content"]
+    assert table(pipe, """SELECT w.said_by FROM im.items i JOIN im.item_said_by w USING (item_id)
+                          JOIN im.episodes e USING (episode_id) WHERE e.current""") == [("Alice",)]
+    assert_invariants(pipe)
+
+
+def test_reuse_after_a_rekey_sends_nothing(pipe, cfg, stream, monkeypatch):
+    with monkeypatch.context() as m:
+        m.setattr(importer, "STAGE_VERSION", "import/stream-v3")
+        m.setattr(importer, "NOT_IDENTITY", {"utterance_id", "affect", "delivery"})
+        run(pipe, cfg, stream)
+        claude = FakeClaude(coffee_item)
+        extract.run_stage(pipe, claude)
+    sent = len(claude.calls)
+    run(pipe, cfg, stream)   # every segment rekeyed, so every episode re-derives
+    stats = extract.run_stage(pipe, claude, monthly_cap_usd=0)
+    assert len(claude.calls) == sent and stats["read"] == 0 and stats["reused"] == 9 and stats["items"] == 1
+    assert table(pipe, """SELECT w.said_by FROM im.items i JOIN im.item_said_by w USING (item_id)
+                          JOIN im.episodes e USING (episode_id) WHERE e.current""") == [("anon A",)]
     assert_invariants(pipe)
 
 

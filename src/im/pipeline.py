@@ -16,7 +16,7 @@ from im.segment import Seg, segment
 
 SCHEMA_VERSION = 1
 SEG_SQL = """SELECT segment_id, conversation_id AS session_id, 'hearsay' AS source, started_at, ended_at,
-                    speaker_label, is_self, speaker_conf
+                    speaker_label, speaker_kind, is_self, speaker_conf
              FROM im.current_segments WHERE conversation_id = ANY(%s)"""
 
 

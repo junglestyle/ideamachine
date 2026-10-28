@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from im import db, fixtures, pipeline, show
+from im import db, fixtures, importer, pipeline, show
 from im.config import Config, SegmentConfig
 from im.fixtures import _alice, _me
 from im.importer import StreamError
@@ -36,7 +36,8 @@ def test_fixtures_segment_as_expected(pipe, cfg, stream):
 
 # (correction, text of a segment in each episode it should re-derive, how the old segment is linked)
 CORRECTIONS = {
-    "name a speaker": (lambda s: s.name_speaker("c-conv", "anon A", "Carol"), [COFFEE], "utterance_id"),
+    # anon A turns out to be Alice: the speech stays, but S2 becomes S1 in what would be sent.
+    "merge voices": (lambda s: s.name_speaker("c-conv", "anon A", "Alice"), [COFFEE], None),
     "split a turn": (lambda s: s.split_turn("c-edits", 1, 10810,
                                             _alice(10806, 10810, "The hosting line doubled."),
                                             _me(10810.5, 10816, "I think we should move off the managed database.")),
@@ -66,6 +67,37 @@ def test_a_correction_rederives_only_affected_episodes(pipe, cfg, stream, name):
     assert stats["episodes_retired"] == len(affected) and stats["episodes_created"] == len(created) >= 1
     methods = {r[0] for r in table(pipe, "SELECT method FROM im.source_supersessions")}
     assert methods == ({method} if method else set())
+    assert_invariants(pipe)
+
+
+def test_naming_a_voice_changes_its_label_and_nothing_else(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    before, coffee = episodes(pipe), segment_of(pipe, COFFEE)
+    stream.name_speaker("c-conv", "anon A", "Carol")
+    stream.write(stream.dir)
+    stats = run(pipe, cfg, stream)
+    assert stats["segments_new"] == stats["segments_left"] == stats["episodes_created"] == 0
+    assert episodes(pipe) == before
+    assert segment_of(pipe, COFFEE) == coffee
+    assert table(pipe, "SELECT speaker_kind, speaker_name, speaker_label FROM im.source_segments WHERE segment_id = %s",
+                 coffee) == [("person", "Carol", "Carol")]
+    assert table(pipe, "SELECT count(*) FROM im.source_supersessions") == [(0,)]
+    assert_invariants(pipe)
+
+
+def test_an_older_importers_segments_are_rekeyed_in_place_of_a_migration(pipe, cfg, stream, monkeypatch):
+    with monkeypatch.context() as m:   # import as stream-v3 did: who spoke is part of a segment's identity
+        m.setattr(importer, "STAGE_VERSION", "import/stream-v3")
+        m.setattr(importer, "NOT_IDENTITY", {"utterance_id", "affect", "delivery"})
+        run(pipe, cfg, stream)
+    old = table(pipe, "SELECT segment_id, text FROM im.current_segments ORDER BY text")
+    stats = run(pipe, cfg, stream)
+    new = table(pipe, "SELECT segment_id, text FROM im.current_segments ORDER BY text")
+    assert [t for _, t in new] == [t for _, t in old] and not {s for s, _ in new} & {s for s, _ in old}
+    assert table(pipe, "SELECT method, count(*) FROM im.source_supersessions GROUP BY 1") == [("rekey", len(old))]
+    assert stats["segments_left"] == 0   # every old segment found its new key, so nothing links by overlap
+    assert table(pipe, "SELECT DISTINCT stage_version FROM im.current_segments") == [(importer.STAGE_VERSION,)]
+    assert run(pipe, cfg, stream)["conversations_changed"] == 0
     assert_invariants(pipe)
 
 
