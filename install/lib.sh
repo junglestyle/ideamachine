@@ -25,8 +25,8 @@ HEARSAY_STREAM_STORAGE="/mnt/storage/hearsay/stream"
 LATTICE_HTTPS_PORT=8444
 DB_CONTAINER=ideamachine-db
 RUN_LOCK=/run/ideamachine-run.lock
-# Corral's NAS worker (github.com/junglestyle/corral, examples/system-worker.sh there) runs from here.
-NAS_CORRAL_DIR="/mnt/fast/corral"
+# Corral's NAS worker runs from here (deployed from the infra repo).
+NAS_CORRAL_DIR="/mnt/fast/corral-worker"
 APPS_UID=568
 APPS_GID=568
 COMPOSE=(docker compose -f "$REPO_DIR/install/compose.yaml")

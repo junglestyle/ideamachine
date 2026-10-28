@@ -250,10 +250,10 @@ fi
 
 say "The run on corral's NAS worker (github.com/junglestyle/corral)"
 # Hearsay enqueues ideamachine.run at the end of its pipeline, once the stream has new turns. Corral is set up from
-# its own repo; this adds the kind to its worker.
+# the infra repo; this adds the kind to its worker.
 systemctl is-active -q corral-worker && [ -f "$NAS_CORRAL_DIR/worker.toml" ] \
-    || die "no corral worker running from $NAS_CORRAL_DIR. Set up corral's server and NAS worker (docs/running.md in
-junglestyle/corral, examples/system-worker.sh there), then re-run."
+    || die "no corral worker running from $NAS_CORRAL_DIR (journalctl -u corral-worker). It's deployed from the infra
+repo; set it up there, then re-run."
 grep -q '"nas"' "$NAS_CORRAL_DIR/worker.toml" \
     || die "the corral worker in $NAS_CORRAL_DIR/worker.toml doesn't offer \"nas\"; add it to offers, then re-run"
 mkdir -p "$NAS_CORRAL_DIR/kinds.d"
