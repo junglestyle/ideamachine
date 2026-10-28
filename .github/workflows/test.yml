@@ -26,7 +26,7 @@ jobs:
       IM_DATABASE_URL: postgresql://im_pipeline:ci-pipeline@127.0.0.1:55432/im_dev
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - name: Create the pipeline role
         run: psql "$IM_DEV_ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE ROLE im_pipeline LOGIN PASSWORD 'ci-pipeline'"
       - name: Install (CPU-only torch, scikit-learn; no model weights are downloaded)
