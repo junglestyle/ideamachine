@@ -17,7 +17,8 @@ STAGE_VERSION = "extract/1"
 ITEM_NS = uuid.UUID("3c1e8a52-7d0f-4b6e-9f21-5a8c4e7d1b90")
 KINDS = ["idea", "aphorism", "joke", "observation", "project", "task", "decision"]
 # $ per million tokens (input, output); a refusal fallback may answer on another model.
-PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-opus-4-8": (5.0, 25.0)}
+PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-opus-4-8": (5.0, 25.0), "claude-sonnet-5-5": (2.0, 10.0),
+          "claude-haiku-5-5": (0.10, 0.50)}   # Haiku 5.5: prompts up to 100K tokens, which every episode is
 FALLBACK_MODEL = "claude-opus-4-8"
 
 # v1: the first prompt (58% of its captures kept). Its text must never change: its hash is the prompt_version every
@@ -275,11 +276,14 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
 
 
 def call(client, model: str, effort: str, system: str, text: str):
+    """Opus falls back to FALLBACK_MODEL on a refusal. Sonnet and Haiku (trials only) don't take that fallback, so
+    a refusal there is counted as one."""
+    fallback = {"betas": ["server-side-fallback-2026-06-01"], "fallbacks": [{"model": FALLBACK_MODEL}]} \
+        if model.startswith("claude-opus") else {}
     return client.beta.messages.create(
         model=model, max_tokens=16000, system=system,
         messages=[{"role": "user", "content": text}],
-        output_config={"effort": effort, "format": {"type": "json_schema", "schema": SCHEMA}},
-        betas=["server-side-fallback-2026-06-01"], fallbacks=[{"model": FALLBACK_MODEL}])
+        output_config={"effort": effort, "format": {"type": "json_schema", "schema": SCHEMA}}, **fallback)
 
 
 def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "medium",
