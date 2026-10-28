@@ -14,7 +14,11 @@ move into this repo ([decision 0005](decisions/0005-presentation-inside-idea-mac
 ### Layers
 
 Who said it decides what an idea can become (2026-10-28, mine). Attribution is me / not me: Hearsay stopped naming
-anyone else, and a turn whose speaker is `unknown` counts as not me, so nothing unattributed can emanate.
+anyone else, and a turn whose speaker is `unknown` counts as not me, so nothing unattributed can emanate. How
+sure "me" is comes from the segment's `speaker_basis`. Hearsay checked it by ear on 2026-10-28: an owner turn by
+`voice` was right 49 of 49 times, and one owner by `diarization` was right 147 of 162 times (the misses are short
+interjections). So an owner turn by `voice`, `named` or `channel` is me. One by `diarization` counts as me for
+webbing, but an idea resting only on such turns doesn't emanate.
 
 - **Not me:** what other people said. Low-level webbing and weighting: it links to my ideas and adds weight to them,
   but it never emanates and never enters review. Status `heard`.
