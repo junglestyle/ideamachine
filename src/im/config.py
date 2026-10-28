@@ -58,11 +58,31 @@ class LatticeConfig:
 
 
 @dataclass(frozen=True)
+class WeightConfig:
+    """weight-1 (docs/design/m2-observations-candidates-ideas.md). Any change is a new formula version: its weights
+    are written beside the old ones. Preview a change with `im tune`."""
+    recurrence_minutes: float = 30.0   # two of my observations in one conversation this far apart count twice
+    others: float = 0.25               # per observation by diarization or not me...
+    others_cap: int = 4                # ...counting at most this many, so a crowd can't outweigh me
+    canonical_link: float = 0.5        # per link to a canonical idea
+    canonical: float = 2.0             # when the cluster is itself a canonical idea
+    proposals_per_week: int = 10
+    repropose_margin: float = 1.0      # a dismissed candidate comes back once its weight has grown this much
+
+    @property
+    def formula_version(self) -> str:
+        params = ";".join(f"{f.name}={getattr(self, f.name):g}" for f in fields(self)
+                          if f.name not in ("proposals_per_week", "repropose_margin"))
+        return f"weight-1;{params}"
+
+
+@dataclass(frozen=True)
 class Config:
     segment: SegmentConfig = SegmentConfig()
     triage: TriageConfig = TriageConfig()
     extract: ExtractConfig = ExtractConfig()
     lattice: LatticeConfig = LatticeConfig()
+    weight: WeightConfig = WeightConfig()
 
 
 def load() -> Config:
@@ -75,4 +95,5 @@ def load() -> Config:
     if "backends" in triage:
         triage["backends"] = tuple(triage["backends"])
     return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
-                  extract=ExtractConfig(**data.get("extract", {})), lattice=LatticeConfig(**data.get("lattice", {})))
+                  extract=ExtractConfig(**data.get("extract", {})), lattice=LatticeConfig(**data.get("lattice", {})),
+                  weight=WeightConfig(**data.get("weight", {})))
