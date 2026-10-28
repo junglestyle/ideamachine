@@ -29,11 +29,13 @@ LEFT JOIN LATERAL (SELECT f.kind, f.payload FROM pub.feedback_events f
                    WHERE f.idea_id = d.idea_id AND f.kind IN ('idea_keep', 'idea_unkeep')
                    ORDER BY f.at DESC, f.event_id DESC LIMIT 1) e ON true;
 
--- Same columns as 030, kept_as now from im.idea_kept.
+-- Same columns as 030, kept_as now from im.idea_kept, and only current captures make a candidate (a cluster whose
+-- evidence is all on superseded reads is out of Lattice, so it isn't proposed).
 CREATE OR REPLACE VIEW im.idea_maturity AS
 SELECT d.idea_id,
        CASE WHEN k.kept_as IS NOT NULL THEN 'idea'
             WHEN EXISTS (SELECT 1 FROM im.idea_evidence ev JOIN im.items i USING (item_id)
+                         JOIN im.episodes e ON e.episode_id = i.episode_id AND e.current
                          JOIN im.observation_speaker o USING (observation_id)
                          WHERE ev.idea_id = d.idea_id AND o.speaker = 'me') THEN 'candidate'
             ELSE 'observation' END AS maturity,

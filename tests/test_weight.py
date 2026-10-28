@@ -90,3 +90,13 @@ def test_tune_previews_without_writing(matched):
     assert table(matched, "SELECT count(*) FROM im.weights") == before
     with pytest.raises(ValueError):
         weight.parse_overrides(["clustering=0.5"])
+
+
+def test_a_cluster_only_on_superseded_reads_is_not_proposed(matched):
+    matched.execute("""UPDATE im.episodes SET current = false, retired_at = now() WHERE episode_id IN (
+                         SELECT i.episode_id FROM im.items i JOIN im.idea_evidence ev USING (item_id)
+                         WHERE ev.idea_id = %s)""", (idea(matched, "Something new"),))
+    m = dict(table(matched, "SELECT idea_id, maturity FROM im.idea_maturity"))
+    assert m[idea(matched, "Something new")] == "observation"
+    weight.stage(matched, WeightConfig(proposals_per_week=5))
+    assert "Something new" not in [t for t, _ in proposals(matched)]
