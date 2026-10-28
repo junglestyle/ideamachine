@@ -12,12 +12,13 @@ Each one leaves the system working and Lattice usable until M6.
 | M0 | Freeze V1 | `v1` tagged on all three repos; Lattice feature-frozen; [decision 0005](decisions/0005-presentation-inside-idea-machine.md) | done |
 | v1.1 | Stop re-spending on unchanged payloads | A naming change sends nothing to Claude and re-matches nothing ([#10](https://github.com/junglestyle/ideamachine/pull/10)) | done |
 | M1 | Stable segment identity | Naming produces no new segments or episodes, and no requests unless the pseudonymized payload changed; extractions per current episode ≤ 1.05; every verdict reachable, every item cites current segments, `pub.ideas` unchanged | [design](design/m1-segment-identity.md) |
-| M2 | One observation per capture; me / not-me layers; status, promotions, edge evidence | B5 passes; `pub.ideas` returns the same ids; Lattice works unchanged | at M2 |
-| M3 | Promotion rule as a run stage | Operator reviews 50 promotions via comparison; agreement ≥ 75% | at M3 |
+| M2 | Observations, clusters, candidates, weight; ideas I keep (canonical or pinned); proposals; edge citations | B5 passes; every cluster weighted; `pub.ideas` returns the same ids; Lattice works unchanged | [design](design/m2-observations-candidates-ideas.md) |
+| Synthesis | A stage triggered by weight: consolidates a cluster's statement or bridges several into a candidate, citing observations; arrives as a proposal | Versioned and capped; I keep a fair share of what it proposes | after M2 |
+| M3 | Tune weight and proposals | Of 50 proposals, I keep ≥ 40% (canonical or pinned); `weight-1` tuned with `im tune` | at M3 |
 | M4 | Jev for match decisions and edge typing, behind versioned `judged_by` | B1 and B4 pass; no rise in duplicate ideas | at M4 |
 | M5 | Lenses; MCP server moves here | Connector works unchanged against the new endpoint; 5 canonical lenses judged useful | at M5 |
 | M6 | Emanation UI; cut over; archive Lattice | Parity checklist from Lattice's tools and views; a week of use without falling back | at M6 |
-| M7 | Cheaper extraction and titles | B3 (Sonnet extraction) and B6 (local titles via Corral) pass; cost per retained idea in `pub.spend` | at M7 |
+| M7 | Local titles | B6 (local titles via Corral) passes | at M7 |
 
 **Hold:** Hearsay's audio retention stays off until M2 validates. Raw audio is the rollback for the re-link.
 
@@ -28,8 +29,8 @@ Each runs on data that already exists and records model and prompt versions.
 | # | Decision | Pass bar |
 |---|---|---|
 | B1 | Match: `new` vs `same_as`/`evolves`, against 1,131 logged Opus decisions after dedupe | ≥ 90% agreement; `same_as` precision ≥ 0.95 on the operator-validated subset (the real bar: agreement with Opus only shows a cost swap is safe) |
-| B2 | Keep/discard prior, for review order only | Discard AUC ≥ 0.75 |
-| B3 | Extraction model swap (`im trial`, 51 judged episodes) | Keep recall ≥ 90% of Opus; cost ≤ 35% |
+| B2 | ~~Keep/discard prior~~ retired 2026-10-28: no keep/discard | — |
+| B3 | Extraction model swap (`im trial`). Done 2026-10-28: Opus stays (Sonnet 82% recall at 42% cost; Haiku lost the blind slug check) | Rerun when a model ships: candidate's slugs preferred or tied ≥ 60% of 30 blind pairs |
 | B4 | Edge typing, 200 labelled pairs | Macro-F1 ≥ 0.70; `contradicts` precision ≥ 0.80 |
 | B5 | Dedupe migration, operator audit of 50 groups and 50 near misses | ≤ 2 false merges in 50 |
 | B6 | Local titles | Local preferred or tied ≥ 60% in 50 blind pairs |
@@ -38,7 +39,7 @@ Each runs on data that already exists and records model and prompt versions.
 
 Spend is about $25 a month: extraction 58%, matching 25%, all on Opus 5.5. That's low, so V2 doesn't trade
 correctness or simplicity for a few dollars. It matters at 5–10× capture, where the lever is a cheaper extraction
-model (B3).
+model (B3; Opus stayed in 2026-10).
 
 ## 4. Open questions
 
@@ -46,9 +47,8 @@ model (B3).
    on extraction, re-transcription was 12% and none of it was speech first sent while its conversation was open,
    so M1 doesn't hold extraction. Repeats of an identical payload were 18% (v1.1 skips them) and naming that
    changed the pseudonymized payload 35%.
-2. What N makes two observations in one conversation independent?
-3. Which statuses can the operator set directly, and does a manual promotion pin the idea against the rule?
-4. An idea from my speech and from someone else's on the same point: one idea of mine with heard support, or a
-   `heard` idea linked to mine? (M2 design.)
-5. Syntheses that emanate: are they the weekly digest points ([SPEC §1](SPEC.md#non-goals) rules out on-demand
-   synthesis), or a stage of their own?
+2. ~~What N makes two observations in one conversation independent?~~ 30 minutes, an operator setting (2026-10-28).
+3. ~~Which statuses can the operator set directly?~~ Only I make ideas, kept as canonical or pinned; a star is a pin (2026-10-28).
+4. ~~My point and someone else's: one cluster or two?~~ One: theirs joins mine as a not-me member (2026-10-28).
+5. ~~Digest points or a synthesis stage?~~ A stage of its own, triggered by weight, after M2 (2026-10-28).
+6. Widening extraction to neutral observations (questions, jokes, passing thoughts): yes, after M2; when?
