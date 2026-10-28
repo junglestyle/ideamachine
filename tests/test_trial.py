@@ -47,6 +47,13 @@ def test_a_trial_compares_the_candidate_with_my_verdicts(pipe, cfg, stream):
     assert (r["keep_rate_before"], r["keep_rate_on_judged"], r["keep_rate_if_unjudged_are_discards"]) == (0.5, 1.0, 0.5)
     assert r["skipped_discards"] == ["Who's got the coffee order?"]
     assert r["unjudged_captures"] == ["idea: We should pin the cache key to the lockfile hash."]
+    assert r["cost_vs_live"] == 1.0   # same model, same tokens as the live reads of the judged episodes
+
+    # A cheaper candidate model (B3) is filed apart, and doesn't ask for Opus's refusal fallback.
+    sonnet = FakeClaude(both(DATABASE))
+    assert trial.run(pipe, sonnet, v2, model="claude-sonnet-5-5")["read"] == 2
+    assert {c["model"] for c in sonnet.calls} == {"claude-sonnet-5-5"} and not any("fallbacks" in c for c in sonnet.calls)
+    assert "fallbacks" in candidate.calls[0]
 
     # A keep in bulk wasn't read: it isn't a judgment to compare a prompt against.
     pipe.execute("UPDATE im.item_verdicts SET how = 'bulk' WHERE verdict = 'keep'")
