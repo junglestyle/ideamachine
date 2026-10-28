@@ -344,10 +344,10 @@ def cmd_ideas(args) -> None:
             print(f"{len(rows)} discarded")
             return
         rows = conn.execute(
-            """SELECT i.kind, i.said_by, i.quote, i.gist, i.confidence, e.started_at,
+            """SELECT i.kind, w.said_by, i.quote, i.gist, i.confidence, e.started_at,
                       (SELECT v.verdict FROM im.item_verdicts v WHERE v.item_id = i.item_id
                        ORDER BY v.decided_at DESC LIMIT 1)
-               FROM im.items i JOIN im.episodes e USING (episode_id)
+               FROM im.items i JOIN im.item_said_by w USING (item_id) JOIN im.episodes e USING (episode_id)
                WHERE e.current ORDER BY e.started_at DESC, i.confidence DESC""").fetchall()
         shown = 0
         for kind, who, quote, gist, conf, at, verdict in rows:
