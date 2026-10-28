@@ -109,14 +109,17 @@ The starting formula, `weight-1`, is tuned at M3:
 
 Pins add nothing. V1 verdicts add nothing.
 
-**Debug control:** `im tune` takes the knobs and prints what would change against the current settings. The knobs
-are N, the clustering match threshold, the weight terms, proposals per week, and the re-propose margin.
+**Debug control:** `im tune knob=value ...` previews a change against the current settings. The knobs are the
+`[weight]` settings in `im.toml`: N (`recurrence_minutes`), the weight terms, proposals per week, and the re-propose
+margin.
 
-- **What it prints:** clusters split or joined, candidates gained or lost, and the top proposals before and after.
+- **What it prints:** the weights that move most, and the next proposals before and after.
 - **Cost:** it writes nothing and costs $0.
-- **`--apply`:** writes the settings to `im.toml` as a new formula version.
-- **What a change costs:** changing N or the weights only recomputes. Changing the match threshold re-clusters, and
-  clusters that survive keep their ids.
+- **Applying:** it prints the `[weight]` block to paste into `im.toml`. A changed formula is a new version, written
+  beside the old one on the next run.
+- **Clustering isn't a knob.** What clusters together is the matcher's same-point decision (Claude, until Jev in M4),
+  not a threshold. The one threshold is how close two captures' quotes must be to fold into one observation
+  (`quote_score` ≥ 0.4), and changing that re-assigns observations, so it stays fixed until B5 says otherwise.
 
 ## Ideas and proposals
 
@@ -128,7 +131,7 @@ Only I make an idea. I keep something as one of two kinds:
 I can switch between them or un-keep. Keeping works on a candidate, or straight on any observation: pinning a
 friend's funny line makes it a pinned idea. Keeping is my endorsement, so it works on not-me material too.
 
-- **Events:** `idea_keep {as: canonical | pinned}` and `idea_unkeep` feedback events, in the ledger like every other
+- **Events:** `idea_keep {as: canonical | pinned}`, `idea_unkeep` and `idea_dismiss` feedback events on a cluster, in the ledger like every other
   human input. Merge and reject stay as they are.
 - **Starting state:**
   - The archive seed and the ideas I added by hand (`add_idea`) are canonical.
