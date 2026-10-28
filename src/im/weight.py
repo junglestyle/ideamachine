@@ -68,16 +68,18 @@ def weights(conn, w: WeightConfig) -> dict:
 
 
 def _eligible(conn, computed: dict, w: WeightConfig) -> list:
-    """Candidates I could be shown next, heaviest first: no open proposal, and not dismissed at about this weight."""
+    """Candidates I could be shown next, heaviest first, the most recently said first among equal weights: no open
+    proposal, and not dismissed at about this weight."""
     rows = conn.execute(
         """SELECT m.idea_id,
                   EXISTS (SELECT 1 FROM im.proposals p WHERE p.idea_id = m.idea_id AND p.outcome IS NULL),
                   (SELECT p.weight FROM im.proposals p WHERE p.idea_id = m.idea_id AND p.outcome = 'dismissed'
-                   ORDER BY p.decided_at DESC LIMIT 1)
+                   ORDER BY p.decided_at DESC LIMIT 1),
+                  (SELECT extract(epoch FROM max(ev.said_at)) FROM pub.evidence ev WHERE ev.idea_id = m.idea_id)
            FROM im.idea_maturity m WHERE m.maturity = 'candidate'""").fetchall()
-    out = [(computed[i][0], i) for i, open_, dismissed in rows
+    out = [(computed[i][0], i, float(said or 0)) for i, open_, dismissed, said in rows
            if not open_ and (dismissed is None or computed[i][0] >= dismissed + w.repropose_margin)]
-    return sorted(out, key=lambda r: (-r[0], str(r[1])))
+    return [(wt, i) for wt, i, _ in sorted(out, key=lambda r: (-r[0], -r[2], str(r[1])))]
 
 
 def _settle(conn) -> dict:
@@ -133,7 +135,7 @@ def tune(conn, current: WeightConfig, overrides: dict, top: int = 10) -> dict:
     titles = dict(conn.execute("SELECT idea_id, title FROM im.idea_text").fetchall())
     moved = sorted(((after[i][0] - before[i][0], titles.get(i, str(i)), before[i][0], after[i][0])
                     for i in before if before[i][0] != after[i][0]), key=lambda r: -abs(r[0]))
-    proposals = lambda c, w: [f"{wt:g}  {titles.get(i, i)}" for wt, i in _eligible(conn, c, w)[:top]]  # noqa: E731
+    proposals = lambda c, w: [f"{wt:g}  {titles.get(i, i)}" for wt, i in _eligible(conn, c, w)[:top]]
     toml = "[weight]\n" + "\n".join(f"{f.name} = {getattr(trial, f.name)!r}" for f in fields(trial)
                                     if getattr(trial, f.name) != getattr(WeightConfig(), f.name))
     return {"formula_version": {"now": current.formula_version, "trial": trial.formula_version},
