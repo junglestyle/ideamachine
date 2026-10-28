@@ -225,10 +225,20 @@ def _item_id(p: egress.Payload, model: str, pv: str, i: int) -> uuid.UUID:
 
 
 def _carry_matches(conn, p: egress.Payload, model: str, pv: str, items: list[dict]) -> None:
-    """Reused items keep the matcher's decision on the items they were copied from: the same capture isn't judged
-    (or paid for) twice, and can't turn into a second idea."""
+    """Reused items keep the matcher's decision and my verdicts on the items they were copied from: the same capture
+    isn't judged (or paid for) twice, and can't turn into a second idea. Verdicts go item to item, so two captures
+    with the same quote each keep their own; feedback.carry_verdicts, which matches by quote, sees them settled."""
     for i, it in enumerate(items):
         new = _item_id(p, model, pv, i)
+        copied = conn.execute(
+            """INSERT INTO im.item_verdicts (item_id, segment_ids, quote, verdict, note, how, decided_at, carried_from)
+               SELECT n.item_id, n.source_segment_ids, n.quote, v.verdict, v.note, v.how, v.decided_at, v.verdict_id
+               FROM im.item_verdicts v JOIN im.items n ON n.item_id = %s
+               WHERE v.item_id = %s AND NOT EXISTS (SELECT 1 FROM im.item_verdicts x WHERE x.item_id = n.item_id)
+               ORDER BY v.decided_at, v.verdict_id""", (new, it["from_item_id"])).rowcount
+        if copied:
+            conn.execute("""INSERT INTO im.verdict_carries (from_item_id, to_item_id, score, carried, method)
+                            VALUES (%s, %s, 1, true, 'reuse') ON CONFLICT DO NOTHING""", (it["from_item_id"], new))
         conn.execute("""INSERT INTO im.item_matches (item_id, decision, idea_id, judged_by, egress_id)
                         SELECT %s, decision, idea_id, judged_by, egress_id FROM im.item_matches WHERE item_id = %s
                         ON CONFLICT DO NOTHING""", (new, it["from_item_id"]))

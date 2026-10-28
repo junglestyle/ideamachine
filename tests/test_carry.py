@@ -58,8 +58,8 @@ def test_a_verdict_follows_its_capture_to_the_new_episode(pipe, cfg, stream):
     stream.conversations["c-edits"].turns[2] = _me(10810.5, 10816.5, quote)   # re-transcribed again: new times
     stream.write(stream.dir)
     run(pipe, cfg, stream)
-    extract.run_stage(pipe, claude)
-    assert feedback.carry_verdicts(pipe)["carried"] == 1
+    assert extract.run_stage(pipe, claude)["reused"] == 1   # only the times moved: the same text goes out
+    assert feedback.carry_verdicts(pipe)["carried"] == 0     # so the reuse carried the verdict, item to item
     assert table(pipe, "SELECT count(*) FROM im.item_verdicts WHERE verdict = 'discard'") == [(3,)]
     assert not extract.review_items(pipe)
     assert_invariants(pipe)
