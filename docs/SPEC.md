@@ -1,31 +1,32 @@
 # Idea Machine V2: spec
 
-_Status: plan, 2026-10-27. What V2 is meant to do: the scope, the contracts, the data model, promotion and edge
+_Status: plan, 2026-10-27; lifecycle revised 2026-10-28 (M2). What V2 is meant to do: the scope, the contracts, the data model, proposals and edge
 typing. The build order and the bar each step has to clear are in [ROADMAP-v2.md](ROADMAP-v2.md). V1 is tagged `v1`
 (`v1.1` adds the extraction reuse fix); its spec and roadmap stay in [ROADMAP.md](ROADMAP.md), frozen._
 
 ## 1. Scope
 
-V2 turns the lattice into a graph with a lifecycle. Captured ideas start **provisional** and are **promoted** by a
-deterministic rule over stored signals. Edges between ideas say how they relate (supports, contradicts, extends) and
+V2 turns the lattice into a graph with a lifecycle: **utterances → observations → candidates → ideas**
+([M2 design](design/m2-observations-candidates-ideas.md)). Everything extracted is an observation; observations of
+the same point cluster; a cluster of mine is a candidate with a computed weight; and only I make ideas, from the
+candidates the system proposes. Edges between ideas say how they relate (supports, contradicts, extends) and
 cite the evidence for it. **Lenses** show the graph from one idea or theme outward. Presentation and the MCP server
 move into this repo ([decision 0005](decisions/0005-presentation-inside-idea-machine.md)), and Lattice is archived.
 
-### Layers
+### Who said it, and what I keep
 
-Who said it decides what an idea can become (2026-10-28, mine). Attribution is me / not me: Hearsay stopped naming
-anyone else, and a turn whose speaker is `unknown` counts as not me, so nothing unattributed can emanate. How
-sure "me" is comes from the segment's `speaker_basis`. Hearsay checked it by ear on 2026-10-28: an owner turn by
-`voice` was right 49 of 49 times, and one owner by `diarization` was right 147 of 162 times (the misses are short
-interjections). So an owner turn by `voice`, `named` or `channel` is me. One by `diarization` counts as me for
-webbing, but an idea resting only on such turns doesn't emanate.
+Who said it decides what an observation can become (2026-10-28, mine). Attribution is me / not me: Hearsay stopped
+naming anyone else, and a turn whose speaker is `unknown` counts as not me. How sure "me" is comes from the
+segment's `speaker_basis`. Hearsay checked it by ear on 2026-10-28: an owner turn by `voice` was right 49 of 49
+times, and one by `diarization` 147 of 162 times (the misses are short interjections). So an owner turn by `voice`,
+`named` or `channel` is me; one by `diarization` counts only alongside a me observation.
 
-- **Not me:** what other people said. Low-level webbing and weighting: it links to my ideas and adds weight to them,
-  but it never emanates and never enters review. Status `heard`.
-- **Me:** the pool of ideas from my own speech. An idea emanates (is promoted) when it's good enough, or through a
-  synthesis of several that emanates.
-- **Anchors:** canonical ideas, entered by hand or flagged canonical. They carry the primary weight, attract ideas,
-  and help them emanate.
+- **Observations** are neutral and never judged: something I said, something someone else said.
+- **Candidates** are clusters with a me observation. Clusters of only not-me observations never become candidates;
+  they link to mine and add weight.
+- **Ideas** are what I keep, as **canonical** (weighted: it attracts and pulls linked clusters) or **pinned** (kept
+  and visible, no weight). Pinning never changes weight, maturity or clustering. The system proposes; it never makes
+  an idea.
 - **Lenses:** topic overlays on the graph. They show it and change nothing.
 
 It's a refactor of V1, not a rewrite: the ledger (`im.source_*`, `im.items`, `im.egress_log`), versioned inference
@@ -48,9 +49,9 @@ V1's non-goals ([ROADMAP §1](ROADMAP.md#non-goals)) still hold, except "a UI in
 - **A second datastore.** No Neo4j, SQLite or Redis. The graph is tables in the existing Postgres; graph algorithms
   run in Python per run and their results are stored. [Decision 0006](decisions/0006-graph-in-postgres.md) says what
   that shapes in the data and the code, and when to look again.
-- **A model deciding promotion.** Models produce signals; a query decides.
+- **The system deciding what's an idea.** Models and queries produce weight and proposals; I decide.
 - **Typing every pair.** Embeddings nominate pairs; nothing runs over n².
-- **On-demand synthesis.** Weekly digest points are the syntheses.
+- **On-demand synthesis.** Synthesis runs as a stage, triggered by weight, not by request.
 - **Reprocessing from audio.** V1 data is migrated with a dedupe pass. Its 818 verdicts, 743 feedback events and
   135+ comparisons are the only labels the benchmarks have.
 
@@ -66,9 +67,9 @@ storing the index's `open` flag per conversation, which the format already carri
 - Until cutover (M6), every existing `pub` view keeps its shape, so Lattice keeps working. New views are additions.
 - **MCP tools are a contract.** The 24 tools at Lattice `v1` (`src/lattice/mcp.py`, `TOOLS`) keep their names,
   argument schemas and result shapes byte-compatible, along with speaker pseudonymization in every answer and the
-  public listener's OAuth behaviour. New tools are additions: `open_lens`, `promote_idea`.
+  public listener's OAuth behaviour. New tools are additions: `proposals`, `keep_idea` (M2), `open_lens` (M5).
 - All human input stays feedback events: verdicts, stars, links, comparisons, theme edits, and V2's
-  promote / demote / merge / reject.
+  keep (canonical or pinned) / unkeep / merge / reject.
 
 ## 3. Data model
 
@@ -78,20 +79,21 @@ Proposed shapes. Each is settled in its milestone's design doc, and every new ta
 | Concept | Shape | Milestone |
 |---|---|---|
 | Segment identity | `uuid5(conversation, start, end, text)`; speaker fields become annotations. Old ids link forward through `im.source_supersessions` (method `rekey`) | M1 |
-| Observation | `items.observation_id`: one capture of one stretch of speech. Items group by segment descent plus `quote_score >= 0.4`. Verdicts fold onto it (latest wins) | M2 |
-| Independent support | Distinct conversations, or one conversation at least N minutes apart. Never distinct items | M2 |
-| Idea status | `ideas.status`: `canonical` (anchors: archive, mine, or flagged), `promoted`, `provisional`, `heard` (not me), `merged`, `rejected` | M2 |
-| Promotion history | `im.promotions`: idea, from and to status, rule version, the signals it read, when | M2 |
-| Edges | `im.idea_links` gains `supports`, `contradicts`, `extends` beside `evolves`, `related`, `archive`, plus `evidence_item_ids`, `confidence`, and `method` with the model version, so a rerun can be diffed | M2, M4 |
+| Observation | `im.observations` + `items.observation_id`: one thing derived from one stretch of speech. Items group by segment descent plus `quote_score >= 0.4`. Speaker read at query time | M2 |
+| Recurrence | Distinct conversations, or one conversation at least N (30) minutes apart. Never distinct items | M2 |
+| Cluster | Today's `im.ideas` row, ids kept. Maturity `observation`, `candidate` or `idea`; an idea is kept as `canonical` or `pinned`; `merged`, `rejected` stay | M2 |
+| Weight | `im.weights`: cluster, formula version, weight, the signals it read, when | M2 |
+| Proposals | `im.proposals`: cluster, weight, formula version, when, outcome (canonical, pinned, dismissed) | M2 |
+| Edges | `im.idea_links` gains `supports`, `contradicts`, `extends` beside `evolves`, `related`, `archive`, plus `cited_observation_ids`, `confidence`, and `method` with the model version, so a rerun can be diffed | M2, M4 |
 | Lens cache | `im.lens_cache(seed, graph_version, result)` | M5 |
 
-## 4. Promotion
+## 4. Proposals
 
-A run stage evaluates a rule over stored signals and writes `status` plus a `promotions` row when it changes. Only
-my ideas are candidates; `heard` ideas only add weight to the ideas they link to. The starting rule (from the
-architecture review, **not yet validated**): at least two independent observations of mine or a link to an anchor;
-rubric generality or outside value of 3 or more; not discarded, not merged. M3 tunes the
-thresholds against operator review, and the rule is versioned like any stage.
+Nothing becomes an idea without me. Each run computes every cluster's weight with a versioned formula over stored
+signals: independent me recurrences above all, a capped amount for members by diarization or not me, links to
+canonical ideas. The top new candidates come to me as proposals (up to 10 a week), and I keep each as canonical or
+pinned, or dismiss it. Syntheses arrive the same way. `im tune` previews any change to the knobs at no cost. M3
+checks that proposals are worth my time and tunes the formula.
 
 ## 5. Edge typing (Jev)
 
@@ -102,5 +104,5 @@ instructions), a choice out.
 - Jev answers `supports`, `contradicts`, `extends`, `related` or `none`. `none` is a real answer, and a confidence
   floor keeps weak `related` edges out of the graph.
 - Every edge records `method` and model version, so it can be rerun and diffed.
-- Jev's weights feed lenses and the promotion signals. Jev does not decide promotion.
+- Jev's weights feed lenses and cluster weight. Jev does not make ideas.
 - The bottleneck is labels: about 200 operator-labelled pairs (B4) before its weights are trusted.
