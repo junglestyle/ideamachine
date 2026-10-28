@@ -111,6 +111,9 @@ def _run_stages(conn, cfg) -> dict:
             stats["sensitivity"] = _sensitivity(conn, cfg)
             stats["vocab"] = _vocab(conn, cfg)
             stats["digest"] = _digest(conn, cfg)
+        from im import weight
+
+        stats["weight"] = weight.stage(conn, cfg.weight)   # after matching: weight reads the clusters
         from im import router
 
         stats["route"] = router.run_stage(conn)
@@ -314,6 +317,14 @@ def cmd_trial(args) -> None:
             out["trial"] = trial.run(conn, anthropic.Anthropic(), system, model, effort, cap, args.limit)
         out["report"] = trial.report(conn, extract.prompt_version(model, effort, system), model)
     _print(out)
+
+
+def cmd_tune(args) -> None:
+    """Preview what changing the weight knobs would do. Writes nothing; paste the printed [weight] into im.toml."""
+    from im import weight
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        _print(weight.tune(conn, config.load().weight, weight.parse_overrides(args.knobs), args.top))
 
 
 def cmd_seed(args) -> None:
@@ -538,6 +549,10 @@ def main(argv=None) -> None:
     tr.add_argument("--effort", help="the candidate's effort (default: the configured one)")
     tr.add_argument("--monthly-cap-usd", type=float, help="stop before the month's spend passes this (default: config)")
     tr.set_defaults(func=cmd_trial)
+    tu = sub.add_parser("tune", help="preview weight and proposal settings, e.g. recurrence_minutes=45 (writes nothing)")
+    tu.add_argument("knobs", nargs="*", metavar="knob=value")
+    tu.add_argument("--top", type=int, default=10)
+    tu.set_defaults(func=cmd_tune)
     sd = sub.add_parser("seed", help="import an idea archive into the lattice (its clusters become pinned themes)")
     sd.add_argument("path", help="the archive, e.g. ~/.local/share/ideamachine/seeds/chatgpt-archive.md")
     sd.add_argument("--name", default="chatgpt", help="prefix for its references, e.g. chatgpt#17")
