@@ -1,6 +1,6 @@
 [project]
 name = "ideamachine"
-version = "0.1.0"
+version = "0.0.0"
 description = "Turns Hearsay transcript segments into episodes, triage and ideas."
 requires-python = ">=3.13"
 dependencies = [
