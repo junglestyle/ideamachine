@@ -19,7 +19,10 @@ from im.config import WeightConfig
 
 
 def _signals(conn) -> dict:
-    """Per cluster: my observations (conversation, when said), the others' count, canonical links, canonical."""
+    """Per cluster: my observations (conversation, when said), the others' count, canonical links, canonical.
+
+    Only current captures count, placed by their own segments: a superseded read's segments can carry a
+    conversation id from before a re-key, which would count one conversation twice."""
     out = {r[0]: {"mine": [], "others": 0, "canonical_links": r[2], "canonical": r[1] == "canonical"}
            for r in conn.execute(
                """SELECT k.idea_id, k.kept_as,
@@ -30,9 +33,9 @@ def _signals(conn) -> dict:
     for idea_id, speaker, conversation, said_at in conn.execute(
             """SELECT ev.idea_id, o.speaker, min(s.conversation_id), min(s.started_at)
                FROM im.idea_evidence ev JOIN im.items i USING (item_id)
+               JOIN im.episodes e ON e.episode_id = i.episode_id AND e.current
                JOIN im.observation_speaker o USING (observation_id)
-               JOIN im.observations b USING (observation_id)
-               JOIN im.source_segments s ON s.segment_id = ANY(b.segment_ids)
+               JOIN im.source_segments s ON s.segment_id = ANY(i.source_segment_ids)
                GROUP BY ev.idea_id, o.observation_id, o.speaker"""):
         if speaker == "me":
             out[idea_id]["mine"].append((conversation, said_at))
