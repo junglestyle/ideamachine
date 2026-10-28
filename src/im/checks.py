@@ -22,6 +22,9 @@ WHERE e.current
 TOMBSTONED = """
 SELECT es.episode_id, es.segment_id
 FROM im.episode_segments es JOIN im.source_tombstones t USING (segment_id)
+UNION ALL
+SELECT o.observation_id, t.segment_id
+FROM im.observations o JOIN im.source_tombstones t ON t.segment_id = ANY(o.segment_ids)
 """
 
 CHECKS = {"orphans": ORPHANS, "stale": STALE, "tombstoned": TOMBSTONED}
