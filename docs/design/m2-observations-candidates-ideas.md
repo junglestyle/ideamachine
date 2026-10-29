@@ -145,7 +145,7 @@ friend's funny line makes it a pinned idea. Keeping is my endorsement, so it wor
   - Proposals and their outcomes are kept in `im.proposals(proposal_id, cluster_id, weight, formula_version, made_at,
     outcome, decided_at)`.
 - **Where I see them:** two new Lattice tools, `proposals` and `keep_idea`, until Emanation replaces Lattice at M6.
-  The old review queue keeps running beside them until then.
+  The old review queue was retired on 2026-10-29 (lattice#10): Lattice's first tab lists proposals instead.
 
 ## Edges
 
