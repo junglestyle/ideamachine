@@ -2,7 +2,7 @@
 
 _V1's roadmap, frozen at tag `v1` (2026-10-27). Code comments cite its sections, so it stays here unchanged. V2's spec is [SPEC.md](SPEC.md) and its roadmap [ROADMAP-v2.md](ROADMAP-v2.md)._
 
-_Status: draft, 2026-10-01. Idea Machine reads Hearsay's utterance stream (§3). Hearsay has delivered the stream changes Idea Machine asked for; the forget command itself comes with Hearsay slice 12. Phase 1 steps 1–4 (stream import, segmentation, projects registry, labeling, and triage with Laya and the fallback) are built. What's left of Phase 1 needs real labels._
+_Status: draft, 2026-10-01. Idea Machine reads Hearsay's utterance stream (§3). Hearsay has delivered the stream changes Idea Machine asked for; the forget command itself comes with Hearsay slice 20. Phase 1 steps 1–4 (stream import, segmentation, projects registry, labeling, and triage with Laya and the fallback) are built. What's left of Phase 1 needs real labels._
 
 ## 1. Scope
 
@@ -31,29 +31,11 @@ The source is Hearsay's **utterance stream** (Hearsay slice 8, `hearsay/stream.p
 
 ### 3.1 What Hearsay publishes
 
-The authoritative description is the output contract in Hearsay's AGENTS.md. In summary:
-
-- `index.json`: `{"format_version": 1, "conversations": [...]}`. Each entry has `conversation_id`, `start`, `end`, `open`, `transcribed`, `taps`, `places`, `utterances`, `revision`, `transcript_revision` and `file`.
-  - `places`: the places I named that the conversation happened at, in order, `[{name, start, end}]`. Empty when nowhere is named, never coordinates. Naming is retroactive, so places can appear or change later, as a new index revision.
-- `conversations/<conversation_id>.jsonl`: one utterance per line, with `conversation_id`, `utterance_id` (`<conversation_id>:<idx>`), `start` and `end` (UTC), `speaker {kind: owner|person|anonymous|stranger|unknown, name, label}`, `text`, `text_confidence`, `speaker_confidence {basis, owner_similarity}`, and on some owner turns `affect {arousal}` and `delivery`.
-  - `text` comes from Parakeet TDT 0.6B v3 (since 2026-10-06; it was Whisper large-v3). It's verbatim, fillers included, and speech is written in the language it was spoken in, so Spanish stays Spanish.
-  - `text_confidence` is each word's least likely token probability, averaged: about 0.93 on average. Before the switch it was WhisperX alignment scores (0.4–0.9), which survive only on superseded segments. Nothing in Idea Machine thresholds on it.
-  - `affect.arousal`: how calm (low) or animated (high) I sounded, about 0–1, from the audio alone. It's tone of voice, not sentiment. It's absent where the turn wasn't scored: short or inherited turns, and other speakers.
-  - `delivery {words_per_second, pauses, pause_seconds, stutters: [{kind: repeat|restart|filler, at, words_per_second_before}]}`: measured from word timings, not judged; absent where not measured. `pause_seconds` is null when there were no pauses, and `words_per_second_before` is null for a stutter at the start of a turn. 20 of 24 detected stutters were real by my ear. Above about 3.3 words/s I repeat and restart 30–50% more per word. It's for trends and feedback on pace, not a measure of confidence or assertiveness.
-- `forgotten.json`: an append-only list, never rewritten or shrunk, of `{forgotten_at, start, end, conversation_id, utterance_ids, reason}`, with IDs as they were. It's the only deletion signal: anything else that leaves the stream was restructured, not deleted.
-- Guarantees:
-  - Files are written atomically, conversation files first and `index.json` last, and only when their content changes.
-  - `revision` is the first 16 hex characters of the sha256 of the conversation file's bytes.
-  - `transcript_revision` hashes the conversation's turns as transcribed: times, index, text, diarized speaker and confidence, including `_noise`/`_media` turns. Who a turn is attributed to never goes into the hash, so naming, merging or relabeling a speaker leaves it unchanged. Within one `transcript_revision`, a given `utterance_id` always names the same stretch of speech; across revisions, IDs are renumbered. It's null for conversations that haven't been transcribed.
-- Turns the operator filed as `_noise` or `_media` are left out of the stream, and can come back if refiled. That's Hearsay's call about who is speaking, not a content filter, so it doesn't conflict with "noise is a label".
-- The unit of change is the conversation. Naming a speaker rewrites the files of every conversation that speaker appears in. An open conversation is re-transcribed as it grows, which gives it a new `transcript_revision` each time.
+Hearsay's [docs/stream.md](https://github.com/junglestyle/hearsay/blob/main/docs/stream.md) is the contract: the index, utterance and `forgotten.json` formats, what each speaker kind and basis means, how conversations and their IDs change, the vocabulary Idea Machine writes back, and the guarantees. It's the only copy; this roadmap doesn't restate it. The importer refuses a `format_version` it doesn't know (`read_index` in `src/im/importer.py`).
 
 ### 3.2 Status of the Hearsay asks (delivered 2026-10-01)
 
-1. `format_version`: done.
-2. `transcript_revision`: done. Hearsay hashes the turns, not the WAV, which follows exactly what an ID points at.
-3. `forgotten.json`: the format is done; the list stays empty until Hearsay slice 12 adds the operator's forget command. Forgetting will be operator input, kept by absolute time and applied on every reprocess, so a re-run from raw never brings forgotten speech back. For now Hearsay keeps the raw payloads and audio of a forgotten span; whether to delete them is decided with retention in slice 12.
-4. Atomic writes and the revision definition: documented as guarantees in Hearsay's AGENTS.md.
+Delivered: `format_version`, `transcript_revision`, `forgotten.json` and the write guarantees, all part of [the contract](https://github.com/junglestyle/hearsay/blob/main/docs/stream.md). The forgotten list stays empty until the operator can forget, which is Hearsay's to schedule.
 
 ### 3.3 How Idea Machine imports it
 
@@ -89,7 +71,7 @@ A forgotten segment is deleted from everything Idea Machine holds:
 - embeddings, links and spans
 - synthesized objects
 
-Until Hearsay slice 12 the list stays empty, so Idea Machine builds and tests the purge against fixtures. Forgetting can't recall anything already sent to Claude. To at least report it, `egress_log` (Phase 4) records the `segment_id`s in every payload, and `im forgotten --sent` lists forgotten segments that went out, and when.
+Until Hearsay slice 20 the list stays empty, so Idea Machine builds and tests the purge against fixtures. Forgetting can't recall anything already sent to Claude. To at least report it, `egress_log` (Phase 4) records the `segment_id`s in every payload, and `im forgotten --sent` lists forgotten segments that went out, and when.
 
 ### 3.5 Idea Machine → Lattice (the `pub` schema)
 
@@ -214,7 +196,7 @@ _What's left from here: the leak test and local gists, if a stricter policy is e
 
 **Goal:** flagged episodes plus their neighbors become structured objects, without other people's words leaving the box.
 
-**Gate (lifted by decision 0004 for extraction):** nothing is sent to Claude until the operator can actually forget something. That needs Hearsay slice 12's forget command (or an earlier, smaller version of it), with Idea Machine's purge verified end to end on real data. Sending is the one step forgetting can't undo.
+**Gate (lifted by decision 0004 for extraction):** nothing is sent to Claude until the operator can actually forget something. That needs Hearsay slice 20's forget command (or an earlier, smaller version of it), with Idea Machine's purge verified end to end on real data. Sending is the one step forgetting can't undo.
 
 **Deliverables**
 - **Object tables:** `ideas`, `tasks`, `decisions`, `project_mentions`. Each row has `source_segment_ids`, timestamps, `model`, `prompt_version`, `privacy_policy_version` and `batch_id`.
@@ -247,7 +229,7 @@ _What's left from here: the leak test and local gists, if a stricter policy is e
 
 ## 5. Open questions
 
-1. The Hearsay asks in §3.2 are delivered. What's still open is when the operator can actually forget (Hearsay slice 12). Phase 4 is gated on it.
+1. The Hearsay asks in §3.2 are delivered. What's still open is when the operator can actually forget (Hearsay slice 20). Phase 4 is gated on it.
 2. Daily capture volume (hours/day, % multi-party) drives Laya throughput, GLiNER2 runtime and Claude cost. It needs measuring in the first week of Phase 1.
 3. Should episodes ever span sessions? Sessions are now Hearsay conversations, which Hearsay already splits on 3 minutes of silence. The default is no.
 4. Is 1–5 the right `keep_score` scale, or is binary keep/skip easier to label consistently? Decide during labeling.
