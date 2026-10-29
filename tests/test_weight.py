@@ -57,6 +57,7 @@ def test_candidates_are_proposed_and_only_i_make_them_ideas(matched):
     assert m[idea(matched, first[0])] == "candidate"                                # proposing changes nothing
 
     event(matched, "idea_keep", idea(matched, first[0]), '{"as": "canonical"}')
+    assert table(matched, "SELECT title FROM pub.proposals") == []                 # off the list before the next run
     weight.stage(matched, WeightConfig(proposals_per_week=2))
     assert proposals(matched)[0] == (first[0], "canonical")
     assert len(proposals(matched)) == 2                                             # the week's second slot
