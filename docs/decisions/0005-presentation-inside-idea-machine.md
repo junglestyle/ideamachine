@@ -24,13 +24,14 @@ What the seam cost, measured in the V2 architecture review:
 
 ## Decision
 
-- Idea Machine gets a web package, `src/im/web/`: one HTTP app serving `/api/*` (lens projections, review queue,
+- Idea Machine gets a web package, `src/im/web/`: one HTTP app serving `/api/*` (lens projections, proposals,
   feedback), `/mcp`, and **Emanation**, the static page that replaces Lattice's UI.
-- **The MCP server moves in with its 24 tool names, argument schemas and result shapes byte-compatible**
-  (`lattice/src/lattice/mcp.py:512-615`), and keeps speaker pseudonymization in every answer and the public
+- **The MCP server moves in with its tool names, argument schemas and result shapes byte-compatible**
+  (`lattice/src/lattice/mcp.py`, `TOOLS`), and keeps speaker pseudonymization in every answer and the public
   listener's OAuth behaviour. It's a live claude.ai connector, so renaming a tool is a breaking change. New tools are
-  additions only (`open_lens`, `promote_idea`).
-- **Domain logic moves into pipeline stages or `pub` views**: bridges, look-again, spot checks, comparison pairs.
+  additions only (`open_lens`). _Amended 2026-10-29: the contract is the 19 tools after lattice#10, which retired
+  the seven review and rating tools (M2 reads no verdicts) and added `proposals` and `keep_idea`._
+- **Domain logic moves into pipeline stages or `pub` views**: bridges.
   The page renders; it doesn't decide.
 - **The role boundary stays.** The web process connects as a read-mostly role (read `pub`, insert into
   `pub.feedback_events`), never as `im_pipeline`. All human input stays feedback events.

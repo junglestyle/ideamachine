@@ -67,11 +67,13 @@ storing the index's `open` flag per conversation, which the format already carri
 - `pub` stays the read model. The web process connects as a read-mostly role: read `pub`, insert into
   `pub.feedback_events`. It never connects as `im_pipeline`.
 - Until cutover (M6), every existing `pub` view keeps its shape, so Lattice keeps working. New views are additions.
-- **MCP tools are a contract.** The 24 tools at Lattice `v1` (`src/lattice/mcp.py`, `TOOLS`) keep their names,
-  argument schemas and result shapes byte-compatible, along with speaker pseudonymization in every answer and the
-  public listener's OAuth behaviour. New tools are additions: `proposals`, `keep_idea` (M2), `open_lens` (M5).
-- All human input stays feedback events: verdicts, stars, links, comparisons, theme edits, and V2's
-  keep (canonical or pinned) / unkeep / merge / reject.
+- **MCP tools are a contract.** The 19 tools Lattice serves after the rating tools were retired (lattice#10,
+  2026-10-29; `src/lattice/mcp.py`, `TOOLS`) keep their names, argument schemas and result shapes byte-compatible,
+  along with speaker pseudonymization in every answer and the public listener's OAuth behaviour. New tools are
+  additions: `open_lens` (M5). The seven retired tools (`review_digest`, `look_again`, `decide_item`, `keep_rest`,
+  `compare_pair`, `record_comparison`, `rate_digest_point`) asked me for verdicts and ratings that nothing reads.
+- All human input stays feedback events: stars, links, notes, theme edits, and V2's keep (canonical or pinned) /
+  unkeep / dismiss / merge / reject. Old verdict and comparison events stay in the ledger; nothing reads them.
 
 ## 3. Data model
 
