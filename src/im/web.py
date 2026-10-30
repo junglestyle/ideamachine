@@ -16,6 +16,7 @@ import html
 import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.resources import files
 from urllib.parse import parse_qs, urlsplit
 
 import psycopg
@@ -32,6 +33,10 @@ SHOW = {  # which maturities the feed shows, and the tab's name
 ACTIONS = {"canonical": ("idea_keep", '{"as": "canonical"}'), "pinned": ("idea_keep", '{"as": "pinned"}'),
            "unkeep": ("idea_unkeep", "{}"), "dismiss": ("idea_dismiss", "{}")}
 SPEAKERS = {"me": "me", "me_diar": "me (diarization)", "not_me": "not me"}
+# The app's icons and manifest (dev/make_icons.py draws them). Served without a login: a browser fetches the manifest
+# without cookies, and the mark is no secret.
+STATIC = {"/manifest.webmanifest": "application/manifest+json", "/icon.svg": "image/svg+xml",
+          "/icon-192.png": "image/png", "/icon-512.png": "image/png", "/apple-touch-icon.png": "image/png"}
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
@@ -118,7 +123,7 @@ def card(conn, idea_id: str) -> str | None:
     body.append("<h2>Near by meaning</h2><ul>" + "".join(
         f'<li><a href="/idea/{x["idea_id"]}">{_e(x["title"])}</a> <small>{x["similarity"]:.2f}</small></li>'
         for x in near) + "</ul>" if near else "")
-    return _page(r["title"], '<a href="/">← all</a>' + "".join(body))
+    return _page(r["title"], "".join(body))
 
 
 def act(conn, idea_id: str, action: str) -> None:
@@ -129,7 +134,11 @@ def act(conn, idea_id: str, action: str) -> None:
 
 def _page(title: str, body: str) -> str:
     return f"""<!doctype html><html lang="en"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>{_e(title)}</title><style>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>{_e(title)}</title>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="apple-mobile-web-app-title" content="Idea Machine">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161618" media="(prefers-color-scheme: dark)"><style>
 :root {{ --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --line: #e5e5ea; --accent: #0a58ca; }}
 @media (prefers-color-scheme: dark) {{ :root {{ --bg: #161618; --fg: #ececf0; --muted: #9a9aa2; --line: #2c2c30;
   --accent: #7aa7ff; }} }}
@@ -140,7 +149,10 @@ nav a[aria-current] {{ font-weight: 600; text-decoration: none; color: var(--fg)
 ol, ul {{ padding-left: 1.2rem; }} li {{ margin: 0 0 1rem; }} li p {{ margin: .2rem 0; }}
 blockquote {{ margin: 0; padding-left: .8rem; border-left: 3px solid var(--line); }}
 button {{ margin: 0 .4rem .4rem 0; font: inherit; padding: .3rem .8rem; }}
-</style><body>{body}</body></html>"""
+header {{ display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }}
+header a {{ color: var(--fg); text-decoration: none; font-weight: 600; }}
+</style><body><header><a href="/"><img src="/icon.svg" alt="" width="28" height="28" style="vertical-align: middle">
+Idea Machine</a></header>{body}</body></html>"""
 
 
 _LOGIN = _page("Log in", '<form method="post" action="/login"><input type="password" name="token" autofocus> '
@@ -164,8 +176,19 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         return {k: v[0] for k, v in parse_qs(self.rfile.read(min(n, 4096)).decode()).items()}
 
+    def _send_static(self, path: str) -> None:
+        data = files("im").joinpath("static", path.lstrip("/")).read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", STATIC[path])
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self) -> None:
         url = urlsplit(self.path)
+        if url.path in STATIC:
+            return self._send_static(url.path)
         if url.path == "/login":
             return self._send(200, _LOGIN)
         if not logged_in(self.headers.get("Cookie")):
