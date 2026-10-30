@@ -51,7 +51,7 @@ def test_candidates_are_proposed_and_only_i_make_them_ideas(matched):
     assert out["proposed"] == 1 and out["weights_changed"] == len(table(matched, "SELECT idea_id FROM im.ideas"))
     assert weight.stage(matched, w)["weights_changed"] == 0                       # nothing new, nothing written
     (first,) = proposals(matched)
-    assert first[1] is None and first[0] in ("Something new", "Broken builds as signal")
+    assert first == ("Something new", None)   # said last; Broken builds weighs more (a canonical link) but orders nothing
     assert table(matched, "SELECT title FROM pub.proposals") == [(first[0],)]
     m = dict(table(matched, "SELECT idea_id, maturity FROM im.idea_maturity"))
     assert m[idea(matched, first[0])] == "candidate"                                # proposing changes nothing

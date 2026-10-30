@@ -7,9 +7,10 @@ A cluster's weight is how much it contributes to links and synthesis. weight-1 a
 - links to canonical ideas, and a boost when the cluster is itself canonical.
 Pins add nothing; verdicts add nothing.
 
-Each run proposes the heaviest candidates to me, up to `proposals_per_week`. I keep each one (canonical or pinned)
-or dismiss it; a dismissed candidate comes back only once its weight has grown by `repropose_margin`. Only I make
-ideas: nothing here changes how a cluster is kept.
+Each run proposes the most recently said candidates to me, up to `proposals_per_week`: weight orders nothing
+(decision 0007; no signal predicted what I keep). I keep each one (canonical or pinned) or dismiss it; a dismissed
+candidate comes back only once its weight has grown by `repropose_margin`. Only I make ideas: nothing here changes
+how a cluster is kept.
 """
 
 import json
@@ -68,8 +69,8 @@ def weights(conn, w: WeightConfig) -> dict:
 
 
 def _eligible(conn, computed: dict, w: WeightConfig) -> list:
-    """Candidates I could be shown next, heaviest first, the most recently said first among equal weights: no open
-    proposal, and not dismissed at about this weight."""
+    """Candidates I could be shown next, the most recently said first (decision 0007): no open proposal, and not
+    dismissed at about this weight."""
     rows = conn.execute(
         """SELECT m.idea_id,
                   EXISTS (SELECT 1 FROM im.proposals p WHERE p.idea_id = m.idea_id AND p.outcome IS NULL),
@@ -79,7 +80,7 @@ def _eligible(conn, computed: dict, w: WeightConfig) -> list:
            FROM im.idea_maturity m WHERE m.maturity = 'candidate'""").fetchall()
     out = [(computed[i][0], i, float(said or 0)) for i, open_, dismissed, said in rows
            if not open_ and (dismissed is None or computed[i][0] >= dismissed + w.repropose_margin)]
-    return [(wt, i) for wt, i, _ in sorted(out, key=lambda r: (-r[0], -r[2], str(r[1])))]
+    return [(wt, i) for wt, i, _ in sorted(out, key=lambda r: (-r[2], str(r[1])))]
 
 
 def _settle(conn) -> dict:
