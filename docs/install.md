@@ -97,7 +97,7 @@ Then, outside that transaction:
   the result through schema `pub` ([ROADMAP §3.5](ROADMAP.md)).
 - **Observations and weight** ([M2 design](design/m2-observations-candidates-ideas.md)). Each new capture joins
   the observation it re-captures, or starts one. Each cluster is weighed (`[weight]` in `im.toml`), and up to 10
-  candidates a week are proposed to me to keep as canonical or pinned. `im tune knob=value ...` previews a change to
+  candidates a week, the most recently said first, are proposed to me to keep as canonical or pinned. `im tune knob=value ...` previews a change to
   those settings, writing nothing, and prints the `[weight]` block to paste.
 - **Route.** The router sends to review whatever I tapped or called a note to self, and any episode where Claude
   captured an item above the confidence bar; the rest is auto-filed (`src/im/router.py`; v1 used the local LLM's flags instead, see

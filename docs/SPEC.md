@@ -93,9 +93,9 @@ Proposed shapes. Each is settled in its milestone's design doc, and every new ta
 
 Nothing becomes an idea without me. Each run computes every cluster's weight with a versioned formula over stored
 signals: independent me recurrences above all, a capped amount for members by diarization or not me, links to
-canonical ideas. The top new candidates come to me as proposals (up to 10 a week), and I keep each as canonical or
-pinned, or dismiss it. Syntheses arrive the same way. `im tune` previews any change to the knobs at no cost. M3
-checks that proposals are worth my time and tunes the formula.
+canonical ideas. Weight orders nothing ([decision 0007](decisions/0007-neutral-proposals.md)): the most recently said
+candidates come to me as proposals (up to 10 a week), and I keep each as canonical or pinned, or dismiss it. Syntheses
+arrive the same way. `im tune` previews any change to the knobs at no cost.
 
 ## 5. Edge typing (Jev)
 
