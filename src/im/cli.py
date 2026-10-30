@@ -327,6 +327,13 @@ def cmd_tune(args) -> None:
         _print(weight.tune(conn, config.load().weight, weight.parse_overrides(args.knobs), args.top))
 
 
+def cmd_web(args) -> None:
+    """Serve the neutral view as Lattice's role (LATTICE_DATABASE_URL), never as im_pipeline."""
+    from im import web
+
+    web.serve(args.host, args.port)
+
+
 def cmd_seed(args) -> None:
     from im import lattice
 
@@ -587,5 +594,9 @@ def main(argv=None) -> None:
     pa.add_parser("list")
     pr.set_defaults(func=cmd_project)
     sub.add_parser("check", help="run invariant queries; exit 1 on failure").set_defaults(func=cmd_check)
+    wb = sub.add_parser("web", help="serve the neutral view (every cluster, newest first, no score)")
+    wb.add_argument("--host", default="127.0.0.1")
+    wb.add_argument("--port", type=int, default=8792)
+    wb.set_defaults(func=cmd_web)
     args = p.parse_args(argv)
     args.func(args)
