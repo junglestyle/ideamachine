@@ -41,6 +41,9 @@ Settings are env vars:
   directories it created itself.
 - `ANTHROPIC_API_KEY` (or an `ant auth login` profile): for idea extraction. Without it `im run` skips extraction
   and says so. What's sent, and how, is in [decisions/0004-claude-extraction.md](decisions/0004-claude-extraction.md).
+- `LATTICE_DATABASE_URL` and `LATTICE_TOKEN`: for `im web`, the neutral view (every cluster past the gates, newest
+  first, no score; [decision 0007](decisions/0007-neutral-proposals.md)). It reads `pub` and appends feedback as
+  Lattice's role, logs in with Lattice's token, and listens on 127.0.0.1:8792.
 - `IM_DEV_ADMIN_URL`: the local dev superuser, used only by tests to create and drop `im_test`. Code refuses it
   unless it points at localhost.
 

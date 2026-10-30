@@ -23,6 +23,7 @@ OLD_ROOT="/mnt/storage/ideamachine"
 HEARSAY_STREAM_FAST="/mnt/fast/hearsay/stream"
 HEARSAY_STREAM_STORAGE="/mnt/storage/hearsay/stream"
 LATTICE_HTTPS_PORT=8444
+WEB_HTTPS_PORT=8445   # the neutral view (im web)
 DB_CONTAINER=ideamachine-db
 RUN_LOCK=/run/ideamachine-run.lock
 # Corral's NAS worker runs from here (deployed from the infra repo).

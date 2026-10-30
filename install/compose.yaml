@@ -3,7 +3,7 @@
 name: ideamachine
 
 # Container output goes to the journal (on the boot pool), not to files on the data disks:
-#   journalctl -t ideamachine-db, -t lattice, -t lattice-tunnel
+#   journalctl -t ideamachine-db, -t lattice, -t ideamachine-web, -t lattice-tunnel
 x-logging: &logging
   driver: journald
   options:
@@ -70,6 +70,25 @@ services:
     ports:
       - "127.0.0.1:8790:8790"
       - "127.0.0.1:8791:8791"   # the public MCP listener; only cloudflared talks to it
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # The neutral view (src/im/web.py; decision 0007). Lattice's role and token, never the pipeline's. Loopback only:
+  # tailscale serve publishes it to the tailnet, like Lattice, never the LAN or the internet.
+  web:
+    image: ideamachine   # built by install/nas.sh with the run service
+    container_name: ideamachine-web
+    logging: *logging
+    init: true
+    user: "568:568"
+    env_file: /mnt/fast/ideamachine/config/lattice.env   # LATTICE_DATABASE_URL, LATTICE_TOKEN
+    environment:
+      TZ: America/New_York
+    command: ["web", "--host", "0.0.0.0", "--port", "8792"]   # inside the container; the host port is loopback
+    ports:
+      - "127.0.0.1:8792:8792"
     depends_on:
       db:
         condition: service_healthy

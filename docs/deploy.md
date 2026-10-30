@@ -9,7 +9,8 @@ Idea Machine and Lattice run on TrueNAS SCALE next to Hearsay (ROADMAP §1 stack
 - The clones live in `/mnt/fast/repos` (dataset `fast/repos`), owned by `admin`. Clone and pull as admin, never
   as root; run the install script with sudo from there.
 - Hearsay's stream is mounted read-only, from whichever pool Hearsay is on (below).
-- Lattice is on the tailnet at `https://truenas.<tailnet>.ts.net:8444/` via `tailscale serve`.
+- Lattice is on the tailnet at `https://truenas.<tailnet>.ts.net:8444/` via `tailscale serve`, and the neutral view
+  (`im web`, container `ideamachine-web`) at `:8445`, with Lattice's token.
 - Logs go to the journal: `journalctl -t ideamachine-run`, `-t ideamachine-backup`, `-t ideamachine-db`,
   `-t lattice`, `-t lattice-tunnel`.
 
@@ -40,7 +41,7 @@ On the NAS again: `sudo /mnt/fast/repos/ideamachine/install/nas.sh`. It does the
 - restores the database;
 - checks that nothing already sent to Claude would be sent again (`im pending --expect-none-resent`; this catches
   a time zone that differs from eeyore's);
-- starts Lattice and publishes it with `tailscale serve`;
+- starts Lattice and the neutral view and publishes both with `tailscale serve`;
 - adds the run to corral's NAS worker and registers nightly backups;
 - checks that it all works (below) and prints Lattice's address and login token.
 

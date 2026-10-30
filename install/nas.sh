@@ -222,6 +222,20 @@ else
     echo "No Tailscale container found. Publish it by hand: tailscale serve --bg --https=$LATTICE_HTTPS_PORT http://127.0.0.1:8790"
 fi
 
+say "The neutral view (im web; tailscale serve, HTTPS port $WEB_HTTPS_PORT)"
+"${COMPOSE[@]}" up -d web
+for _ in $(seq 30); do
+    [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8792/login)" = 200 ] && break
+    sleep 1
+done
+[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8792/login)" = 200 ] || die "im web isn't answering"
+if [ -n "$ts" ]; then
+    docker exec "$ts" tailscale serve --bg --https="$WEB_HTTPS_PORT" http://127.0.0.1:8792 >/dev/null
+    echo "https://$ts_host:$WEB_HTTPS_PORT/ (log in with Lattice's token)"
+else
+    echo "Publish it by hand: tailscale serve --bg --https=$WEB_HTTPS_PORT http://127.0.0.1:8792"
+fi
+
 say "Public MCP listener for claude.ai (Lattice's docs/public-mcp.md)"
 LATTICE_PUBLIC_URL="$(env_get "$NAS_LATTICE_ENV" LATTICE_PUBLIC_URL)"
 if [ -n "$LATTICE_PUBLIC_URL" ]; then
