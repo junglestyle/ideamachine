@@ -54,3 +54,15 @@ def test_only_a_cookie_signed_with_the_token_logs_in(monkeypatch):
     monkeypatch.setenv("LATTICE_TOKEN", "short")
     with pytest.raises(SystemExit):
         web.logged_in(f"{web.COOKIE}=x")
+
+
+def test_the_app_icons_ship_and_need_no_login():
+    import json
+    from importlib.resources import files
+
+    static = files("im").joinpath("static")
+    manifest = json.loads(static.joinpath("manifest.webmanifest").read_text())
+    assert {i["src"] for i in manifest["icons"]} <= set(web.STATIC)
+    for path in web.STATIC:
+        assert static.joinpath(path.lstrip("/")).read_bytes()
+    assert "/manifest.webmanifest" in web._page("t", "") and "/apple-touch-icon.png" in web._page("t", "")
