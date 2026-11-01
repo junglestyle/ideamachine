@@ -327,6 +327,19 @@ def cmd_tune(args) -> None:
         _print(weight.tune(conn, config.load().weight, weight.parse_overrides(args.knobs), args.top))
 
 
+def cmd_audit_dedupe(args) -> None:
+    """B5: a blind sheet of merged captures and near misses for me to mark, then the false merges in my marks."""
+    from pathlib import Path
+
+    from im import dedupe_audit
+
+    if args.action == "score":
+        _print(dedupe_audit.score(Path(args.folder)))
+        return
+    with db.connect(db.pipeline_dsn()) as conn:
+        _print(dedupe_audit.write(conn, Path(args.folder), args.seed))
+
+
 def cmd_web(args) -> None:
     """Serve the neutral view as Lattice's role (LATTICE_DATABASE_URL), never as im_pipeline."""
     from im import web
@@ -560,6 +573,11 @@ def main(argv=None) -> None:
     tu.add_argument("knobs", nargs="*", metavar="knob=value")
     tu.add_argument("--top", type=int, default=10)
     tu.set_defaults(func=cmd_tune)
+    ad = sub.add_parser("audit-dedupe", help="B5: a blind sheet of merged captures and near misses; score my marks")
+    ad.add_argument("action", choices=["sheet", "score"])
+    ad.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
+    ad.add_argument("--seed", type=int, default=5, help="the sample and shuffle's seed")
+    ad.set_defaults(func=cmd_audit_dedupe)
     sd = sub.add_parser("seed", help="import an idea archive into the lattice (its clusters become pinned themes)")
     sd.add_argument("path", help="the archive, e.g. ~/.local/share/ideamachine/seeds/chatgpt-archive.md")
     sd.add_argument("--name", default="chatgpt", help="prefix for its references, e.g. chatgpt#17")

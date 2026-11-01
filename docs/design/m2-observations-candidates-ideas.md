@@ -178,6 +178,27 @@ deploy has the same shape as M1's:
 Then comes **B5**: a blind sheet of 50 merged observation groups and 50 near misses, like the B3 slug sheet. It
 passes with at most 2 false merges.
 
+- **Merged:** 50 observations with two or more captures, sampled, each shown as its least alike pair. Merges that
+  quote the very same words are sampled only when there aren't 50 others.
+- **Near misses:** the 50 closest pairs that stayed apart: captures citing the same speech by segment descent,
+  scoring under 0.4.
+- Both sets are shuffled together, sides in random order, with no score. I mark each pair `same`, `different` or
+  `unsure`. A merged pair marked different (or unsure) is a false merge; a near miss marked same is a false split,
+  which says the threshold could come down.
+
+On the NAS, as root (the sheet quotes people, so it stays in `saved/`):
+
+```sh
+install -d -o root -g 568 -m 770 /mnt/fast/ideamachine/saved/b5   # the run container is apps (568)
+docker compose -f /mnt/fast/repos/ideamachine/install/compose.yaml run --rm \
+  -v /mnt/fast/ideamachine/saved:/saved run audit-dedupe sheet /saved/b5
+# mark /mnt/fast/ideamachine/saved/b5/sheet.md, then:
+docker compose -f /mnt/fast/repos/ideamachine/install/compose.yaml run --rm \
+  -v /mnt/fast/ideamachine/saved:/saved run audit-dedupe score /saved/b5
+```
+
+It reads only, and sends nothing to Claude.
+
 **Rollback:** each new table and column drops cleanly, because nothing old reads them, and the dump is the backstop.
 The ledger (items, verdicts, feedback events) is never rewritten, only pointed at.
 
