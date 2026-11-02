@@ -86,7 +86,7 @@ class FakeTyper:
     def create(self, **kw):
         self.calls.append(kw)
         ns = self._ns
-        if "structure" in kw["system"]:
+        if "structures" in kw["output_config"]["format"]["schema"]["properties"]:
             n = kw["messages"][0]["content"].count("\n")
             text = self._json.dumps({"structures": [{"idea": i, "structure": "an agent picks the safe option"}
                                                     for i in range(1, n + 1)]})
