@@ -335,6 +335,19 @@ def cmd_tune(args) -> None:
         _print(weight.tune(conn, config.load().weight, weight.parse_overrides(args.knobs), args.top))
 
 
+def cmd_audit_edges(args) -> None:
+    """B4 pilot: a blind sheet of pairs of clusters for me to type, then what my marks say about the labels."""
+    from pathlib import Path
+
+    from im import edge_audit
+
+    if args.action == "score":
+        _print(edge_audit.score(Path(args.folder)))
+        return
+    with db.connect(db.pipeline_dsn()) as conn:
+        _print(edge_audit.write(conn, Path(args.folder), args.seed, args.size))
+
+
 def cmd_audit_dedupe(args) -> None:
     """B5: a blind sheet of merged captures and near misses for me to mark, then the false merges in my marks."""
     from pathlib import Path
@@ -601,6 +614,12 @@ def main(argv=None) -> None:
     ad.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
     ad.add_argument("--seed", type=int, default=5, help="the sample and shuffle's seed")
     ad.set_defaults(func=cmd_audit_dedupe)
+    ae = sub.add_parser("audit-edges", help="B4 pilot: a blind sheet of pairs of clusters to type; tally my marks")
+    ae.add_argument("action", choices=["sheet", "score"])
+    ae.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
+    ae.add_argument("--seed", type=int, default=4, help="the sample and shuffle's seed")
+    ae.add_argument("--size", type=int, default=20, help="how many pairs")
+    ae.set_defaults(func=cmd_audit_edges)
     so = sub.add_parser("seed-observations",
                         help="what I said into the ChatGPT Idea Machine, from its export, as archive observations")
     so.add_argument("path", help="the conversation's export (Markdown), e.g. /saved/chatgpt-idea-machine.md")

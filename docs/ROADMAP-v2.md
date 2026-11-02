@@ -31,7 +31,7 @@ Each runs on data that already exists and records model and prompt versions.
 | B1 | Match: `new` vs `same_as`/`evolves`, against 1,131 logged Opus decisions after dedupe | ≥ 90% agreement; `same_as` precision ≥ 0.95 on the operator-validated subset (the real bar: agreement with Opus only shows a cost swap is safe) |
 | B2 | ~~Keep/discard prior~~ retired 2026-10-28: no keep/discard | — |
 | B3 | Extraction model swap (`im trial`). Done 2026-10-28: Opus stays (Sonnet 82% recall at 42% cost; Haiku lost the blind slug check) | Rerun when a model ships: candidate's slugs preferred or tied ≥ 60% of 30 blind pairs |
-| B4 | Edge typing, 200 labelled pairs | Macro-F1 ≥ 0.70; `contradicts` precision ≥ 0.80 |
+| B4 | Edge typing, 200 labelled pairs. A pilot of 20 first (`im audit-edges`) settles the labels, direction and how rare `contradicts` is | Macro-F1 ≥ 0.70; `contradicts` precision ≥ 0.80 |
 | B5 | Dedupe migration, operator audit of 50 groups and 50 near misses (`im audit-dedupe`). First sheet 2026-11-01, stopped at 26 merged: 2 false merges, both chained through a quote stitched with "..."; an item now joins only if it matches every capture. **Passed 2026-11-01** on a fresh sheet: 1 false merge in 50; 5 false splits in 50 near misses, so 0.4 stays | ≤ 2 false merges in 50 |
 | B6 | Local titles | Local preferred or tied ≥ 60% in 50 blind pairs |
 
