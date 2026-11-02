@@ -62,4 +62,4 @@ def changed_episodes(before, after):
 
 
 def assert_invariants(conn):
-    assert run_checks(conn) == {"orphans": [], "stale": [], "tombstoned": []}
+    assert run_checks(conn) == {"orphans": [], "stale": [], "tombstoned": [], "uncited": []}

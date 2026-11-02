@@ -27,7 +27,17 @@ SELECT o.observation_id, t.segment_id
 FROM im.observations o JOIN im.source_tombstones t ON t.segment_id = ANY(o.segment_ids)
 """
 
-CHECKS = {"orphans": ORPHANS, "stale": STALE, "tombstoned": TOMBSTONED}
+# Every edge cites what exists (migration 035): no observation that's gone, and nothing missing when an end has one.
+UNCITED = """
+SELECT l.a, l.b, l.kind FROM im.idea_links l
+WHERE EXISTS (SELECT 1 FROM unnest(l.cited_observation_ids) c
+              WHERE NOT EXISTS (SELECT 1 FROM im.observations o WHERE o.observation_id = c))
+   OR (cardinality(l.cited_observation_ids) = 0
+       AND EXISTS (SELECT 1 FROM im.idea_evidence ev JOIN im.items i USING (item_id)
+                   WHERE ev.idea_id IN (l.a, l.b) AND ev.relation = 'origin' AND i.observation_id IS NOT NULL))
+"""
+
+CHECKS = {"orphans": ORPHANS, "stale": STALE, "tombstoned": TOMBSTONED, "uncited": UNCITED}
 
 
 def run_checks(conn) -> dict[str, list]:

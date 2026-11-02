@@ -151,13 +151,25 @@ friend's funny line makes it a pinned idea. Keeping is my endorsement, so it wor
 
 ## Edges
 
-M2 gives edges the columns they cite with. Typing the edges waits for Jev in M4.
+M2 gives edges the columns they cite with. Typing the edges waits for Jev in M4. Built 2026-11-01 (migration 035,
+`im/citations.py`), with these decisions:
 
-- `im.idea_links` gains `cited_observation_ids uuid[]`, `confidence real` and `method text`. Existing edges get the
-  observations they were made from where the matcher logged them, and an empty array where it didn't.
-- A not-me cluster is linked to my nearest clusters by embedding (`related` until Jev types it).
-- Nothing writes an edge without at least one cited observation. Forgetting (`pipeline._purge_tombstoned`) removes
-  cited ids, then any edge left with none.
+- `im.idea_links` gains `cited_observation_ids uuid[]` and `confidence real` (`method` was already there).
+  `confidence` is the cosine for `related` edges, and empty where nothing measured one.
+- **An edge cites the origin observations of its two ends:** what each idea's statement was made from. For
+  `related` edges that's the text that was embedded; for `evolves`, the capture the matcher judged and the idea it
+  evolved.
+- **Cite what exists.** An idea with no observation (the archive's, or one I added) adds nothing to the edges it's
+  on, so an edge between two of them cites nothing and its `method` says where it came from. That keeps the
+  archive's cross-references, and the `related` edge that puts an idea I add next to its near-duplicate. Archive
+  and added ideas get observations of their own next (the ChatGPT transcript has my words and their times), and
+  then their edges cite them with no change here.
+- **Not-me clusters link like any other** (`related`, cosine ≥ 0.70, top 3). No forced link below the threshold:
+  it would mostly be noise, and `weight-1` doesn't count those links anyway.
+- **Citations are derived.** They're recomputed whenever observations or edges change, so a rebuild of
+  observations (like migration 034) costs nothing. Forgetting drops the ids it deletes; an edge made from forgotten
+  speech already goes with the idea it came from. `im check` fails on an edge citing an observation that's gone, or
+  citing nothing when one of its ends has an observation.
 
 ## Migration, validation and rollback
 

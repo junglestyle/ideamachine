@@ -10,6 +10,7 @@ from pathlib import Path
 import psycopg
 from psycopg.rows import class_row
 
+from im import citations
 from im.config import Config
 from im.importer import import_stream
 from im.segment import Seg, segment
@@ -48,6 +49,7 @@ def _purge_tombstoned(conn) -> tuple[set[str], int]:
                       SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(v.segment_ids))""")
     conn.execute("""DELETE FROM im.observations o WHERE EXISTS (
                       SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(o.segment_ids))""")
+    citations.uncite_missing(conn)   # an edge loses the forgotten observations it cited
     # What was sent can't be recalled, but the local copy of the text goes; the segment IDs stay so
     # `im forgotten --sent` can say what went out.
     conn.execute("""UPDATE im.egress_log g SET payload = NULL WHERE payload IS NOT NULL AND EXISTS (

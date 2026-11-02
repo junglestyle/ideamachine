@@ -11,6 +11,7 @@ Every capture, not any one: Claude sometimes stitches two passages into one quot
 matches each passage, so matching any one capture chained two points into one observation (B5, 2026-11-01).
 """
 
+from im import citations
 from im.feedback import CARRY_MIN_SCORE, quote_score
 
 # The segments an item's segments descend from, and the segments themselves.
@@ -27,6 +28,8 @@ def assign_stage(conn) -> dict:
                                """).rowcount
         items = conn.execute("""SELECT item_id, quote, source_segment_ids, created_at FROM im.items
                                 WHERE observation_id IS NULL ORDER BY created_at, item_id""").fetchall()
+        if dropped:
+            citations.uncite_missing(conn)
         stats = {"new": 0, "joined": 0, "dropped": dropped}
         for item_id, quote, segs, created_at in items:
             members: dict = {}
@@ -48,4 +51,6 @@ def assign_stage(conn) -> dict:
                        RETURNING observation_id""", (segs, created_at)).fetchone()
                 stats["new"] += 1
             conn.execute("UPDATE im.items SET observation_id = %s WHERE item_id = %s", (observation, item_id))
+        if items:
+            citations.cite(conn)   # a new observation can be what an edge's end was made from
     return stats
