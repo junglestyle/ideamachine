@@ -171,6 +171,30 @@ M2 gives edges the columns they cite with. Typing the edges waits for Jev in M4.
   speech already goes with the idea it came from. `im check` fails on an edge citing an observation that's gone, or
   citing nothing when one of its ends has an observation.
 
+## Observations that aren't speech
+
+_2026-11-01, migration 036._ The archive's ideas and the ones I add were said too: into the ChatGPT Idea Machine,
+or typed. They get observations of their own, so they recur, weigh and cite like captures do.
+
+- `im.observations` gains a `source`: `speech`, `archive` or `typed`. One that isn't speech has no segments and no
+  capture: it belongs to its idea directly, and holds its own quote, time, speaker and conversation. Forgetting
+  works on segments, so it never reaches them.
+- **Archive:** `im seed-observations <export>` reads the ChatGPT conversation's export (ChatGPT Exporter's
+  Markdown). Each message goes to the idea ChatGPT's answer numbered it under ("**Idea #14, refined:**"), which the
+  archive keeps as `chatgpt#14`; the archive's own quotes are ChatGPT's cleaned-up copies, and it has no times. A
+  message with no numbered answer isn't an idea. Without `--write` it only shows the plan, lowest match with the
+  archive's text first, so a wrong number stands out. `--not-me 18`: #18 was my brother's point.
+- **Typed:** each idea I add gets one observation of what I typed, at the time, from its first `idea_add` event.
+- **Recurrence** counts them like speech, by conversation and `recurrence_minutes`: two messages to ChatGPT minutes
+  apart are one recurrence, weeks apart two. The neutral view's cards show them as quotes.
+
+On the NAS, after the export is in `saved/`:
+
+```sh
+im seed-observations /saved/chatgpt-idea-machine.md --not-me 18           # look it over
+im seed-observations /saved/chatgpt-idea-machine.md --not-me 18 --write   # then add them
+```
+
 ## Migration, validation and rollback
 
 Everything M2 adds is new tables, columns and views, so the existing `pub` views and Lattice don't change. The

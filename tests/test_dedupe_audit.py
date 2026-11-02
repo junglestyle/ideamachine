@@ -26,7 +26,7 @@ def audited(pipe, cfg, stream):
     extract.run_stage(pipe, FakeClaude(capture(DATABASE)))
     observations.assign_stage(pipe)
     retranscribe(pipe, cfg, stream, FakeClaude(with_a_near_miss))   # joins the old observation, plus one apart
-    assert observations.assign_stage(pipe) == {"new": 1, "joined": 1, "dropped": 0}
+    assert observations.assign_stage(pipe) == {"new": 1, "joined": 1, "dropped": 0, "typed": 0}
     return pipe
 
 

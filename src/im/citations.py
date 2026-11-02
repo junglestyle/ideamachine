@@ -1,17 +1,20 @@
 """Edge citations (M2, migration 035): every edge cites the observations it rests on.
 
 An edge cites the origin observations of its two ends: what each idea's statement was made from. Cite what exists:
-an end with no observation (the archive, an idea I added) adds none, so an edge between two such ideas cites
-nothing, and its `method` says where it came from. Citations are derived: `cite` recomputes them whenever
+an end with no observation adds none, so an edge between two such ideas cites nothing, and its `method` says
+where it came from. (Archive ideas cite the messages they came from once `im seed-observations` has read them.) Citations are derived: `cite` recomputes them whenever
 observations or edges change, and `uncite_missing` drops ids that are gone (forgetting, an emptied observation).
 """
 
 
 # The observations each idea's statement was made from: its origin captures'. A reused read copies the origin
-# relation to the new capture, which joins the same observation, so there's usually one.
+# relation to the new capture, which joins the same observation, so there's usually one. An archive idea or one I
+# added was made from its observations that aren't speech (migration 036): my messages, or what I typed.
 ORIGIN_OBSERVATIONS = """
 SELECT ev.idea_id, i.observation_id FROM im.idea_evidence ev JOIN im.items i USING (item_id)
-WHERE ev.relation = 'origin' AND i.observation_id IS NOT NULL"""
+WHERE ev.relation = 'origin' AND i.observation_id IS NOT NULL
+UNION ALL
+SELECT o.idea_id, o.observation_id FROM im.observations o WHERE o.source <> 'speech'"""
 
 
 def cite(conn) -> int:
