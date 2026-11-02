@@ -49,3 +49,19 @@ What the seam cost, measured in the V2 architecture review:
 - The migration order keeps Lattice working throughout: `pub` view shapes stay the same until M6, and Lattice's MCP
   server stays up next to the new one until the connector has been verified against the new endpoint.
 - Rollback until archive: restart the Lattice container against `pub`.
+
+## Amendment: one sky, lenses light it (2026-11-02)
+
+A lens returned `{nodes, links}` for the page to lay out, so every lens drew its own map: the same idea sat
+somewhere else in each, and a lens padded with unrelated ideas to fill its size. Splitting the two jobs fixes both:
+
+- **Positions stay in the pipeline**, one coordinate space for every view, kept stable between runs (placed ideas
+  stay; new ones land near their neighbours). This reverses "map positions leave the pipeline".
+- **A lens returns relevance, never positions:** a score for every cluster, from personalized PageRank seeded at the
+  lens over edges plus embedding similarity. The page uses it for brightness and to frame the camera.
+- **The home sky is the lens with no seed.** Relevance is uniform, and the encodings light it (recurrence,
+  recency, lifecycle). Global PageRank would be a score of what matters, which [0007](0007-neutral-proposals.md)
+  rules out.
+
+The cost: a seed's relevant clusters can sit apart on the map, because positions follow meaning, not the graph
+around the seed. The camera frames them; a temporary local layout is the fallback if that isn't enough.

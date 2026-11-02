@@ -13,8 +13,10 @@ publishes it to the tailnet (install/nas.sh).
 import hashlib
 import hmac
 import html
+import json
 import os
 import re
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from urllib.parse import parse_qs, urlsplit
@@ -90,7 +92,7 @@ def feed(conn, show: str = "candidates", page: int = 0) -> str:
                           ORDER BY last_seen DESC, idea_id LIMIT %s OFFSET %s""",
                  (list(maturities), PAGE + 1, page * PAGE))
     tabs = " ".join(f'<a href="/?show={k}"{" aria-current=page" if k == show else ""}>{name}</a>'
-                    for k, (_, name) in SHOW.items())
+                    for k, (_, name) in SHOW.items()) + ' <a href="/sky">sky</a>'
     cards = "".join(f'<li><a href="/idea/{r["idea_id"]}">{_e(r["title"])}</a><p>{_e(r["statement"])}</p>'
                     f'<small>{_e(_facts(r))}</small></li>' for r in rows[:PAGE])
     more = f'<a href="/?show={_e(show)}&page={page + 1}">older</a>' if len(rows) > PAGE else ""
@@ -111,7 +113,8 @@ def card(conn, idea_id: str) -> str | None:
                           JOIN pub.cards c USING (idea_id) ORDER BY n.similarity DESC""", (idea_id,))
     buttons = "".join(f'<button name="action" value="{a}">{a}</button>' for a in ACTIONS)
     body = [f"<h1>{_e(r['title'])}</h1><p>{_e(r['statement'])}</p><small>{_e(_facts(r))}</small>",
-            f'<form method="post" action="/idea/{idea_id}">{buttons}</form>']
+            f'<form method="post" action="/idea/{idea_id}">{buttons}</form>',
+            f'<p><a href="/sky?seed={idea_id}">Light the sky from here</a></p>']
     if r["my_note"]:
         body.append(f"<h2>My note</h2><p>{_e(r['my_note'])}</p>")
     body.append("<h2>Said</h2><ol>" + "".join(
@@ -124,6 +127,31 @@ def card(conn, idea_id: str) -> str | None:
         f'<li><a href="/idea/{x["idea_id"]}">{_e(x["title"])}</a> <small>{x["similarity"]:.2f}</small></li>'
         for x in near) + "</ul>" if near else "")
     return _page(r["title"], "".join(body))
+
+
+SIZES = {"observation": 0, "candidate": 1, "idea": 2}   # a canonical idea is one bigger than a pinned one
+
+
+def sky(conn, seed: str | None = None) -> str | None:
+    """Every card at its place on the one map (decision 0005, amended). With a seed, a lens lights what's relevant to
+    it; without one, the encodings light everything. None if the seed isn't on the map."""
+    from im import lens
+
+    rows = _rows(conn, """SELECT c.*, p.x, p.y FROM pub.cards c JOIN pub.card_positions p USING (idea_id)
+                          ORDER BY c.idea_id""")
+    index = {str(r["idea_id"]): n for n, r in enumerate(rows)}
+    if seed is not None and seed not in index:
+        return None
+    now = datetime.now(timezone.utc)
+    stars = [[str(r["idea_id"]), round(float(r["x"]), 4), round(float(r["y"]), 4),
+              SIZES[r["maturity"]] + (r["kept_as"] == "canonical"), r["conversations"],
+              max((now - r["last_seen"]).days, 0) if r["last_seen"] else 365, r["title"], _facts(r)] for r in rows]
+    links = sorted({tuple(sorted((index[a], index[b]))) for a, b in conn.execute(
+        "SELECT a::text, b::text FROM pub.card_links") if a in index and b in index and a != b})
+    rel = {k: v for k, v in lens.relevance(conn, seed).items() if k in index} if seed else None
+    data = json.dumps({"stars": stars, "links": links, "rel": rel, "seed": seed}, separators=(",", ":"))
+    title = rows[index[seed]]["title"] if seed else "Sky"
+    return _SKY.replace("{title}", _e(title)).replace("{data}", data.replace("</", "<\\/"))
 
 
 def act(conn, idea_id: str, action: str) -> None:
@@ -157,6 +185,9 @@ Idea Machine</a></header>{body}</body></html>"""
 
 _LOGIN = _page("Log in", '<form method="post" action="/login"><input type="password" name="token" autofocus> '
                          '<button>Log in</button></form>')
+
+
+_SKY = (files("im") / "sky.html").read_text()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -198,6 +229,10 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/":
                 page = int(q["page"]) if q.get("page", "").isdigit() else 0
                 return self._send(200, feed(conn, q.get("show", "candidates"), page))
+            if url.path == "/sky":
+                seed = q.get("seed")
+                body = sky(conn, seed) if seed is None or _UUID.match(seed) else None
+                return self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))
             m = re.fullmatch(r"/idea/([0-9a-f-]{36})", url.path)
             body = card(conn, m[1]) if m and _UUID.match(m[1]) else None
         self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))

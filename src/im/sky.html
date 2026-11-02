@@ -1,0 +1,162 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>{title}</title>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#0b0d14">
+<style>
+:root { --bg: #0b0d14; --fg: #e8eaf2; --muted: #9aa0b4; --panel: rgba(20, 23, 34, .92); --accent: #9db8ff; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+  font: 15px/1.45 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+canvas { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: grab; }
+nav { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 16px; display: flex; gap: 14px; }
+nav a, #bar a { color: var(--accent); text-decoration: none; }
+nav a { background: var(--panel); padding: 4px 10px; border-radius: 6px; }
+#bar { position: fixed; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); max-width: 40rem;
+  margin: 0 auto; background: var(--panel); border-radius: 10px; padding: 12px 14px; display: none; }
+#bar b { display: block; } #bar small { color: var(--muted); display: block; margin: 2px 0 8px; }
+#bar a { margin-right: 16px; }
+</style>
+<nav><a href="/">Feed</a><a href="/sky" id="home" hidden>Home sky</a></nav>
+<canvas id="c"></canvas>
+<div id="bar"><b id="t"></b><small id="f"></small><a id="open">Open</a><a id="lens">Light from here</a></div>
+<script type="application/json" id="d">{data}</script>
+<script>
+"use strict";
+// The sky (decision 0005, amended): positions come from the pipeline and never move. A lens only lights.
+const D = JSON.parse(document.getElementById("d").textContent);
+const S = D.stars.map(([id, x, y, size, conv, age, title, facts]) =>
+  ({id, x, y: -y, size, conv, age, title, facts, rel: D.rel ? (D.rel[id] || 0) : 1}));
+const RADIUS = [1.6, 2.6, 3.6, 4.8];   // observation, candidate, pinned idea, canonical idea
+const c = document.getElementById("c"), g = c.getContext("2d");
+let W = 0, H = 0, dpr = 1, cam = {x: 0, y: 0, k: 200}, selected = null, queued = false;
+if (D.seed) document.getElementById("home").hidden = false;
+
+// Colour is the direction from the map's centre, so neighbours share a hue.
+const mx = S.reduce((a, s) => a + s.x, 0) / (S.length || 1), my = S.reduce((a, s) => a + s.y, 0) / (S.length || 1);
+for (const s of S) s.hue = Math.round((Math.atan2(s.y - my, s.x - mx) * 180 / Math.PI + 360) % 360);
+
+function fit(stars) {
+  if (!stars.length) return;
+  const xs = stars.map(s => s.x), ys = stars.map(s => s.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  cam.x = (x0 + x1) / 2; cam.y = (y0 + y1) / 2;
+  cam.k = Math.min(W / Math.max(x1 - x0, .05), H / Math.max(y1 - y0, .05)) * .8;
+}
+const sx = s => (s.x - cam.x) * cam.k + W / 2, sy = s => (s.y - cam.y) * cam.k + H / 2;
+
+function draw() {
+  queued = false;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = "#0b0d14"; g.fillRect(0, 0, W, H);
+  const grow = Math.min(2.2, .75 + .25 * Math.sqrt(cam.k / 200));
+  g.lineWidth = 1;
+  for (const [i, j] of D.links) {
+    const a = S[i], b = S[j], lit = Math.min(a.rel, b.rel);
+    const alpha = D.rel ? .45 * lit : .07;
+    if (alpha < .02) continue;
+    g.strokeStyle = `rgba(170, 180, 215, ${alpha})`;
+    g.beginPath(); g.moveTo(sx(a), sy(a)); g.lineTo(sx(b), sy(b)); g.stroke();
+  }
+  for (const s of S) {
+    const x = sx(s), y = sy(s);
+    if (x < -40 || y < -40 || x > W + 40 || y > H + 40) continue;
+    const bright = .35 + .65 * Math.min(1, Math.log2(1 + s.conv) / 3);   // recurrence: 7 conversations is full
+    const old = Math.min(s.age / 120, 1);                                  // recency: softer and wider with age
+    // In a lens, what it reaches stands out at any recurrence, and the rest recedes to a faint backdrop.
+    const a = !D.rel ? bright : s.rel > 0 ? Math.max(bright, .7) * (.45 + .55 * s.rel) : .05 * bright;
+    const r = RADIUS[s.size] * grow * (D.rel && s.rel > 0 ? 1.3 : 1), halo = r * (1.6 + 3 * old);
+    const grad = g.createRadialGradient(x, y, 0, x, y, halo);
+    grad.addColorStop(0, `hsla(${s.hue}, 55%, 82%, ${a})`);
+    grad.addColorStop(r / halo, `hsla(${s.hue}, 55%, 75%, ${a * (1 - .6 * old)})`);
+    grad.addColorStop(1, `hsla(${s.hue}, 55%, 70%, 0)`);
+    g.fillStyle = grad; g.beginPath(); g.arc(x, y, halo, 0, 2 * Math.PI); g.fill();
+  }
+  const labelled = D.rel ? S.filter(s => s.rel > 0).sort((a, b) => b.rel - a.rel).slice(0, 9) : [];
+  if (selected && !labelled.includes(selected)) labelled.push(selected);
+  g.font = "12px system-ui, sans-serif"; g.textBaseline = "middle";
+  for (const s of labelled) {
+    const t = s.title.length > 42 ? s.title.slice(0, 40) + "…" : s.title;
+    g.fillStyle = s === selected ? "#ffffff" : "rgba(232, 234, 242, .8)";
+    g.fillText(t, sx(s) + 8, sy(s));
+  }
+}
+const redraw = () => { if (!queued) { queued = true; requestAnimationFrame(draw); } };
+
+function resize() {
+  dpr = window.devicePixelRatio || 1; W = innerWidth; H = innerHeight;
+  c.width = W * dpr; c.height = H * dpr; redraw();
+}
+
+function zoom(factor, px, py) {
+  const wx = (px - W / 2) / cam.k + cam.x, wy = (py - H / 2) / cam.k + cam.y;
+  cam.k = Math.max(20, Math.min(cam.k * factor, 200000));
+  cam.x = wx - (px - W / 2) / cam.k; cam.y = wy - (py - H / 2) / cam.k; redraw();
+}
+
+function select(s) {
+  selected = s;
+  const bar = document.getElementById("bar");
+  bar.style.display = s ? "block" : "none";
+  if (s) {
+    document.getElementById("t").textContent = s.title;
+    document.getElementById("f").textContent = s.facts;
+    document.getElementById("open").href = "/idea/" + s.id;
+    document.getElementById("lens").href = "/sky?seed=" + s.id;
+  }
+  redraw();
+}
+
+function hit(px, py) {
+  let best = null, bestD = Infinity;
+  for (const s of S) {
+    if (D.rel && s.rel === 0) continue;
+    const d = Math.hypot(sx(s) - px, sy(s) - py);
+    if (d < bestD) { best = s; bestD = d; }
+  }
+  return bestD <= 18 ? best : null;
+}
+
+const pointers = new Map();
+let down = null, pinch = null;
+c.addEventListener("pointerdown", e => {
+  c.setPointerCapture(e.pointerId); pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  down = pointers.size === 1 ? {x: e.clientX, y: e.clientY, t: Date.now(), moved: false} : null;
+  if (pointers.size === 2) {
+    const [p, q] = [...pointers.values()];
+    pinch = Math.hypot(p.x - q.x, p.y - q.y);
+  }
+});
+c.addEventListener("pointermove", e => {
+  const prev = pointers.get(e.pointerId);
+  if (!prev) return;
+  const now = {x: e.clientX, y: e.clientY};
+  pointers.set(e.pointerId, now);
+  if (pointers.size === 2) {
+    const [p, q] = [...pointers.values()];
+    const d = Math.hypot(p.x - q.x, p.y - q.y);
+    if (pinch) zoom(d / pinch, (p.x + q.x) / 2, (p.y + q.y) / 2);
+    pinch = d;
+  } else if (pointers.size === 1) {
+    cam.x -= (now.x - prev.x) / cam.k; cam.y -= (now.y - prev.y) / cam.k;
+    if (down && Math.hypot(now.x - down.x, now.y - down.y) > 6) down.moved = true;
+    redraw();
+  }
+});
+const up = e => {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") select(hit(e.clientX, e.clientY));
+  down = null;
+};
+c.addEventListener("pointerup", up);
+c.addEventListener("pointercancel", up);
+c.addEventListener("wheel", e => { e.preventDefault(); zoom(Math.exp(-e.deltaY / 400), e.clientX, e.clientY); },
+                   {passive: false});
+addEventListener("resize", resize);
+
+resize();
+const lit = D.rel ? S.filter(s => s.rel >= .25) : S;
+fit(lit.length >= 2 ? lit : S);
+if (D.seed) select(S.find(s => s.id === D.seed) || null);
+redraw();
+</script>
+</html>
