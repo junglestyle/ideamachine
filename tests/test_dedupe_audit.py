@@ -41,7 +41,7 @@ def fill(folder, mark_of):
 
 def test_the_sheet_is_blind_and_has_both_sets(audited, tmp_path):
     out = dedupe_audit.write(audited, tmp_path, size=50)
-    assert out["merged"] == 1 and out["near"] == 2   # the coffee capture is apart from both database ones
+    assert out["merged"] == 1 and out["near"] == 1   # coffee and the database: once, not once per capture
     sheet = (tmp_path / "sheet.md").read_text()
     assert OTHER in sheet and "managed database" in sheet
     assert not re.search(r"merged|near|0\.\d", sheet)   # nothing says which set a pair is from
@@ -71,3 +71,11 @@ def test_scoring_counts_false_merges_and_splits(audited, tmp_path):
 def test_marks_reads_what_i_typed():
     sheet = "## 1\n\nmark: Same\n\n## 2\nmark: `d`\n\n## 3\nmark: ?\n\n## 4\nmark: maybe\n## 5\nmark:\n"
     assert dedupe_audit.marks(sheet) == {"1": "same", "2": "different", "3": "unsure"}
+
+
+def test_each_pair_of_quotes_comes_up_once():
+    caps = {i: (None, q, "", None, []) for i, q in
+            {"a": "move off the managed database", "b": "Coffee, ground fresh.", "c": "Move off the managed database!",
+             "d": "coffee ground fresh", "e": "something else to say"}.items()}
+    pairs = [{"items": ["a", "b"]}, {"items": ["d", "c"]}, {"items": ["a", "e"]}]
+    assert dedupe_audit.distinct(pairs, caps) == [{"items": ["a", "b"]}, {"items": ["a", "e"]}]

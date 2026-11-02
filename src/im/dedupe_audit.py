@@ -9,7 +9,7 @@ merged pair I mark different is a false merge (the bar is at most 2 in 50), a ne
 split, which says the threshold could come down. An `unsure` merged pair counts against the bar.
 
 Merges whose captures quote the very same words are trivially right, so they're sampled only when there aren't 50
-others. The sheet quotes people: keep it, and the key, where only root and the apps read (`saved/`, deploy.md).
+others. A near miss is one per pair of observations, and no two pairs on the sheet quote the same two things. The sheet quotes people: keep it, and the key, where only root and the apps read (`saved/`, deploy.md).
 """
 
 import itertools
@@ -56,9 +56,10 @@ def merged(caps: dict) -> list[dict]:
 
 
 def near_misses(conn, caps: dict) -> list[dict]:
-    """Pairs of captures in different observations, one citing speech the other's descends from, under the
-    threshold: the closest first."""
-    seen, out = set(), []
+    """Pairs of observations, one's capture citing speech the other's descends from, under the threshold: each as
+    its closest pair of captures, the closest first. An observation has a capture per re-read, so one pair of
+    observations would otherwise come up once for each pair of their captures."""
+    seen, best = set(), {}
     for item_id, (obs, quote, _, _, segs) in caps.items():
         for other, other_obs, other_quote in conn.execute(
                 _ANCESTRY + """
@@ -70,10 +71,23 @@ def near_misses(conn, caps: dict) -> list[dict]:
                 continue
             seen.add(pair)
             score = quote_score(quote, other_quote)
-            if score < CARRY_MIN_SCORE:
-                out.append({"set": "near", "observations": sorted([str(obs), str(other_obs)]), "items": list(pair),
-                            "score": round(score, 3)})
+            observations = tuple(sorted((str(obs), str(other_obs))))
+            if score < CARRY_MIN_SCORE and (-score, pair) < best.get(observations, (1.0, ())):
+                best[observations] = (-score, pair)
+    out = [{"set": "near", "observations": list(o), "items": list(pair), "score": round(-neg, 3)}
+           for o, (neg, pair) in best.items()]
     return sorted(out, key=lambda p: (-p["score"], p["items"]))
+
+
+def distinct(pairs: list[dict], caps: dict) -> list[dict]:
+    """The first pair for each pair of quotes, whichever side each is on: the sheet asks about each only once."""
+    seen, out = set(), []
+    for p in pairs:
+        words = frozenset(tuple(_words(caps[i][1])) for i in p["items"])
+        if words not in seen:
+            seen.add(words)
+            out.append(p)
+    return out
 
 
 def build(conn, seed: int = 5, size: int = SIZE) -> tuple[str, dict]:
@@ -81,11 +95,11 @@ def build(conn, seed: int = 5, size: int = SIZE) -> tuple[str, dict]:
     caps = _captures(conn)
     rng = random.Random(seed)
     groups = merged(caps)
-    worded = [g for g in groups if not g["verbatim"]]
-    verbatim = [g for g in groups if g["verbatim"]]
+    worded = distinct([g for g in groups if not g["verbatim"]], caps)
+    verbatim = distinct([g for g in groups if g["verbatim"]], caps)
     picked = rng.sample(worded, min(size, len(worded)))
     picked += rng.sample(verbatim, min(size - len(picked), len(verbatim)))
-    near = near_misses(conn, caps)
+    near = distinct(near_misses(conn, caps), caps)
     pairs = picked + near[:size]
     rng.shuffle(pairs)
     for p in pairs:
