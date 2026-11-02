@@ -329,11 +329,19 @@ if [ -n "$ts" ]; then
     echo "Lattice: answering on the tailnet at $LATTICE_URL"
 fi
 
+say "The im command, for root"
+# The system directories are read-only on TrueNAS, so install/bin goes on root's PATH. An upgrade can reset root's
+# home; the next run of this script adds the line again.
+IM_PATH_LINE="export PATH=\"\$PATH:$REPO_DIR/install/bin\"   # Idea Machine's im (install/nas.sh)"
+grep -qxF "$IM_PATH_LINE" /root/.zshrc 2>/dev/null || echo "$IM_PATH_LINE" >> /root/.zshrc
+
 say "Done"
 cat <<EOF
 Idea Machine runs when Hearsay's pipeline enqueues it on corral (log: journalctl -t ideamachine-run). One run now,
 to see it work:
     sudo ${COMPOSE[*]} run --rm run
+Any im command, as root (in a new shell, or after: source /root/.zshrc):
+    im check
 Hearsay's stream: $HEARSAY_STREAM ($HEARSAY_STREAM_WHY)
 Lattice: $LATTICE_URL
     token: $(env_get "$NAS_LATTICE_ENV" LATTICE_TOKEN)

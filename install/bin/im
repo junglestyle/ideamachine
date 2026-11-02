@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# `im` on the NAS: runs an Idea Machine command in the pipeline image, e.g. `im check`, `im lattice`,
+# `im audit-dedupe sheet /saved/b5`. No arguments is a pipeline run. saved/ is mounted at /saved, for commands that
+# write a file to keep (they quote people, so it stays root and apps only). install/nas.sh puts this on root's PATH.
+set -euo pipefail
+
+# shellcheck source=SCRIPTDIR/../lib.sh
+. "$(dirname "$0")/../lib.sh"
+exec "${COMPOSE[@]}" run --rm -v "$NAS_SAVED:/saved" run "$@"
