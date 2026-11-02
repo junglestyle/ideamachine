@@ -52,3 +52,6 @@ model (B3; Opus stayed in 2026-10).
 4. ~~My point and someone else's: one cluster or two?~~ One: theirs joins mine as a not-me member (2026-10-28).
 5. ~~Digest points or a synthesis stage?~~ A stage of its own, triggered by weight, after M2 (2026-10-28).
 6. Widening extraction to neutral observations (questions, jokes, passing thoughts): yes, after M2; when?
+7. Does Emanation keep a stable global layout? [0005](decisions/0005-presentation-inside-idea-machine.md) drops
+   global map positions for lens projections; the [M6 notes](design/m6-emanation.md) argue for a persisted sky with
+   lenses as zoom.
