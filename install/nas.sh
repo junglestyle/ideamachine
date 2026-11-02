@@ -113,7 +113,8 @@ chown "root:$APPS_GID" "$NAS_BACKUPS"; chmod 2770 "$NAS_BACKUPS"
 # vocab: the run (apps user) writes vocab.json; Hearsay mounts it read-only, so anyone may read it. It holds terms
 # only (names, rare words, and a few misheard spans), never whole quotes.
 mkdir -p "$NAS_VOCAB"; chown "$APPS_UID:$APPS_GID" "$NAS_VOCAB"; chmod 755 "$NAS_VOCAB"
-mkdir -p "$NAS_SAVED"; chown "root:$APPS_GID" "$NAS_SAVED"; chmod 750 "$NAS_SAVED"
+# saved/: root and apps only (it quotes people). Group-writable, so `im audit-* sheet /saved/<new folder>` can make it.
+mkdir -p "$NAS_SAVED"; chown "root:$APPS_GID" "$NAS_SAVED"; chmod 770 "$NAS_SAVED"
 # pg: Postgres runs as the apps user (install/compose.yaml). Data from before that change belongs to uid 999
 # (`netdata` on TrueNAS); hand it over once, with the database stopped.
 if [ "$(stat -c %u "$NAS_PG")" != "$APPS_UID" ]; then
