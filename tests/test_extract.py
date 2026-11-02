@@ -263,6 +263,10 @@ def test_pending_reports_what_would_be_resent(pipe, cfg, stream, monkeypatch, ca
     monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
     cli.main(["pending", "--expect-none-resent"])
     assert json.loads(capsys.readouterr().out)["already_extracted_would_resend"] == 0
+    cli.main(["pending", "--prompt", "v3"])   # what switching prompts would re-read, and what those reads cost
+    out = json.loads(capsys.readouterr().out)
+    assert out["episodes_to_extract"] == 9 and out["already_extracted_would_resend"] == 0
+    assert out["their_last_reads_cost_usd"] > 0
     monkeypatch.setenv("TZ", "Asia/Tokyo")  # a machine in another time zone renders different payloads
     time.tzset()
     try:

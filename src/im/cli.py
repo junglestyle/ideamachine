@@ -287,13 +287,21 @@ def cmd_pending(args) -> None:
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
         pv = extract.prompt_version(cfg.extract.model, cfg.extract.effort,
-                                    extract.system_prompt(cfg.extract.prompt, cfg.extract.interests))
+                                    extract.system_prompt(args.prompt or cfg.extract.prompt, cfg.extract.interests))
         todo = extract._pending(conn, cfg.extract.model, pv)
         done = {r[0] for r in conn.execute(
             "SELECT episode_id FROM im.extractions WHERE model = %s AND prompt_version = %s",
             (cfg.extract.model, pv))}
-        out = {"episodes_to_extract": len(todo),
+        # What each one's latest read cost, a read shared by reuse counted once; an `im trial` of a new prompt
+        # says how its cost compares (cost_vs_live).
+        (last_read,) = conn.execute(
+            """SELECT sum(g.cost_usd) FROM im.egress_log g WHERE g.egress_id IN (
+                 SELECT DISTINCT ON (episode_id) egress_id FROM im.extractions
+                 WHERE episode_id = ANY(%s) AND model = %s ORDER BY episode_id, created_at DESC)""",
+            ([p.episode_id for p in todo], cfg.extract.model)).fetchone()
+        out = {"prompt_version": pv, "episodes_to_extract": len(todo),
                "already_extracted_would_resend": sum(p.episode_id in done for p in todo),
+               "their_last_reads_cost_usd": round(float(last_read or 0), 2),
                "items_to_match": len(lattice._pending_items(conn)),
                "ideas_to_file": len(themes._unthemed(conn, themes.themes_version(conn)))}
     _print(out)
@@ -566,6 +574,7 @@ def main(argv=None) -> None:
     pe = sub.add_parser("pending", help="what the next run would send to Claude, without sending anything")
     pe.add_argument("--expect-none-resent", action="store_true",
                     help="exit 1 if any already-extracted episode would be sent again (use after a move)")
+    pe.add_argument("--prompt", help="as if extract.prompt were this one (e.g. v3): what switching would re-read")
     pe.set_defaults(func=cmd_pending)
     sc = sub.add_parser("scores", help="the top-ranked ideas, with their rubric scores")
     sc.add_argument("--top", type=int, default=20)

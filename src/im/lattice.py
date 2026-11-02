@@ -179,6 +179,32 @@ def _pending_items(conn) -> list[tuple]:
            ORDER BY e.started_at, i.item_id""").fetchall()
 
 
+CARRIED = "carried:observation"   # judged_by for a match an item takes from its observation
+
+
+def carry_by_observation(conn, item_id=None) -> int:
+    """An unmatched item whose observation already has a capture in a cluster joins that cluster, unasked.
+
+    A re-read (a new prompt, re-transcribed speech) captures the same speech again, and the observation stage folds
+    it in. Asking the matcher again would pay for a decision already made, and could put one observation in two
+    clusters. The earliest matched capture decides. `item_id` limits it to one item. Returns how many were carried."""
+    with conn.transaction():
+        rows = conn.execute(
+            """SELECT DISTINCT ON (i.item_id) i.item_id, m.idea_id
+               FROM im.items i JOIN im.episodes e USING (episode_id)
+               JOIN im.items s ON s.observation_id = i.observation_id AND s.item_id <> i.item_id
+               JOIN im.item_matches m ON m.item_id = s.item_id AND m.idea_id IS NOT NULL
+               WHERE e.current AND (%(item)s::uuid IS NULL OR i.item_id = %(item)s::uuid)
+                 AND NOT EXISTS (SELECT 1 FROM im.item_matches x WHERE x.item_id = i.item_id)
+               ORDER BY i.item_id, m.created_at, s.item_id""", {"item": item_id}).fetchall()
+        for item, idea in rows:
+            conn.execute("""INSERT INTO im.idea_evidence (idea_id, item_id, relation, judged_by)
+                            VALUES (%s, %s, 'same_as', %s) ON CONFLICT DO NOTHING""", (idea, item, CARRIED))
+            conn.execute("""INSERT INTO im.item_matches (item_id, decision, idea_id, judged_by)
+                            VALUES (%s, 'same_as', %s, %s)""", (item, idea, CARRIED))
+    return len(rows)
+
+
 def _ask(client, item: tuple, candidates: list[tuple]) -> tuple[dict, str, object]:
     _, _, kind, said_by, quote, gist, _, _ = item
     who = "me" if said_by == "me" else "someone else"   # no names leave the box
@@ -214,9 +240,10 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
     from im.extract import spent_this_month
 
     version = matcher_version()
+    carried = carry_by_observation(conn)
     items = _pending_items(conn)
-    stats = {"matcher": version, "pending": len(items), "new": 0, "same_as": 0, "evolves": 0, "skipped": 0,
-             "stopped": None}
+    stats = {"matcher": version, "carried": carried, "pending": len(items), "new": 0, "same_as": 0, "evolves": 0,
+             "skipped": 0, "stopped": None}
     if not items:   # ideas I added or corrected still need embedding, relating and placing
         stats["related_links"] = relate(conn, embedder)
         stats["positions"] = place(conn, embedder.model_version)
@@ -233,6 +260,9 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
             conn.execute("INSERT INTO im.item_matches (item_id, decision, judged_by) VALUES (%s, 'skipped', %s)",
                          (item_id, version))
             stats["skipped"] += 1
+            continue
+        if carry_by_observation(conn, item_id):   # another capture of it was matched earlier in this run
+            stats["carried"] += 1
             continue
         if spent_this_month(conn) >= monthly_cap_usd:
             stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"

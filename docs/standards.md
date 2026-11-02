@@ -96,8 +96,6 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
 - Docs: [ROADMAP-v2.md](ROADMAP-v2.md)'s milestones restate what they build instead of naming the
   [SPEC.md](SPEC.md) requirements they deliver, and M1's and M4's goals are internals (stable segment identity, Jev
   behind `judged_by`), not what I'd notice.
-- Docs: widening extraction to neutral observations is decided ([ROADMAP-v2.md](ROADMAP-v2.md) §4, question 6: "yes,
-  after M2"), but it isn't in [SPEC.md](SPEC.md) and no milestone delivers it.
 - Deployment repos: [deploy.md](deploy.md), [ROADMAP.md](ROADMAP.md) and `install/` carry the deployment's values:
   `/mnt/fast/...` paths, the `fast/ideamachine`, `fast/repos` and `storage/fast-replica` datasets, Lattice's
   `tailscale serve` port, 8444 (`install/lib.sh` line 25), and the NAS's time zone (`install/compose.yaml` line 47).

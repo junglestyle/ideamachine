@@ -8,7 +8,7 @@ import numpy as np
 import psycopg
 import pytest
 
-from im import extract, lattice
+from im import extract, lattice, observations
 
 from helpers import run, table
 from test_extract import FakeClaude
@@ -133,6 +133,31 @@ def test_matching_new_same_and_evolves(seeded, cfg, stream):
     sent = json.dumps([c["messages"] for c in claude.calls])
     assert "anon A" not in sent and "Alice" not in sent and "said by someone else" in sent
     assert lattice.match_stage(seeded, claude, HashEmbedder())["pending"] == 0 and len(claude.calls) == 3
+
+
+def test_a_re_read_joins_its_observations_cluster_unasked(seeded, cfg, stream):
+    # A new prompt reads every episode again. What it captures again folds into the same observations, and those
+    # captures join the clusters their observations are already in: no matcher request, no observation split.
+    lat_setup(seeded, cfg, stream)
+    observations.assign_stage(seeded)
+    extract.run_stage(seeded, FakeClaude(items_for), system=extract.system_prompt("v3"))
+    observations.assign_stage(seeded)
+    claude = FakeMatcher()
+    stats = lattice.match_stage(seeded, claude, HashEmbedder())
+    assert (stats["carried"], stats["pending"], claude.calls) == (3, 0, [])
+    assert table(seeded, """SELECT count(DISTINCT m.idea_id) FROM im.items i JOIN im.item_matches m USING (item_id)
+                            GROUP BY i.observation_id""") == [(1,)] * 3
+    assert table(seeded, "SELECT relation, count(*) FROM im.idea_evidence WHERE judged_by = %s GROUP BY 1",
+                 lattice.CARRIED) == [("same_as", 3)]
+
+
+def test_two_captures_of_one_line_are_matched_once(seeded, cfg, stream):
+    run(seeded, cfg, stream)
+    extract.run_stage(seeded, FakeClaude(lambda text: items_for(text) * 2))
+    observations.assign_stage(seeded)
+    claude = FakeMatcher()
+    stats = lattice.match_stage(seeded, claude, HashEmbedder())
+    assert (len(claude.calls), stats["carried"]) == (3, 3)
 
 
 def test_discarded_items_are_skipped(seeded, cfg, stream):
