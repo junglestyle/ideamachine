@@ -54,6 +54,6 @@ model (B3; Opus stayed in 2026-10).
 6. ~~Widening extraction to neutral observations (questions, jokes, passing thoughts): yes, after M2; when?~~ Now
    (2026-11-02): prompt `v3`. A re-read's captures of speech already captured join their observation's cluster
    without asking the matcher, so it costs about one extraction pass. Trial it, then switch `extract.prompt`.
-7. Does Emanation keep a stable global layout? [0005](decisions/0005-presentation-inside-idea-machine.md) drops
-   global map positions for lens projections; the [M6 notes](design/m6-emanation.md) argue for a persisted sky with
-   lenses as zoom.
+7. ~~Does Emanation keep a stable global layout?~~ Yes (2026-11-02): one sky with stable positions, and a lens
+   returns relevance, not a layout; the home sky is the lens with no seed
+   ([0005, amended](decisions/0005-presentation-inside-idea-machine.md#amendment-one-sky-lenses-light-it-2026-11-02)).

@@ -47,10 +47,19 @@ Clicking one shows the cited utterances on both sides. Keeping it goes through t
 
 ## Conflicts with decisions already made
 
-- **[Decision 0005](../decisions/0005-presentation-inside-idea-machine.md)** says map positions leave the pipeline
-  once lenses replace the global map, and the force map is fed a lens's `{nodes, links}`. A stable sky needs a global
-  layout that persists between runs. Lens projections stay relative to their seed. Resolve this before the design:
-  amend 0005 so a persisted, incrementally updated layout is kept, either in the pipeline or as a `pub` view.
+- ~~[Decision 0005](../decisions/0005-presentation-inside-idea-machine.md) drops global positions for lens
+  layouts.~~ Resolved by amending 0005 (2026-11-02): positions stay in the pipeline, a lens returns relevance, and the
+  home sky is the lens with no seed.
+
+## First sky (`im web`, `/sky`)
+
+- Every card at its pipeline position (`pub.card_positions`; the pipeline places every card, not only Lattice's).
+- Brightness: distinct conversations. Sharpness: days since last said (older is softer and wider). Size: lifecycle
+  (observation, candidate, pinned, canonical). Colour: the direction from the map's centre, so neighbours share a
+  hue. Edges: faint, every kind.
+- `/sky?seed=<id>` is a lens: personalized PageRank from the seed over edges, plus the seed's nearest by meaning
+  (`lens.relevance`). Unlit clusters dim; the camera frames the lit ones.
+- Tap a star for its title and facts, then open its card or make it the lens. Drag to pan, pinch or scroll to zoom.
 
 ## Later encodings (not M6)
 

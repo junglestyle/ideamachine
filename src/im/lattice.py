@@ -392,11 +392,12 @@ def project(M: np.ndarray, prev: np.ndarray | None = None, shared: np.ndarray | 
 
 
 def place(conn, model_version: str) -> int:
-    """Recompute im.idea_positions for every idea Lattice shows that has an embedding. Returns how many."""
+    """Recompute im.idea_positions for every card (the neutral view's clusters, a superset of what Lattice shows)
+    that has an embedding: the one map every view shares (decision 0005, amended). Returns how many."""
     rows = conn.execute(
         """SELECT e.idea_id, e.embedding::text, p.x, p.y, p.method FROM im.idea_embeddings e
            LEFT JOIN im.idea_positions p USING (idea_id)
-           WHERE e.model_version = %s AND e.idea_id IN (SELECT idea_id FROM pub.ideas)
+           WHERE e.model_version = %s AND e.idea_id IN (SELECT idea_id FROM pub.cards)
            ORDER BY e.idea_id""", (model_version,)).fetchall()
     with conn.transaction():
         conn.execute("DELETE FROM im.idea_positions")

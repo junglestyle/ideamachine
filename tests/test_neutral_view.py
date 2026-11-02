@@ -66,3 +66,38 @@ def test_the_app_icons_ship_and_need_no_login():
     for path in web.STATIC:
         assert static.joinpath(path.lstrip("/")).read_bytes()
     assert "/manifest.webmanifest" in web._page("t", "") and "/apple-touch-icon.png" in web._page("t", "")
+
+
+def sky_data(page):
+    """The data a sky page draws from."""
+    import json
+    import re
+    return json.loads(re.search(r'<script type="application/json" id="d">(.*?)</script>', page, re.S)[1]
+                      .replace("<\\/", "</"))
+
+
+def test_the_sky_places_every_card_even_one_lattice_hides(matched, admin):  # noqa: F811
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    new = idea(matched, "Something new")
+    matched.execute("""INSERT INTO im.item_verdicts (item_id, segment_ids, quote, verdict)
+                       SELECT i.item_id, i.source_segment_ids, i.quote, 'discard'
+                       FROM im.items i JOIN im.idea_evidence ev USING (item_id) WHERE ev.idea_id = %s""", (new,))
+    lattice.place(matched, HashEmbedder().model_version)
+    data = sky_data(as_app(admin, web.sky))
+    cards = as_app(admin, lambda c: {r[0] for r in c.execute("SELECT idea_id::text FROM pub.cards")})
+    assert {s[0] for s in data["stars"]} == cards and str(new) in cards   # discarded, so not in Lattice, but here
+    assert data["rel"] is None and data["seed"] is None   # the home sky: no lens, the encodings light it
+
+
+def test_a_lens_lights_its_seed_and_what_it_reaches(matched, admin):  # noqa: F811
+    build = str(idea(matched, "Broken builds as signal"))
+    (signal,) = table(matched, "SELECT idea_id::text FROM im.ideas WHERE statement LIKE '%%always correct%%'")[0]
+    data = sky_data(as_app(admin, web.sky, build))
+    assert data["seed"] == build and data["rel"][build] == 1.0
+    assert data["rel"][signal] > 0   # it evolves from the signal idea
+    assert all(0 < v <= 1 for v in data["rel"].values())
+    assert {s[0]: (s[1], s[2]) for s in data["stars"]} == \
+        {s[0]: (s[1], s[2]) for s in sky_data(as_app(admin, web.sky))["stars"]}   # a lens moves nothing
+    assert as_app(admin, web.sky, "00000000-0000-0000-0000-000000000000") is None
