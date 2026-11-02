@@ -1,4 +1,4 @@
-"""B4 pilot: the blind sheet of pairs of clusters, and tallying my marks on it."""
+"""B4: the blind sheet of pairs of clusters, and tallying my marks on it."""
 
 import json
 import re
@@ -34,6 +34,7 @@ def test_the_sheet_is_blind_and_draws_every_set(lattice_with_clusters, tmp_path)
     assert len({tuple(p["ideas"]) for p in key["pairs"].values()}) == out["pairs"]   # no pair twice
     body = (tmp_path / "sheet.md").read_text().split("\n## 1\n", 1)[1]
     assert "Signal may not be true" in body and "> \"" in body   # statements, and quotes of what was said
+    assert body.index("> \"") < body.index("Claude's summary")   # what was said comes first
     assert not re.search(r"near|evolves|far|similar|0\.\d", body)   # nothing says why a pair is there
     with pytest.raises(SystemExit):   # never over my marks
         edge_audit.write(lattice_with_clusters, tmp_path)

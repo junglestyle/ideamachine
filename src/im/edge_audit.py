@@ -1,17 +1,20 @@
-"""B4 pilot (docs/ROADMAP-v2.md): a small blind sheet of pairs of clusters for me to type by hand, before the 200
-pairs B4 needs.
+"""B4 (docs/ROADMAP-v2.md): blind sheets of pairs of clusters for me to type by hand, the labels Jev is scored on.
 
-The pilot is for settling the labels, not for scoring a model: whether the five answers (supports, contradicts,
-extends, related, none) are the right ones and can be told apart, whether direction matters, and how rare
-contradictions are among the pairs Jev will actually see. Its marks are kept, and count towards the 200.
+What the pilot (20 pairs, 2026-11-02) settled: the answers stay supports, contradicts, extends, related and none,
+with the matcher's `evolves` counted as `extends`; direction is cheap to give; and contradictions and supports
+don't turn up among nearest neighbours, so the sheet goes looking for them. Marks must be mine, made blind: a
+model's marks would score Jev against another model.
 
-The pairs come from the clusters Jev would type, candidates and ideas, in three sets:
-- near: each cluster's nearest neighbours by embedding (SPEC §5: embeddings nominate pairs), spread across the
-  range of similarity rather than only the closest;
-- evolves: pairs the matcher already linked as one evolving into the other;
+The pairs come in five sets:
+- near: nearest neighbours by embedding among candidates and ideas (SPEC §5: embeddings nominate pairs), spread
+  across the range of similarity rather than only the closest;
+- evolves: pairs the matcher linked as one evolving into the other;
+- apart: neighbours among candidates and ideas first said far apart in time, where a change of mind would show;
+- levels: a candidate or idea next to a nearby concrete observation (anyone's), where support would show;
 - far: pairs below the median similarity, so `none` is represented.
-The sets are shuffled together, each pair's sides in random order, with no similarity or set shown. The sheet
-quotes people: keep it, and the key, in saved/ (deploy.md).
+The sets are shuffled together, each pair's sides in random order, with no similarity or set shown. Each side shows
+what was said first, then Claude's summary, marked as Claude's. The sheet quotes people: keep it, and the key, in
+saved/ (deploy.md).
 """
 
 import json
@@ -21,67 +24,98 @@ from pathlib import Path
 
 import numpy as np
 
-SIZE = 20
+SIZE = 50
 NEAR_K = 5
-SHARE = {"evolves": 3, "far": 3}   # the rest of the sheet is near pairs
+WIDE_K = 10    # how far the apart and levels sets look for neighbours
+SHARE = {"evolves": 0.12, "apart": 0.16, "levels": 0.16, "far": 0.08}   # the rest of the sheet is near pairs
+SETS = ("near", "evolves", "apart", "levels", "far")
+CONCRETE = ("observation",)          # item kinds that are about a case, not a claim
+CLAIMS = ("idea", "aphorism")
 LABELS = {"supports": "supports", "sup": "supports", "contradicts": "contradicts", "con": "contradicts",
           "extends": "extends", "ext": "extends", "related": "related", "rel": "related", "none": "none",
           "same": "same", "unsure": "unsure", "?": "unsure"}
 DIRECTED = ("supports", "extends")
 
-HEADER = """# B4 pilot: typing edges (blind)
+HEADER = """# B4: typing edges (blind)
 
-Each pair is two clusters from the lattice. How does A relate to B? After `mark:`, write one of:
+Each pair is two clusters from the lattice: what was said, then Claude's summary of it. Judge by what was said;
+the summary can be wrong. How does A relate to B? After `mark:`, write one of:
 
-- `supports` (`sup`): one gives a reason, evidence or an example for the other.
-- `contradicts` (`con`): they can't both be held as stated.
-- `extends` (`ext`): one takes the other further: applies it, generalizes it, or builds on it.
-- `related` (`rel`): the same subject, but none of the above.
+- `supports` (`sup`): one is a reason to believe the other: evidence, an example, an argument. Test: if A is true,
+  is B more believable, while still saying the same thing?
+- `extends` (`ext`): one takes the other further: applies it, generalizes it, builds on it, or is a later version
+  of it. Test: does A say something new that B made possible?
+- `contradicts` (`con`): they can't both be held as stated, including a change of mind.
+- `related` (`rel`): the same subject, but none of the above. Test: knowing one doesn't change how you read the
+  other.
 - `none`: no real connection.
 - `same`: the same idea said twice (a merge the matcher missed).
 - `unsure` (`?`).
 
 For `supports` and `extends`, add `A>B` if A supports or extends B, or `B>A` the other way; leave it off if it
-runs both ways or you can't say. Use `note:` for anything the labels didn't fit: that's what the pilot is for.
-Then run `im audit-edges score` on this folder. Quotes are what was said; "me" is me, "someone" anyone else.
+runs both ways or you can't say. Use `note:` for anything worth saying, such as a summary that misstates the quotes.
+Mark it yourself, without a model's help: these marks are what Jev is scored against.
+Then run `im audit-edges score` on this folder. "me" is me, "someone" anyone else.
 """
 
 
-def _pool(conn) -> tuple[list, np.ndarray]:
-    """Candidates and ideas Lattice shows, with their embeddings under the model most of them were embedded with."""
-    rows = conn.execute(
-        """WITH v AS (SELECT model_version FROM im.idea_embeddings GROUP BY 1 ORDER BY count(*) DESC LIMIT 1)
-           SELECT p.idea_id, e.embedding::text FROM pub.ideas p
-           JOIN im.idea_maturity m USING (idea_id)
+def _clusters(conn) -> list[tuple]:
+    """Every cluster Lattice shows, with its embedding (under the model most were embedded with), whether it's mine
+    (a candidate or idea), when it was first said, and the kind most of its captures are."""
+    return conn.execute(
+        """WITH v AS (SELECT model_version FROM im.idea_embeddings GROUP BY 1 ORDER BY count(*) DESC LIMIT 1),
+           said AS (SELECT ev.idea_id, e.started_at AS at, i.kind FROM im.idea_evidence ev
+                    JOIN im.items i USING (item_id) JOIN im.episodes e ON e.episode_id = i.episode_id AND e.current
+                    UNION ALL
+                    SELECT idea_id, said_at, NULL FROM im.observations WHERE idea_id IS NOT NULL)
+           SELECT p.idea_id::text, e.embedding::text, m.maturity IN ('candidate', 'idea'),
+                  (SELECT min(at) FROM said WHERE said.idea_id = p.idea_id),
+                  (SELECT mode() WITHIN GROUP (ORDER BY kind) FROM said WHERE said.idea_id = p.idea_id)
+           FROM pub.ideas p JOIN im.idea_maturity m USING (idea_id)
            JOIN im.idea_embeddings e ON e.idea_id = p.idea_id AND e.model_version = (SELECT model_version FROM v)
-           WHERE m.maturity IN ('candidate', 'idea') ORDER BY p.idea_id""").fetchall()
-    if not rows:
-        return [], np.zeros((0, 1))
-    M = np.vstack([np.array(json.loads(r[1])) for r in rows])
-    return [str(r[0]) for r in rows], M / np.linalg.norm(M, axis=1, keepdims=True)
+           ORDER BY p.idea_id""").fetchall()
 
 
 def candidates(conn) -> dict[str, list[dict]]:
     """Every pair each set could draw from, as {"ideas": [a, b], "similarity": s}, a < b."""
-    ids, M = _pool(conn)
-    if len(ids) < 2:
-        return {"near": [], "evolves": [], "far": []}
+    rows = _clusters(conn)
+    mine = [n for n, r in enumerate(rows) if r[2]]
+    if len(mine) < 2:
+        return {s: [] for s in SETS}
+    ids = [r[0] for r in rows]
+    M = np.vstack([np.array(json.loads(r[1])) for r in rows])
+    M = M / np.linalg.norm(M, axis=1, keepdims=True)
     S = M @ M.T
     np.fill_diagonal(S, -np.inf)
     pair = lambda i, j: {"ideas": sorted([ids[i], ids[j]]), "similarity": round(float(S[i, j]), 3)}  # noqa: E731
-    near = {}
-    for i in range(len(ids)):
-        for j in np.argsort(-S[i])[:NEAR_K]:
-            near[tuple(sorted((i, int(j))))] = None
+    by_sim = lambda ps: sorted(ps, key=lambda p: (-p["similarity"], p["ideas"]))  # noqa: E731
+
+    def neighbours(k: int, among: list[int]) -> set[tuple[int, int]]:
+        out = set()
+        for i in mine:
+            for j in [among[x] for x in np.argsort(-S[i, among])[:k]]:   # S[i, i] is -inf: never among them
+                if j != i:
+                    out.add(tuple(sorted((i, j))))
+        return out
+
+    near = neighbours(NEAR_K, mine)
     index = {x: n for n, x in enumerate(ids)}
-    evolves = [pair(index[str(a)], index[str(b)]) for a, b in conn.execute(
-        "SELECT a, b FROM im.idea_links WHERE kind = 'evolves' ORDER BY a, b") if str(a) in index and str(b) in index]
-    upper = S[np.triu_indices(len(ids), 1)]
-    median = float(np.median(upper))
-    far = [pair(i, j) for i in range(len(ids)) for j in range(i + 1, len(ids))
-           if S[i, j] < median and (i, j) not in near]
-    return {"near": sorted((pair(i, j) for i, j in near), key=lambda p: (-p["similarity"], p["ideas"])),
-            "evolves": evolves, "far": far}
+    evolves = [pair(index[a], index[b]) for a, b in conn.execute(
+        "SELECT a::text, b::text FROM im.idea_links WHERE kind = 'evolves' ORDER BY a, b")
+        if a in index and b in index and rows[index[a]][2] and rows[index[b]][2]]
+    wide = neighbours(WIDE_K, mine)
+    gap = {(i, j): abs((rows[i][3] - rows[j][3]).days) for i, j in wide if rows[i][3] and rows[j][3]}
+    longest = float(np.quantile(list(gap.values()), 0.75)) if gap else 0
+    apart = [pair(i, j) for (i, j), d in gap.items() if d >= max(longest, 1)]
+    levels = [pair(i, j) for i, j in neighbours(WIDE_K, list(range(len(ids))))
+              if {rows[i][4] in CONCRETE, rows[j][4] in CONCRETE} == {True, False}
+              and (rows[i][4] in CLAIMS or rows[j][4] in CLAIMS)]
+    sub = S[np.ix_(mine, mine)][np.triu_indices(len(mine), 1)]
+    median = float(np.median(sub))
+    far = [pair(mine[a], mine[b]) for a in range(len(mine)) for b in range(a + 1, len(mine))
+           if S[mine[a], mine[b]] < median and tuple(sorted((mine[a], mine[b]))) not in near]
+    return {"near": by_sim(pair(i, j) for i, j in near), "evolves": evolves, "apart": by_sim(apart),
+            "levels": by_sim(levels), "far": far}
 
 
 def _spread(pairs: list[dict], n: int) -> list[dict]:
@@ -92,19 +126,21 @@ def _spread(pairs: list[dict], n: int) -> list[dict]:
 
 
 def _side(conn, idea_id: str) -> list[str]:
-    """A cluster on the sheet: its title and statement, and up to two quotes, mine first, with when they were said."""
+    """A cluster on the sheet: up to two things said, mine first, with when; then Claude's summary, and my note."""
     title, statement, note = conn.execute(
         "SELECT title, statement, my_note FROM im.idea_text WHERE idea_id = %s", (idea_id,)).fetchone()
     quotes = conn.execute(
-        """SELECT o.quote, o.said_on, o.me FROM (
+        """SELECT quote, said_on, me FROM (
              SELECT DISTINCT ON (i.observation_id) i.quote, e.started_at::date AS said_on, s.speaker = 'me' AS me
              FROM im.idea_evidence ev JOIN im.items i USING (item_id)
              JOIN im.episodes e ON e.episode_id = i.episode_id AND e.current
              JOIN im.observation_speaker s USING (observation_id)
-             WHERE ev.idea_id = %s ORDER BY i.observation_id, i.created_at) o
-           ORDER BY o.me DESC, o.said_on, o.quote LIMIT 2""", (idea_id,)).fetchall()
-    lines = [f"**{title}**: {statement}"] + ([f"   (my note: {note})"] if note else [])
-    lines += [f"   > \"{q}\" ({'me' if me else 'someone'}, {on})" for q, on, me in quotes]
+             WHERE ev.idea_id = %(id)s ORDER BY i.observation_id, i.created_at) o
+           UNION ALL
+           SELECT quote, said_at::date, said_by = 'me' FROM im.observations WHERE idea_id = %(id)s
+           ORDER BY me DESC, said_on, quote LIMIT 2""", {"id": idea_id}).fetchall()
+    lines = [f"> \"{q}\" ({'me' if me else 'someone'}, {on})" for q, on, me in quotes]
+    lines += [f"   Claude's summary: {title}. {statement}"] + ([f"   My note: {note}"] if note else [])
     return lines
 
 
@@ -123,10 +159,13 @@ def build(conn, seed: int = 4, size: int = SIZE) -> tuple[str, dict]:
                 picked.append(p | {"set": kind})
                 n -= 1
 
-    take(rng.sample(pool["evolves"], len(pool["evolves"])), SHARE["evolves"], "evolves")
-    take(rng.sample(pool["far"], min(len(pool["far"]), 10 * size)), SHARE["far"], "far")
+    for kind in ("evolves", "apart", "levels"):
+        take(rng.sample(pool[kind], len(pool[kind])), round(SHARE[kind] * size), kind)
+    take(rng.sample(pool["far"], min(len(pool["far"]), 10 * size)), round(SHARE["far"] * size), "far")
     near = [p for p in pool["near"] if tuple(p["ideas"]) not in taken]   # an evolves pair is often a near one too
     take(_spread(near, size - len(picked)), size - len(picked), "near")
+    for kind in SETS:   # a small lattice: whatever is left, so the sheet still has `size` pairs if it can
+        take(pool[kind], size - len(picked), kind)
     rng.shuffle(picked)
     for p in picked:
         p["sides"] = rng.sample(p["ideas"], 2)
@@ -134,10 +173,10 @@ def build(conn, seed: int = 4, size: int = SIZE) -> tuple[str, dict]:
     for n, p in enumerate(picked, 1):
         lines += [f"## {n}", ""]
         for side, idea in zip("AB", p["sides"]):
-            first, *rest = _side(conn, idea)
-            lines += [f"{side}. {first}", *rest, ""]
+            first, *rest = _side(conn, idea) or ["(nothing said on record)"]
+            lines += [f"{side}. {first}", *[f"   {x}" if x.startswith(">") else x for x in rest], ""]
         lines += ["mark: ", "note: ", ""]
-    key = {"benchmark": "B4-pilot", "seed": seed, "size": size, "near_k": NEAR_K,
+    key = {"benchmark": "B4", "seed": seed, "size": size, "near_k": NEAR_K, "wide_k": WIDE_K,
            "available": {k: len(v) for k, v in pool.items()},
            "pairs": {str(n): p for n, p in enumerate(picked, 1)}}
     return "\n".join(lines), key
@@ -154,7 +193,7 @@ def write(conn, out: Path, seed: int = 4, size: int = SIZE) -> dict:
     key.write_text(json.dumps(k, indent=2))
     sets = [p["set"] for p in k["pairs"].values()]
     return {"sheet": str(sheet), "key": str(key), "pairs": len(sets),
-            "by_set": {s: sets.count(s) for s in ("near", "evolves", "far")}, "available": k["available"]}
+            "by_set": {s: sets.count(s) for s in SETS}, "available": k["available"]}
 
 
 def marks(text: str) -> dict:
@@ -176,10 +215,10 @@ def marks(text: str) -> dict:
 
 
 def score(folder: Path) -> dict:
-    """What the pilot says about the labels: how often each came up, per set, and where they didn't fit."""
+    """My marks, tallied: how often each label came up, per set, how often I gave a direction, and my notes."""
     key = json.loads((folder / "key.json").read_text())
     got = marks((folder / "sheet.md").read_text())
-    counts = {s: {} for s in ("near", "evolves", "far")}
+    counts = {s: {} for s in SETS}
     missing, notes, directed, labels = [], [], {"given": 0, "of": 0}, []
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         mark = got.get(num, {})
@@ -199,7 +238,6 @@ def score(folder: Path) -> dict:
     for c in counts.values():
         for label, k in c.items():
             total[label] = total.get(label, 0) + k
-    near = sum(counts["near"].values())
-    return {"benchmark": "B4-pilot", "marked": len(labels), "missing": missing, "labels": total, "by_set": counts,
-            "contradicts_among_near": f"{counts['near'].get('contradicts', 0)} of {near}",
+    return {"benchmark": key["benchmark"], "marked": len(labels), "missing": missing, "labels": total,
+            "by_set": {s: c for s, c in counts.items() if c},
             "direction_given": f"{directed['given']} of {directed['of']}", "notes": notes, "marks": labels}
