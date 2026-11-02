@@ -32,7 +32,7 @@ Each runs on data that already exists and records model and prompt versions.
 | B2 | ~~Keep/discard prior~~ retired 2026-10-28: no keep/discard | — |
 | B3 | Extraction model swap (`im trial`). Done 2026-10-28: Opus stays (Sonnet 82% recall at 42% cost; Haiku lost the blind slug check) | Rerun when a model ships: candidate's slugs preferred or tied ≥ 60% of 30 blind pairs |
 | B4 | Edge typing, 200 labelled pairs | Macro-F1 ≥ 0.70; `contradicts` precision ≥ 0.80 |
-| B5 | Dedupe migration, operator audit of 50 groups and 50 near misses (`im audit-dedupe`). First sheet 2026-11-01, stopped at 26 merged: 2 false merges, both chained through a quote stitched with "..."; an item now joins only if it matches every capture. Rerun pending | ≤ 2 false merges in 50 |
+| B5 | Dedupe migration, operator audit of 50 groups and 50 near misses (`im audit-dedupe`). First sheet 2026-11-01, stopped at 26 merged: 2 false merges, both chained through a quote stitched with "..."; an item now joins only if it matches every capture. **Passed 2026-11-01** on a fresh sheet: 1 false merge in 50; 5 false splits in 50 near misses, so 0.4 stays | ≤ 2 false merges in 50 |
 | B6 | Local titles | Local preferred or tied ≥ 60% in 50 blind pairs |
 
 ## 3. Cost

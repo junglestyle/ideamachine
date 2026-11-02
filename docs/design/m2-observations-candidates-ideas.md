@@ -208,6 +208,19 @@ merges scored 0.429 and up, the one false split 0.294, so 0.4 stays; the join ru
 (migration 034 rebuilds observations). The near misses also repeated, one per pair of captures of the same two
 observations; the sheet now has each pair once. B5 reruns on a fresh sheet.
 
+**Second sheet, 2026-11-01: B5 passes.** After the rebuild (528 merged observations, 293 of them verbatim; 80 near
+misses), all 100 pairs marked:
+
+| | Pairs | Wrong |
+|---|---|---|
+| Merged | 50 | 1 false merge, scoring 0.444 |
+| Near misses | 50 | 5 false splits, scoring 0.2–0.351; 1 unsure |
+
+True merges scored 0.433 and up. The threshold stays at 0.4: the false splits spread down to 0.2, so no threshold
+recovers them without letting merges like the 0.444 one through. A false split is also the cheaper error: both
+observations stay in their cluster, and two from the same moment are one recurrence, so weight doesn't move; a
+false merge hides a point.
+
 **Rollback:** each new table and column drops cleanly, because nothing old reads them, and the dump is the backstop.
 The ledger (items, verdicts, feedback events) is never rewritten, only pointed at.
 
