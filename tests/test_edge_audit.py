@@ -34,7 +34,9 @@ def test_the_sheet_is_blind_and_draws_every_set(lattice_with_clusters, tmp_path)
     assert len({tuple(p["ideas"]) for p in key["pairs"].values()}) == out["pairs"]   # no pair twice
     body = (tmp_path / "sheet.md").read_text().split("\n## 1\n", 1)[1]
     assert "Signal may not be true" in body and "> \"" in body   # statements, and quotes of what was said
-    assert body.index("> \"") < body.index("Claude's summary")   # what was said comes first
+    for side in re.split(r"\n(?=[AB]\. )", body):   # on each side, what was said comes before Claude's summary
+        if "> \"" in side:
+            assert side.index("> \"") < side.index("Claude's summary")
     assert not re.search(r"near|evolves|far|similar|0\.\d", body)   # nothing says why a pair is there
     with pytest.raises(SystemExit):   # never over my marks
         edge_audit.write(lattice_with_clusters, tmp_path)
