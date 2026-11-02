@@ -90,3 +90,19 @@ def test_forgetting_takes_the_observation(seeded, cfg, stream):  # noqa: F811
     assert table(seeded, "SELECT count(*) FROM im.observations")[0][0] == before - 1
     assert observations.assign_stage(seeded) == {"new": 0, "joined": 0, "dropped": 0}
     assert_invariants(seeded)
+
+
+HOSTING = "The hosting line doubled and nobody noticed for a month."
+MOVE = "I think we should move off the managed database before renewal."
+STITCHED = HOSTING[:-1] + "... " + MOVE   # two passages Claude joined with "...": it matches each
+
+
+def test_a_stitched_quote_doesnt_chain_two_points_into_one_observation(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    def respond(text):   # three captures of the database line; nothing on other episodes
+        return [dict(line, quote=q) for line in capture(DATABASE)(text) for q in (HOSTING, STITCHED, MOVE)]
+    extract.run_stage(pipe, FakeClaude(respond))
+    assert observations.assign_stage(pipe) == {"new": 2, "joined": 1, "dropped": 0}
+    obs = dict(table(pipe, "SELECT quote, observation_id FROM im.items"))
+    assert obs[HOSTING] != obs[MOVE]                       # B5's false merges: two points, one observation
+    assert obs[STITCHED] in (obs[HOSTING], obs[MOVE])      # the stitched quote joins one of them, whichever came first

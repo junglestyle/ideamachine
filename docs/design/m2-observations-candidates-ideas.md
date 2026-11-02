@@ -61,7 +61,9 @@ instead of starting a new one.
 - **Table:** `im.observations(observation_id, segment_ids, first_seen)`, plus `items.observation_id`. It's on the
   ledger side, rebuilt only by the dedupe stage.
 - **Matching:** the matcher `carry_verdicts` already uses (`feedback.py`). A new item joins an observation when its
-  segments descend from the observation's and `quote_score` ≥ 0.4. The threshold was calibrated on the 2026-10-06
+  segments descend from the observation's and `quote_score` ≥ 0.4 against every capture already in it. (Until
+  2026-11-01 any one capture was enough, and B5 found that chains: a quote Claude stitched from two passages with
+  "..." matches each, so it pulled both into one observation.) The threshold was calibrated on the 2026-10-06
   re-transcription: the same captures scored ≥ 0.44, others ≤ 0.3. When Claude captures the same line twice in one
   read, the two fold into one observation.
 - **Speaker** is derived when it's read, from the segment the observation is said by, so a Hearsay relabel moves it
@@ -180,8 +182,9 @@ passes with at most 2 false merges.
 
 - **Merged:** 50 observations with two or more captures, sampled, each shown as its least alike pair. Merges that
   quote the very same words are sampled only when there aren't 50 others.
-- **Near misses:** the 50 closest pairs that stayed apart: captures citing the same speech by segment descent,
-  scoring under 0.4.
+- **Near misses:** the 50 closest pairs of observations that stayed apart: captures citing the same speech by
+  segment descent, scoring under 0.4, each pair of observations once.
+- No two pairs on the sheet quote the same two things: re-reads repeat a capture's words, and each is asked once.
 - Both sets are shuffled together, sides in random order, with no score. I mark each pair `same`, `different` or
   `unsure`. A merged pair marked different (or unsure) is a false merge; a near miss marked same is a false split,
   which says the threshold could come down.
@@ -198,6 +201,12 @@ docker compose -f /mnt/fast/repos/ideamachine/install/compose.yaml run --rm \
 ```
 
 It reads only, and sends nothing to Claude.
+
+**First sheet, 2026-11-01:** stopped after 53 pairs, 26 of them merged. 2 false merges, both scoring under 0.4:
+each observation held two points, joined through a third capture that quoted both with "..." between them. True
+merges scored 0.429 and up, the one false split 0.294, so 0.4 stays; the join rule changed to every capture
+(migration 034 rebuilds observations). The near misses also repeated, one per pair of captures of the same two
+observations; the sheet now has each pair once. B5 reruns on a fresh sheet.
 
 **Rollback:** each new table and column drops cleanly, because nothing old reads them, and the dump is the backstop.
 The ledger (items, verdicts, feedback events) is never rewritten, only pointed at.

@@ -1,10 +1,14 @@
 """Observations (M2, docs/design/m2-observations-candidates-ideas.md): one thing Claude derived from one stretch of
 speech, outliving re-extraction.
 
-Each run gives every new item an observation. An item joins an existing one when one of the observation's items
-cites a segment its own segments descend from (supersession links, as `feedback.carry_verdicts` follows them) and
-the quotes match (`quote_score` >= CARRY_MIN_SCORE). That covers a re-read of re-transcribed or re-keyed speech,
-a reused read, and Claude capturing the same line twice in one read. Otherwise the item starts a new observation.
+Each run gives every new item an observation. An item can join an observation when one of its items cites a
+segment the item's own segments descend from (supersession links, as `feedback.carry_verdicts` follows them). It
+joins when its quote matches every capture already there (`quote_score` >= CARRY_MIN_SCORE), the best such
+observation if there are several. That covers a re-read of re-transcribed or re-keyed speech, a reused read, and
+Claude capturing the same line twice in one read. Otherwise the item starts a new observation.
+
+Every capture, not any one: Claude sometimes stitches two passages into one quote with "...", and that quote
+matches each passage, so matching any one capture chained two points into one observation (B5, 2026-11-01).
 """
 
 from im.feedback import CARRY_MIN_SCORE, quote_score
@@ -25,12 +29,16 @@ def assign_stage(conn) -> dict:
                                 WHERE observation_id IS NULL ORDER BY created_at, item_id""").fetchall()
         stats = {"new": 0, "joined": 0, "dropped": dropped}
         for item_id, quote, segs, created_at in items:
-            cands = conn.execute(
-                _ANCESTRY + """
-                   SELECT i.observation_id, i.quote FROM im.items i
-                   WHERE i.observation_id IS NOT NULL AND i.source_segment_ids && ARRAY(SELECT seg FROM a)""",
-                (segs,)).fetchall()
-            best = max(((quote_score(quote, q), str(o), o) for o, q in cands), default=None)
+            members: dict = {}
+            for o, q in conn.execute(
+                    _ANCESTRY + """
+                       SELECT i.observation_id, i.quote FROM im.items i
+                       WHERE i.observation_id IN (
+                         SELECT c.observation_id FROM im.items c
+                         WHERE c.source_segment_ids && ARRAY(SELECT seg FROM a))""", (segs,)):
+                members.setdefault(o, []).append(q)
+            best = max(((min(quote_score(quote, q) for q in qs), str(o), o) for o, qs in members.items()),
+                       default=None)
             if best and best[0] >= CARRY_MIN_SCORE:
                 observation = best[2]
                 stats["joined"] += 1
