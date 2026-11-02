@@ -39,6 +39,14 @@ def test_the_sheet_is_blind_and_draws_every_set(lattice_with_clusters, tmp_path)
         edge_audit.write(lattice_with_clusters, tmp_path)
 
 
+def test_a_sheet_has_as_many_pairs_as_asked_for(lattice_with_clusters):
+    # An evolves pair is usually a near pair too: drawing it twice mustn't leave the sheet short.
+    pool = edge_audit.candidates(lattice_with_clusters)
+    every = {tuple(p["ideas"]) for s in pool.values() for p in s}
+    for size in range(1, len(every) + 1):
+        assert len(edge_audit.build(lattice_with_clusters, size=size)[1]["pairs"]) == size
+
+
 def test_the_same_seed_makes_the_same_sheet(lattice_with_clusters):
     assert edge_audit.build(lattice_with_clusters, seed=1) == edge_audit.build(lattice_with_clusters, seed=1)
 

@@ -125,7 +125,8 @@ def build(conn, seed: int = 4, size: int = SIZE) -> tuple[str, dict]:
 
     take(rng.sample(pool["evolves"], len(pool["evolves"])), SHARE["evolves"], "evolves")
     take(rng.sample(pool["far"], min(len(pool["far"]), 10 * size)), SHARE["far"], "far")
-    take(_spread(pool["near"], size - len(picked)), size - len(picked), "near")
+    near = [p for p in pool["near"] if tuple(p["ideas"]) not in taken]   # an evolves pair is often a near one too
+    take(_spread(near, size - len(picked)), size - len(picked), "near")
     rng.shuffle(picked)
     for p in picked:
         p["sides"] = rng.sample(p["ideas"], 2)
