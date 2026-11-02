@@ -6,10 +6,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata && rm -r
 RUN pip install --no-cache-dir uv==0.12.2
 
 # Install from a throwaway copy: the host clone's files may be root-only, which the runtime user can't read.
+# Dependencies first, from the lock alone, so a code change reuses them and the model below: only a new uv.lock
+# (or model revision) downloads torch and the rest again.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 COPY pyproject.toml uv.lock README.md /src/
-COPY src /src/src
-RUN cd /src && UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-dev --extra models --no-editable \
-    && rm -rf /src /root/.cache
+RUN cd /src && uv sync --frozen --no-dev --extra models --no-install-project && rm -rf /root/.cache
 ENV PATH=/opt/venv/bin:$PATH
 
 # The embedding model, pinned and baked in so runs are offline and repeatable. refs/main points at the pinned
@@ -23,7 +24,11 @@ RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(
     && chmod -R a+rX /models
 ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 
-# Last, so a new commit doesn't rebuild the layers above.
+# Then Idea Machine itself, into the same environment.
+COPY src /src/src
+RUN cd /src && uv sync --frozen --no-dev --extra models --no-editable && rm -rf /src /root/.cache
+
+# Last, so a new commit doesn't rebuild the layers above (a code change rebuilds only the step before).
 ARG IM_COMMIT=unknown
 ENV IM_COMMIT=$IM_COMMIT
 USER 568:568

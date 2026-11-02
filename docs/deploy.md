@@ -114,5 +114,6 @@ tunnel's hostname, two WAF rules) and how to add the connector are in Lattice's 
 | Kept by hand (trial reports, exports) | `/mnt/fast/ideamachine/saved/` (root and apps only: they quote people) |
 | Clones | `/mnt/fast/repos/ideamachine`, `/mnt/fast/repos/lattice` (admin) |
 | Logs | `journalctl -t ideamachine-run` (and `-t ideamachine-backup`, `-t ideamachine-db`, `-t lattice`, `-t lattice-tunnel`) |
-| Run now | `docker compose -f /mnt/fast/repos/ideamachine/install/compose.yaml run --rm run` |
+| Run now | `im` as root (`install/bin/im`; `install/nas.sh` puts it on root's PATH), or `docker compose -f /mnt/fast/repos/ideamachine/install/compose.yaml run --rm run` |
+| Any im command | `im check`, `im lattice`, ...: the command runs in the pipeline image, with `saved/` at `/saved` |
 | psql | `docker compose -f /mnt/fast/repos/ideamachine/install/compose.yaml exec db psql -U postgres -d im` |
