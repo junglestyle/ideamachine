@@ -151,6 +151,27 @@ def test_a_re_read_joins_its_observations_cluster_unasked(seeded, cfg, stream):
                  lattice.CARRIED) == [("same_as", 3)]
 
 
+def test_a_re_read_shows_each_observation_once_with_my_verdict(seeded, cfg, stream):
+    # Evidence, review and the CLI's queue go by observation: a re-capture doesn't show twice, doesn't ask for my
+    # verdict again, and doesn't bring back a cluster I discarded.
+    lat_setup(seeded, cfg, stream)
+    observations.assign_stage(seeded)
+    v1 = dict(table(seeded, "SELECT quote, item_id FROM im.items"))
+    coffee, lora = (next(i for q, i in v1.items() if word in q) for word in ("coffee", "LoRa"))
+    extract.decide(seeded, coffee, "keep")
+    extract.decide(seeded, lora, "discard")
+    before = table(seeded, "SELECT idea_id, n_evidence, kept, discarded FROM pub.ideas ORDER BY idea_id")
+    extract.run_stage(seeded, FakeClaude(items_for), system=extract.system_prompt("v3"))
+    observations.assign_stage(seeded)
+    lattice.match_stage(seeded, FakeMatcher(), HashEmbedder())
+    assert table(seeded, "SELECT count(*) FROM im.items") == [(6,)]
+    assert table(seeded, "SELECT idea_id, n_evidence, kept, discarded FROM pub.ideas ORDER BY idea_id") == before
+    assert table(seeded, "SELECT item_id, verdict FROM pub.evidence WHERE verdict IS NOT NULL ORDER BY verdict") == \
+        [(lora, "discard"), (coffee, "keep")]   # the capture I judged stands for its observation
+    assert table(seeded, "SELECT count(*) FROM pub.review_items") == [(1,)]   # only the build line, once
+    assert len(extract.review_items(seeded)) == 1
+
+
 def test_two_captures_of_one_line_are_matched_once(seeded, cfg, stream):
     run(seeded, cfg, stream)
     extract.run_stage(seeded, FakeClaude(lambda text: items_for(text) * 2))

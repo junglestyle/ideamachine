@@ -393,14 +393,19 @@ def forgotten_sent(conn) -> list[tuple]:
 
 
 def review_items(conn) -> list[tuple]:
-    """Items on current episodes I haven't decided on yet: most confident first."""
+    """Captures on current episodes I haven't decided on yet, one per observation (a verdict or feedback on any of
+    its captures decides it, migration 037): most confident first."""
     return conn.execute(
-        """SELECT i.item_id, i.kind, w.said_by, i.quote, i.gist, i.themes, i.confidence, i.source_segment_ids,
-                  e.started_at, e.episode_id
-           FROM im.items i JOIN im.item_said_by w USING (item_id) JOIN im.episodes e USING (episode_id)
-           WHERE e.current AND NOT EXISTS (SELECT 1 FROM im.item_verdicts v WHERE v.item_id = i.item_id)
-             AND NOT EXISTS (SELECT 1 FROM pub.feedback_events f WHERE f.item_id = i.item_id)
-           ORDER BY i.confidence DESC, e.started_at DESC""").fetchall()
+        """SELECT * FROM (
+             SELECT DISTINCT ON (coalesce(i.observation_id, i.item_id))
+                    i.item_id, i.kind, w.said_by, i.quote, i.gist, i.themes, i.confidence, i.source_segment_ids,
+                    e.started_at, e.episode_id
+             FROM im.items i JOIN im.item_said_by w USING (item_id) JOIN im.episodes e USING (episode_id)
+             WHERE e.current AND NOT EXISTS (SELECT 1 FROM im.capture_verdict v WHERE v.item_id = i.item_id)
+               AND NOT EXISTS (SELECT 1 FROM im.items s JOIN pub.feedback_events f ON f.item_id = s.item_id
+                               WHERE s.item_id = i.item_id OR s.observation_id = i.observation_id)
+             ORDER BY coalesce(i.observation_id, i.item_id), i.created_at, i.item_id) r
+           ORDER BY confidence DESC, started_at DESC""").fetchall()
 
 
 def discards(conn) -> list[tuple]:

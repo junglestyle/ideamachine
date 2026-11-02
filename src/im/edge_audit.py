@@ -174,7 +174,7 @@ def build(conn, seed: int = 4, size: int = SIZE) -> tuple[str, dict]:
         lines += [f"## {n}", ""]
         for side, idea in zip("AB", p["sides"]):
             first, *rest = _side(conn, idea) or ["(nothing said on record)"]
-            lines += [f"{side}. {first}", *[f"   {x}" if x.startswith(">") else x for x in rest], ""]
+            lines += [f"{side}. {first.strip()}", *[f"   {x}" if x.startswith(">") else x for x in rest], ""]
         lines += ["mark: ", "note: ", ""]
     key = {"benchmark": "B4", "seed": seed, "size": size, "near_k": NEAR_K, "wide_k": WIDE_K,
            "available": {k: len(v) for k, v in pool.items()},
