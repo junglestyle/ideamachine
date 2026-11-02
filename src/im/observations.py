@@ -9,6 +9,9 @@ Claude capturing the same line twice in one read. Otherwise the item starts a ne
 
 Every capture, not any one: Claude sometimes stitches two passages into one quote with "...", and that quote
 matches each passage, so matching any one capture chained two points into one observation (B5, 2026-11-01).
+
+Not every observation is speech (migration 036). An idea I add gets one, of what I typed, and
+`im seed-observations` adds what I said into the ChatGPT Idea Machine. Those belong to their idea directly.
 """
 
 from im import citations
@@ -23,8 +26,8 @@ _ANCESTRY = """WITH RECURSIVE a(seg) AS (
 def assign_stage(conn) -> dict:
     with conn.transaction():
         # Forgetting and `im reset` delete items; an observation left with none goes too.
-        dropped = conn.execute("""DELETE FROM im.observations o
-                                  WHERE NOT EXISTS (SELECT 1 FROM im.items i WHERE i.observation_id = o.observation_id)
+        dropped = conn.execute("""DELETE FROM im.observations o WHERE o.source = 'speech'
+                                    AND NOT EXISTS (SELECT 1 FROM im.items i WHERE i.observation_id = o.observation_id)
                                """).rowcount
         items = conn.execute("""SELECT item_id, quote, source_segment_ids, created_at FROM im.items
                                 WHERE observation_id IS NULL ORDER BY created_at, item_id""").fetchall()
@@ -51,6 +54,21 @@ def assign_stage(conn) -> dict:
                        RETURNING observation_id""", (segs, created_at)).fetchone()
                 stats["new"] += 1
             conn.execute("UPDATE im.items SET observation_id = %s WHERE item_id = %s", (observation, item_id))
-        if items:
+        stats["typed"] = _typed(conn)
+        if items or stats["typed"]:
             citations.cite(conn)   # a new observation can be what an edge's end was made from
     return stats
+
+
+def _typed(conn) -> int:
+    """An idea I added gets one observation: what I typed (or approved), when, from its first idea_add event.
+    A correction later changes the idea's text, not what I said."""
+    return conn.execute("""
+        INSERT INTO im.observations (segment_ids, first_seen, source, idea_id, quote, said_at, said_by, conversation,
+                                     source_ref)
+        SELECT DISTINCT ON (f.idea_id) '{}', f.at, 'typed', f.idea_id, f.payload->>'statement', f.at, 'me',
+               'idea_add:' || f.event_id, 'idea_add:' || f.event_id
+        FROM pub.feedback_events f JOIN im.ideas d ON d.idea_id = f.idea_id AND d.origin = 'mine'
+        WHERE f.kind = 'idea_add'
+          AND NOT EXISTS (SELECT 1 FROM im.observations o WHERE o.idea_id = f.idea_id AND o.source = 'typed')
+        ORDER BY f.idea_id, f.event_id""").rowcount

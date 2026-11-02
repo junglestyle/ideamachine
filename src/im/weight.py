@@ -22,7 +22,7 @@ from im.config import WeightConfig
 def _signals(conn) -> dict:
     """Per cluster: my observations (conversation, when said), the others' count, canonical links, canonical.
 
-    Only current captures count, placed by their own segments: a superseded read's segments can carry a
+    Only current captures count (im.idea_observations), placed by their own segments: a superseded read's segments can carry a
     conversation id from before a re-key, which would count one conversation twice."""
     out = {r[0]: {"mine": [], "others": 0, "canonical_links": r[2], "canonical": r[1] == "canonical"}
            for r in conn.execute(
@@ -31,13 +31,9 @@ def _signals(conn) -> dict:
                             ON o.idea_id = CASE WHEN l.a = k.idea_id THEN l.b ELSE l.a END
                           WHERE (l.a = k.idea_id OR l.b = k.idea_id) AND o.kept_as = 'canonical')
                   FROM im.idea_kept k""")}
+    # Speech and not (migration 036): what I said into the ChatGPT Idea Machine, or typed adding an idea, recurs too.
     for idea_id, speaker, conversation, said_at in conn.execute(
-            """SELECT ev.idea_id, o.speaker, min(s.conversation_id), min(s.started_at)
-               FROM im.idea_evidence ev JOIN im.items i USING (item_id)
-               JOIN im.episodes e ON e.episode_id = i.episode_id AND e.current
-               JOIN im.observation_speaker o USING (observation_id)
-               JOIN im.source_segments s ON s.segment_id = ANY(i.source_segment_ids)
-               GROUP BY ev.idea_id, o.observation_id, o.speaker"""):
+            "SELECT idea_id, speaker, conversation, said_at FROM im.idea_observations"):
         if speaker == "me":
             out[idea_id]["mine"].append((conversation, said_at))
         else:

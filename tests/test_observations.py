@@ -24,22 +24,22 @@ def test_a_re_read_joins_the_observation_it_captured_before(pipe, cfg, stream):
     run(pipe, cfg, stream)
     claude = FakeClaude(capture(DATABASE))
     extract.run_stage(pipe, claude)
-    assert observations.assign_stage(pipe) == {"new": 1, "joined": 0, "dropped": 0}
+    assert observations.assign_stage(pipe) == {"new": 1, "joined": 0, "dropped": 0, "typed": 0}
     ((old, _),) = current_items(pipe)
 
     retranscribe(pipe, cfg, stream, claude)   # a new segment and episode, linked to the old one
     ((new, _),) = current_items(pipe)
     assert new != old
-    assert observations.assign_stage(pipe) == {"new": 0, "joined": 1, "dropped": 0}
+    assert observations.assign_stage(pipe) == {"new": 0, "joined": 1, "dropped": 0, "typed": 0}
     assert observation_of(pipe, new) == observation_of(pipe, old)
-    assert observations.assign_stage(pipe) == {"new": 0, "joined": 0, "dropped": 0}   # each item once
+    assert observations.assign_stage(pipe) == {"new": 0, "joined": 0, "dropped": 0, "typed": 0}   # each item once
     assert_invariants(pipe)
 
 
 def test_the_same_line_captured_twice_in_one_read_is_one_observation(pipe, cfg, stream):
     run(pipe, cfg, stream)
     extract.run_stage(pipe, FakeClaude(lambda text: capture(DATABASE)(text) * 2 + capture("coffee")(text)))
-    assert observations.assign_stage(pipe) == {"new": 2, "joined": 1, "dropped": 0}
+    assert observations.assign_stage(pipe) == {"new": 2, "joined": 1, "dropped": 0, "typed": 0}
     by_quote = {}
     for item_id, quote in current_items(pipe):
         by_quote.setdefault(quote, set()).add(observation_of(pipe, item_id))
@@ -88,7 +88,7 @@ def test_forgetting_takes_the_observation(seeded, cfg, stream):  # noqa: F811
     stream.write(stream.dir)
     run(seeded, cfg, stream)
     assert table(seeded, "SELECT count(*) FROM im.observations")[0][0] == before - 1
-    assert observations.assign_stage(seeded) == {"new": 0, "joined": 0, "dropped": 0}
+    assert observations.assign_stage(seeded) == {"new": 0, "joined": 0, "dropped": 0, "typed": 0}
     assert_invariants(seeded)
 
 
@@ -102,7 +102,7 @@ def test_a_stitched_quote_doesnt_chain_two_points_into_one_observation(pipe, cfg
     def respond(text):   # three captures of the database line; nothing on other episodes
         return [dict(line, quote=q) for line in capture(DATABASE)(text) for q in (HOSTING, STITCHED, MOVE)]
     extract.run_stage(pipe, FakeClaude(respond))
-    assert observations.assign_stage(pipe) == {"new": 2, "joined": 1, "dropped": 0}
+    assert observations.assign_stage(pipe) == {"new": 2, "joined": 1, "dropped": 0, "typed": 0}
     obs = dict(table(pipe, "SELECT quote, observation_id FROM im.items"))
     assert obs[HOSTING] != obs[MOVE]                       # B5's false merges: two points, one observation
     assert obs[STITCHED] in (obs[HOSTING], obs[MOVE])      # the stitched quote joins one of them, whichever came first

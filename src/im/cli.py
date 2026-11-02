@@ -340,6 +340,20 @@ def cmd_audit_dedupe(args) -> None:
         _print(dedupe_audit.write(conn, Path(args.folder), args.seed))
 
 
+def cmd_seed_observations(args) -> None:
+    """What I said into the ChatGPT Idea Machine, as observations of its archive ideas. Shows the plan; --write adds."""
+    from pathlib import Path
+
+    from im import archive_observations as ao
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        p = ao.plan(conn, Path(args.path).read_text(), args.name, set(args.not_me or []), args.tz)
+        out = ao.report(p)
+        if args.write:
+            out["written"] = ao.write(conn, p)
+    _print(out)
+
+
 def cmd_web(args) -> None:
     """Serve the neutral view as Lattice's role (LATTICE_DATABASE_URL), never as im_pipeline."""
     from im import web
@@ -578,6 +592,15 @@ def main(argv=None) -> None:
     ad.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
     ad.add_argument("--seed", type=int, default=5, help="the sample and shuffle's seed")
     ad.set_defaults(func=cmd_audit_dedupe)
+    so = sub.add_parser("seed-observations",
+                        help="what I said into the ChatGPT Idea Machine, from its export, as archive observations")
+    so.add_argument("path", help="the conversation's export (Markdown), e.g. /saved/chatgpt-idea-machine.md")
+    so.add_argument("--name", default="chatgpt", help="the archive's prefix, as im seed was given (default chatgpt)")
+    so.add_argument("--not-me", type=int, action="append", metavar="N",
+                    help="archive idea N was someone else's (e.g. a point I passed on); repeat for more")
+    so.add_argument("--tz", default="America/New_York", help="the time zone the export's times are in")
+    so.add_argument("--write", action="store_true", help="add them (without it, only show what would be added)")
+    so.set_defaults(func=cmd_seed_observations)
     sd = sub.add_parser("seed", help="import an idea archive into the lattice (its clusters become pinned themes)")
     sd.add_argument("path", help="the archive, e.g. ~/.local/share/ideamachine/seeds/chatgpt-archive.md")
     sd.add_argument("--name", default="chatgpt", help="prefix for its references, e.g. chatgpt#17")
