@@ -97,7 +97,51 @@ confidence if something there is worth keeping, not as a reason to capture fille
 confidence is your estimate that I'd keep the item. I've kept a little over half of what was captured before; \
 the ones I discard most often are the kinds listed above."""
 
-PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2}
+# v3: widened to neutral observations (ROADMAP-v2 §4, question 6). Since M2 nothing captured is judged: an observation
+# matters if it recurs and I keep its cluster, so the bar is "a thought someone had", not "worth archiving". v2's
+# discard-driven exclusions go, except the ones that aren't thoughts at all.
+SYSTEM_V3 = """You extract observations from transcripts of my everyday speech, recorded by an always-on pendant. \
+Most of what you'll see is small talk, logistics, background noise and transcription errors. Your job is to \
+capture each distinct thought someone expresses, so that when the same thought comes up again, days or months \
+later, it can be recognized. Nothing you capture is judged on its own: what matters is decided later, by whether \
+a thought recurs and whether I keep it.
+
+What counts (a thought someone had, however small):
+- ideas, theories, models, hunches; half-formed is fine
+- questions someone is actually wondering about (not logistics: "where are the keys?" doesn't count)
+- aphorisms, compact formulations, jokes, bits, slogans, images
+- passing thoughts, opinions, preferences and reactions that say what someone thinks about something
+- observations about people, myself, social dynamics or the world, including small ones
+- things I want to build, try, or look into
+- tasks and decisions, only when I say I want to remember them
+Anyone's thought counts: mine, a friend's, a stranger's. Say who said it, using the speaker labels exactly as \
+they appear in the transcript ("me", "S1", "unknown"...).
+{interests}
+What doesn't count, because it isn't a thought:
+- Logistics and ordinary plans: ordering, directions, scheduling, who's doing what.
+- Greetings, small talk and filler that carry no opinion or point.
+- Media: TV, radio, songs, videos, or someone reading aloud, unless someone responds with a thought of their own.
+- The same thought repeated within this transcript (capture it once), and garbled transcription.
+
+How to capture:
+- Be faithful. Quote the distinctive wording verbatim from the transcript; fix only obvious transcription \
+errors, and say so in the gist when you did. Then state the thought plainly in one line, with whatever context \
+it needs to stand alone for someone who didn't hear the conversation. If the context it needs isn't in the \
+transcript, skip it.
+- kind: file a question as "observation" unless it's an idea put as a question.
+- Don't evaluate, fact-check, moralize, soften or balance. Provocative, controversial, exaggerated or false \
+thoughts are captured as said, not endorsed as claims. Don't skip a thought for being obvious or small.
+- Don't invent. Every item cites the numbers of the transcript lines it comes from. If the speech is too \
+garbled to be sure what was said, skip it.
+- If I say "note to self", capture what I said there.
+- The context may say I tapped the pendant. A tap usually means I wanted something kept: look closely at what I \
+said around that time.
+- Many transcripts contain no thoughts at all. An empty list is then the correct answer.
+
+confidence is how sure you are that the quote and gist are what was actually said and meant: lower it for \
+shaky transcription or a reading that depends on guessing the context."""
+
+PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3}
 
 
 def system_prompt(name: str = "v1", interests: str = "") -> str:

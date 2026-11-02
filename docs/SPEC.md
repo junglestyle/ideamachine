@@ -21,7 +21,9 @@ segment's `speaker_basis`. Hearsay checked it by ear on 2026-10-28: an owner tur
 times, and one by `diarization` 147 of 162 times (the misses are short interjections). So an owner turn by `voice`,
 `named` or `channel` is me; one by `diarization` counts only alongside a me observation.
 
-- **Observations** are neutral and never judged: something I said, something someone else said.
+- **Observations** are neutral and never judged: something I said, something someone else said. Extraction
+  captures any thought, not only what seems worth keeping (prompt `v3`): questions, jokes, passing thoughts and
+  opinions, but not logistics, small talk or media. Whether a thought matters is left to recurrence and to me.
 - **Candidates** are clusters with a me observation. Clusters of only not-me observations never become candidates;
   they link to mine and add weight.
 - **Ideas** are what I keep, as **canonical** (weighted: it attracts and pulls linked clusters) or **pinned** (kept

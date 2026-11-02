@@ -51,7 +51,9 @@ model (B3; Opus stayed in 2026-10).
 3. ~~Which statuses can the operator set directly?~~ Only I make ideas, kept as canonical or pinned; a star is a pin (2026-10-28).
 4. ~~My point and someone else's: one cluster or two?~~ One: theirs joins mine as a not-me member (2026-10-28).
 5. ~~Digest points or a synthesis stage?~~ A stage of its own, triggered by weight, after M2 (2026-10-28).
-6. Widening extraction to neutral observations (questions, jokes, passing thoughts): yes, after M2; when?
+6. ~~Widening extraction to neutral observations (questions, jokes, passing thoughts): yes, after M2; when?~~ Now
+   (2026-11-02): prompt `v3`. A re-read's captures of speech already captured join their observation's cluster
+   without asking the matcher, so it costs about one extraction pass. Trial it, then switch `extract.prompt`.
 7. Does Emanation keep a stable global layout? [0005](decisions/0005-presentation-inside-idea-machine.md) drops
    global map positions for lens projections; the [M6 notes](design/m6-emanation.md) argue for a persisted sky with
    lenses as zoom.
