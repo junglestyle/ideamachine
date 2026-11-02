@@ -1,4 +1,4 @@
-"""B4 pilot: the blind sheet of pairs of clusters, and tallying my marks on it."""
+"""B4: the blind sheet of pairs of clusters, and tallying my marks on it."""
 
 import json
 import re
@@ -34,6 +34,7 @@ def test_the_sheet_is_blind_and_draws_every_set(lattice_with_clusters, tmp_path)
     assert len({tuple(p["ideas"]) for p in key["pairs"].values()}) == out["pairs"]   # no pair twice
     body = (tmp_path / "sheet.md").read_text().split("\n## 1\n", 1)[1]
     assert "Signal may not be true" in body and "> \"" in body   # statements, and quotes of what was said
+    assert body.index("> \"") < body.index("Claude's summary")   # what was said comes first
     assert not re.search(r"near|evolves|far|similar|0\.\d", body)   # nothing says why a pair is there
     with pytest.raises(SystemExit):   # never over my marks
         edge_audit.write(lattice_with_clusters, tmp_path)
@@ -60,7 +61,7 @@ def test_scoring_tallies_labels_direction_and_notes(lattice_with_clusters, tmp_p
     assert r["missing"] == [] and r["by_set"]["evolves"] == {"extends": 1}
     assert r["direction_given"] == "1 of 1" and [m["direction"] for m in r["marks"] if m["set"] == "evolves"] == ["B>A"]
     near = sum(r["by_set"]["near"].values())
-    assert near and r["contradicts_among_near"] == f"{near} of {near}"
+    assert near and r["by_set"]["near"] == {"contradicts": near}
     assert [n["note"] for n in r["notes"]] == ["a later version, not an extension"]
 
 

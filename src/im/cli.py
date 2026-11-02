@@ -336,7 +336,7 @@ def cmd_tune(args) -> None:
 
 
 def cmd_audit_edges(args) -> None:
-    """B4 pilot: a blind sheet of pairs of clusters for me to type, then what my marks say about the labels."""
+    """B4: a blind sheet of pairs of clusters for me to type, then my marks tallied."""
     from pathlib import Path
 
     from im import edge_audit
@@ -614,11 +614,11 @@ def main(argv=None) -> None:
     ad.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
     ad.add_argument("--seed", type=int, default=5, help="the sample and shuffle's seed")
     ad.set_defaults(func=cmd_audit_dedupe)
-    ae = sub.add_parser("audit-edges", help="B4 pilot: a blind sheet of pairs of clusters to type; tally my marks")
+    ae = sub.add_parser("audit-edges", help="B4: a blind sheet of pairs of clusters to type; tally my marks")
     ae.add_argument("action", choices=["sheet", "score"])
     ae.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
     ae.add_argument("--seed", type=int, default=4, help="the sample and shuffle's seed")
-    ae.add_argument("--size", type=int, default=20, help="how many pairs")
+    ae.add_argument("--size", type=int, default=50, help="how many pairs")
     ae.set_defaults(func=cmd_audit_edges)
     so = sub.add_parser("seed-observations",
                         help="what I said into the ChatGPT Idea Machine, from its export, as archive observations")
