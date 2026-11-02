@@ -99,9 +99,8 @@ STITCHED = HOSTING[:-1] + "... " + MOVE   # two passages Claude joined with "...
 
 def test_a_stitched_quote_doesnt_chain_two_points_into_one_observation(pipe, cfg, stream):
     run(pipe, cfg, stream)
-    def respond(text):
-        (line,) = capture(DATABASE)(text)
-        return [dict(line, quote=q) for q in (HOSTING, STITCHED, MOVE)]
+    def respond(text):   # three captures of the database line; nothing on other episodes
+        return [dict(line, quote=q) for line in capture(DATABASE)(text) for q in (HOSTING, STITCHED, MOVE)]
     extract.run_stage(pipe, FakeClaude(respond))
     assert observations.assign_stage(pipe) == {"new": 2, "joined": 1, "dropped": 0}
     obs = dict(table(pipe, "SELECT quote, observation_id FROM im.items"))
