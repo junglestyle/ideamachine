@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from im import egress
+from im import citations, egress
 
 MATCH_K = 5                    # nearest ideas shown to Claude
 RELATED_K, RELATED_MIN = 3, 0.70   # related edges: top 3 neighbours at cosine >= 0.70. bge-small puts a typical
@@ -281,6 +281,7 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
                             VALUES (%s, %s, %s, %s, %s)""", (item_id, decision, idea, version, egress_id))
         stats[decision] += 1
     stats["related_links"] = relate(conn, embedder)
+    stats["cited_links"] = citations.cite(conn)
     stats["positions"] = place(conn, embedder.model_version)
     return stats
 
@@ -301,10 +302,11 @@ def relate(conn, embedder) -> int:
                 if S[i, j] >= RELATED_MIN:
                     edges.add((min(i, j), max(i, j), float(S[i, j])))
         with conn.cursor() as cur:
-            cur.executemany("""INSERT INTO im.idea_links (a, b, kind, weight, method) VALUES (%s, %s, 'related', %s, %s)
-                               ON CONFLICT DO NOTHING""",
-                            [(ids[i], ids[j], round(w, 4), method) for i, j, w in edges])
+            cur.executemany("""INSERT INTO im.idea_links (a, b, kind, weight, confidence, method)
+                               VALUES (%s, %s, 'related', %s, %s, %s) ON CONFLICT DO NOTHING""",
+                            [(ids[i], ids[j], round(w, 4), round(w, 4), method) for i, j, w in edges])
     return len(edges)
+
 
 
 POSITIONS_METHOD = "pca2;placed-ideas-stay;new-near-neighbours"
