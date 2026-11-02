@@ -281,13 +281,13 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
                             VALUES (%s, %s, %s, %s, %s)""", (item_id, decision, idea, version, egress_id))
         stats[decision] += 1
     stats["related_links"] = relate(conn, embedder)
-    stats["cited_links"] = citations.cite(conn)
     stats["positions"] = place(conn, embedder.model_version)
     return stats
 
 
 def relate(conn, embedder) -> int:
-    """Rebuild the derived `related` edges: each idea's nearest neighbours above RELATED_MIN."""
+    """Rebuild the derived `related` edges: each idea's nearest neighbours above RELATED_MIN. They're cited as
+    they're rebuilt, whichever path called this (an idle run rebuilds them too), along with any new evolves edge."""
     ids, M = _idea_matrix(conn, embedder)
     method = f"embedding:{embedder.model_version};k={RELATED_K};min={RELATED_MIN}"
     with conn.transaction():
@@ -305,6 +305,7 @@ def relate(conn, embedder) -> int:
             cur.executemany("""INSERT INTO im.idea_links (a, b, kind, weight, confidence, method)
                                VALUES (%s, %s, 'related', %s, %s, %s) ON CONFLICT DO NOTHING""",
                             [(ids[i], ids[j], round(w, 4), round(w, 4), method) for i, j, w in edges])
+        citations.cite(conn)
     return len(edges)
 
 

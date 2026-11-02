@@ -58,3 +58,14 @@ def test_a_citation_to_an_observation_thats_gone_is_dropped(seeded, cfg, stream)
                    ([build, uuid.uuid4()],))
     assert citations.uncite_missing(seeded) == 1
     assert edges(seeded, ["evolves"]) == {"evolves": [build]}
+
+
+def test_an_idle_run_keeps_its_citations(seeded, cfg, stream, monkeypatch):
+    """A run with nothing new to match still rebuilds the related edges, and must cite them (seen on the NAS)."""
+    monkeypatch.setattr(lattice, "RELATED_MIN", -1.0)   # every idea gets its nearest neighbours
+    matched(seeded, cfg, stream)
+    before = table(seeded, "SELECT a, b, kind, cited_observation_ids FROM im.idea_links ORDER BY 1, 2, 3")
+    assert any(kind == "related" and cited for _, _, kind, cited in before)
+    assert lattice.match_stage(seeded, FakeMatcher(), HashEmbedder())["pending"] == 0
+    assert table(seeded, "SELECT a, b, kind, cited_observation_ids FROM im.idea_links ORDER BY 1, 2, 3") == before
+    assert_invariants(seeded)
