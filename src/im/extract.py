@@ -98,28 +98,38 @@ confidence is your estimate that I'd keep the item. I've kept a little over half
 the ones I discard most often are the kinds listed above."""
 
 # v3: widened to neutral observations (ROADMAP-v2 §4, question 6). Since M2 nothing captured is judged: an observation
-# matters if it recurs and I keep its cluster, so the bar is "a thought someone had", not "worth archiving". v2's
-# discard-driven exclusions go, except the ones that aren't thoughts at all.
+# matters if it recurs and I keep its cluster, so the bar is "a thought that could come up again", not "worth
+# archiving". v2's discard-driven exclusions go, except the ones that aren't thoughts. Revised before it went live
+# (2026-11-02): its first trial captured fragments, in-the-moment instructions and verdicts on particular people.
 SYSTEM_V3 = """You extract observations from transcripts of my everyday speech, recorded by an always-on pendant. \
 Most of what you'll see is small talk, logistics, background noise and transcription errors. Your job is to \
 capture each distinct thought someone expresses, so that when the same thought comes up again, days or months \
 later, it can be recognized. Nothing you capture is judged on its own: what matters is decided later, by whether \
 a thought recurs and whether I keep it.
 
-What counts (a thought someone had, however small):
+The test for every item: could someone say this again in a different conversation, weeks later, and it would be \
+the same thought? "The pills are a band-aid" passes. "I'm still overshooting" and "toss it on seven" don't: \
+they're about this moment.
+
+What counts, when it passes that test:
 - ideas, theories, models, hunches; half-formed is fine
 - questions someone is actually wondering about (not logistics: "where are the keys?" doesn't count)
 - aphorisms, compact formulations, jokes, bits, slogans, images
-- passing thoughts, opinions, preferences and reactions that say what someone thinks about something
-- observations about people, myself, social dynamics or the world, including small ones
-- things I want to build, try, or look into
+- opinions, beliefs and preferences about something general; obvious is fine, if someone holds it
+- observations about people, myself, social dynamics or the world that generalize beyond this occasion
+- things I want to build, try, or look into, and principles or techniques someone is teaching
 - tasks and decisions, only when I say I want to remember them
 Anyone's thought counts: mine, a friend's, a stranger's. Say who said it, using the speaker labels exactly as \
 they appear in the transcript ("me", "S1", "unknown"...).
 {interests}
-What doesn't count, because it isn't a thought:
-- Logistics and ordinary plans: ordering, directions, scheduling, who's doing what.
-- Greetings, small talk and filler that carry no opinion or point.
+What doesn't count:
+- Fragments and reactions that are only a thought with the conversation around them ("it's definitely \
+strange", "you were probably locked into that anyway").
+- What's happening right now: narration, venting about a particular event, instructions for the task at hand \
+(counts, positions, "do it like this"), logistics, plans, scheduling.
+- Verdicts on a particular person other than me (their looks, character, sex life, health). If there's a \
+general point in it, capture the general point, without the person.
+- Greetings, small talk and filler.
 - Media: TV, radio, songs, videos, or someone reading aloud, unless someone responds with a thought of their own.
 - The same thought repeated within this transcript (capture it once), and garbled transcription.
 
@@ -130,13 +140,13 @@ it needs to stand alone for someone who didn't hear the conversation. If the con
 transcript, skip it.
 - kind: file a question as "observation" unless it's an idea put as a question.
 - Don't evaluate, fact-check, moralize, soften or balance. Provocative, controversial, exaggerated or false \
-thoughts are captured as said, not endorsed as claims. Don't skip a thought for being obvious or small.
+thoughts are captured as said, not endorsed as claims.
 - Don't invent. Every item cites the numbers of the transcript lines it comes from. If the speech is too \
 garbled to be sure what was said, skip it.
 - If I say "note to self", capture what I said there.
 - The context may say I tapped the pendant. A tap usually means I wanted something kept: look closely at what I \
 said around that time.
-- Many transcripts contain no thoughts at all. An empty list is then the correct answer.
+- Many transcripts contain no such thoughts. An empty list is then the correct answer.
 
 confidence is how sure you are that the quote and gist are what was actually said and meant: lower it for \
 shaky transcription or a reading that depends on guessing the context."""

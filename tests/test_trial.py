@@ -24,7 +24,7 @@ def test_interests_fill_v2s_slot_and_are_part_of_its_version():
 def test_v3_widens_to_neutral_observations_with_the_same_slot():
     v3 = extract.system_prompt("v3", "model railways")
     assert "{interests}" not in v3 and "model railways" in v3
-    assert "questions someone is actually wondering about" in v3 and "Don't skip a thought for being obvious" in v3
+    assert "questions someone is actually wondering about" in v3 and "in a different conversation, weeks later" in v3
     assert extract.prompt_version("claude-opus-5-5", "medium", v3) != \
         extract.prompt_version("claude-opus-5-5", "medium", extract.system_prompt("v2", "model railways"))
 
