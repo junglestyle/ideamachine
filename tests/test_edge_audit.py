@@ -61,7 +61,7 @@ def test_scoring_tallies_labels_direction_and_notes(lattice_with_clusters, tmp_p
     assert r["missing"] == [] and r["by_set"]["evolves"] == {"extends": 1}
     assert r["direction_given"] == "1 of 1" and [m["direction"] for m in r["marks"] if m["set"] == "evolves"] == ["B>A"]
     near = sum(r["by_set"]["near"].values())
-    assert near and r["contradicts_among_near"] == f"{near} of {near}"
+    assert near and r["by_set"]["near"] == {"contradicts": near}
     assert [n["note"] for n in r["notes"]] == ["a later version, not an extension"]
 
 
