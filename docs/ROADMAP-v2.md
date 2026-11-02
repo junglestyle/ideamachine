@@ -12,7 +12,7 @@ Each one leaves the system working and Lattice usable until M6.
 | M0 | Freeze V1 | `v1` tagged on all three repos; Lattice feature-frozen; [decision 0005](decisions/0005-presentation-inside-idea-machine.md) | done |
 | v1.1 | Stop re-spending on unchanged payloads | A naming change sends nothing to Claude and re-matches nothing ([#10](https://github.com/junglestyle/ideamachine/pull/10)) | done |
 | M1 | Stable segment identity | Naming produces no new segments or episodes, and no requests unless the pseudonymized payload changed; extractions per current episode ≤ 1.05; every verdict reachable, every item cites current segments, `pub.ideas` unchanged | [design](design/m1-segment-identity.md) |
-| M2 | Observations, clusters, candidates, weight; ideas I keep (canonical or pinned); proposals; edge citations | B5 passes; every cluster weighted; `pub.ideas` returns the same ids; Lattice works unchanged | [design](design/m2-observations-candidates-ideas.md) |
+| M2 | Observations, clusters, candidates, weight; ideas I keep (canonical or pinned); proposals; edge citations | B5 passes; every cluster weighted; `pub.ideas` returns the same ids; Lattice works unchanged | done 2026-11-01 ([design](design/m2-observations-candidates-ideas.md)) |
 | Synthesis | A stage triggered by weight: consolidates a cluster's statement or bridges several into a candidate, citing observations; arrives as a proposal | Versioned and capped; I keep a fair share of what it proposes | after M2 |
 | M3 | ~~Tune weight and proposals~~ No rating: proposals neutral, newest first | Closed without tuning: no signal predicted what I keep | [0007](decisions/0007-neutral-proposals.md) |
 | M4 | Jev for match decisions and edge typing, behind versioned `judged_by` | B1 and B4 pass; no rise in duplicate ideas | at M4 |
@@ -20,7 +20,7 @@ Each one leaves the system working and Lattice usable until M6.
 | M6 | Emanation UI; cut over; archive Lattice | Parity checklist from Lattice's tools and views; a week of use without falling back | at M6 |
 | M7 | Local titles | B6 (local titles via Corral) passes | at M7 |
 
-**Hold:** Hearsay's audio retention stays off until M2 validates. Raw audio is the rollback for the re-link.
+~~**Hold:** Hearsay's audio retention stays off until M2 validates. Raw audio is the rollback for the re-link.~~ Lifted 2026-11-01: M2 validated, and nothing in Idea Machine needs the audio.
 
 ## 2. Benchmarks
 

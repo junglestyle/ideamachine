@@ -1,6 +1,7 @@
 # M2 design: observations, candidates and ideas
 
-_2026-10-28. Status: approved, building. Milestone M2 in [ROADMAP-v2.md](../ROADMAP-v2.md); my decisions, worked
+_2026-10-28. Status: done 2026-11-01 (B5 passed; edges cite observations; archive and typed ideas have
+observations of their own). Milestone M2 in [ROADMAP-v2.md](../ROADMAP-v2.md); my decisions, worked
 out in the M2 design thread. It replaces the provisional/promoted lifecycle in the V2 spec._
 
 ## Summary
