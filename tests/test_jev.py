@@ -26,7 +26,7 @@ def test_a_tension_is_four_atomic_questions_and_the_strongest_counts():
     client, sent = fake({"trade_off": 0.82})
     p, meta = client.ask("tension", {"a": {"said": []}, "b": {"said": []}})
     body = sent[0]
-    assert body["model"] == "jev-1.14.0" and set(body["questions"]) == set(jev.QUESTIONS["tension"])
+    assert body["model"] == "typesafe/jev-1.14" and set(body["questions"]) == set(jev.QUESTIONS["tension"])
     assert all(q["type"] == "noul" for q in body["questions"].values())
     assert body["questions"]["trade_off"]["criteria"]["true"].startswith("Each gives up")
     assert p["p"] == 0.82 and jev.answer(p["p"]) == "yes"
@@ -60,3 +60,16 @@ def test_jev_drafts_a_sheet_from_structured_state_with_names_pseudonymized(latti
     quotes, qsent = fake({})
     probe_audit.draft(lattice_with_clusters, quotes, tmp_path, "jev-1.14.0", quotes_only=True)
     assert all("summary" not in b["state"]["a"] for b in qsent)
+
+
+def test_the_route_decides_the_endpoint_key_and_model_name(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-key")
+    via = jev.Jev()
+    assert (via.route, via.url, via.key, via.sent_as) == ("openrouter", "https://openrouter.ai/api/v1/systemone",
+                                                          "or-key", "typesafe/jev-1.14")
+    direct = jev.Jev(route="typesafe")
+    assert (direct.url, direct.key, direct.sent_as) == ("https://api.typesafe.ai/v1/systemone", "ts-key",
+                                                        "jev-1.14.0")
+    monkeypatch.delenv("OPENROUTER_API_KEY")
+    assert jev.Jev().route == "typesafe"

@@ -139,7 +139,8 @@ fi
 # pseudonym, and so every payload. Backed up with the rest of config/.
 env_ensure "$NAS_PIPELINE_ENV" IM_NAME_KEY "$(openssl rand -hex 32)"
 # OPENROUTER_API_KEY (optional, by hand in pipeline.env): other providers' models, for `im trial` and edge drafts.
-# TYPESAFE_API_KEY (optional, by hand): Jev, TypeSafe's decision model, for drafts of the probe sheets (im.jev).
+# Jev (im.jev) goes through OpenRouter on its key, with zero retention; TYPESAFE_API_KEY (optional) calls TypeSafe
+# directly instead.
 env_ensure "$NAS_LATTICE_ENV" LATTICE_DATABASE_URL \
     "postgresql://lattice_app:$(env_get "$NAS_DB_ENV" LATTICE_APP_PASSWORD)@db:5432/im"
 env_ensure "$NAS_LATTICE_ENV" LATTICE_TOKEN "$(openssl rand -base64 24 | tr -d '/+=')"

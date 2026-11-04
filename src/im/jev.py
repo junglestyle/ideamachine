@@ -7,7 +7,9 @@ against my marks beside the chat models. Every question's wording is in this mod
 forms (a tension can be a contradiction, a change of mind, a trade-off or competing pulls) is asked as one Noul
 per form and combined in code, as TypeSafe recommends.
 
-Price: $0.042 per million input tokens; output is free. The key is TYPESAFE_API_KEY (config/pipeline.env).
+It's reached through OpenRouter by default, which serves TypeSafe's own API (not a chat format) with zero data
+retention, on the same OPENROUTER_API_KEY as the other models; with only TYPESAFE_API_KEY set, it goes to TypeSafe
+directly, where zero retention is for enterprise accounts. Price: $0.042 per million input tokens; output is free.
 """
 
 import json
@@ -17,7 +19,11 @@ import urllib.request
 
 from im import llm
 
-URL = "https://api.typesafe.ai/v1/systemone"
+ROUTES = {   # (endpoint, key's environment variable, how the model is named there)
+    "openrouter": ("https://openrouter.ai/api/v1/systemone", "OPENROUTER_API_KEY",
+                   lambda m: "typesafe/" + m.rsplit(".", 1)[0]),
+    "typesafe": ("https://api.typesafe.ai/v1/systemone", "TYPESAFE_API_KEY", lambda m: m),
+}
 MODEL = "jev-1.14.0"               # pinned: an alias (jev-latest) can change answers without a change here
 PRICE_IN = 0.042 / 1e6             # $ per input token
 YES, NO = 0.7, 0.3                 # TypeSafe's starting thresholds: between them, the state doesn't settle it
@@ -61,14 +67,20 @@ def answer(p: float) -> str:
 
 
 class Jev:
-    def __init__(self, key: str | None = None, post=None, model: str = MODEL):
-        self.key, self.model = key or os.environ.get("TYPESAFE_API_KEY"), model
+    """`model` is TypeSafe's versioned ID (jev-1.14.0); `route` is openrouter (the default, when its key is set) or
+    typesafe."""
+
+    def __init__(self, key: str | None = None, post=None, model: str = MODEL, route: str | None = None):
+        self.route = route or ("openrouter" if os.environ.get("OPENROUTER_API_KEY") or post else "typesafe")
+        self.url, env, named = ROUTES[self.route]
+        self.model, self.sent_as = model, named(model)
+        self.key = key or os.environ.get(env)
         if not self.key and post is None:
-            raise SystemExit("TYPESAFE_API_KEY isn't set: Jev needs it (config/pipeline.env)")
+            raise SystemExit("Jev needs OPENROUTER_API_KEY (zero retention) or TYPESAFE_API_KEY (config/pipeline.env)")
         self.post = post or self._post
 
     def _post(self, body: dict) -> dict:
-        req = urllib.request.Request(URL, data=json.dumps(body).encode(), headers={
+        req = urllib.request.Request(self.url, data=json.dumps(body).encode(), headers={
             "Authorization": f"Bearer {self.key}", "Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=120) as r:
@@ -76,16 +88,16 @@ class Jev:
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]
             if e.code == 429 or e.code >= 500:
-                raise llm.Unavailable(f"TypeSafe HTTP {e.code}: {detail}") from None
-            raise RuntimeError(f"TypeSafe HTTP {e.code}: {detail}") from None
+                raise llm.Unavailable(f"Jev via {self.route}, HTTP {e.code}: {detail}") from None
+            raise RuntimeError(f"Jev via {self.route}, HTTP {e.code}: {detail}") from None
         except (urllib.error.URLError, TimeoutError) as e:
-            raise llm.Unavailable(f"TypeSafe: {e}") from None
+            raise llm.Unavailable(f"Jev via {self.route}: {e}") from None
 
     def body(self, question: str, state: dict) -> dict:
         qs = {}
         for name, (instructions, criteria) in QUESTIONS[question].items():
             qs[name] = {"type": "noul", "instructions": instructions, **({"criteria": criteria} if criteria else {})}
-        return {"model": self.model, "state": state, "questions": qs}
+        return {"model": self.sent_as, "state": state, "questions": qs}
 
     def ask(self, question: str, state: dict) -> tuple[dict, dict]:
         """The atomic probabilities and the combined one, and what the request cost: ({name: p, "p": p}, usage)."""
