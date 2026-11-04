@@ -394,8 +394,13 @@ def cmd_audit_probe(args) -> None:
             from im import llm, names
 
             scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
-            _print(probe_audit.draft(conn, llm.client_for(args.model), folder, args.model, args.effort, scrubber,
-                                     args.quotes_only))
+            if args.model.startswith("jev"):
+                from im import jev
+
+                client = jev.Jev(model=args.model)
+            else:
+                client = llm.client_for(args.model)
+            _print(probe_audit.draft(conn, client, folder, args.model, args.effort, scrubber, args.quotes_only))
             return
         if args.question == "summary":
             from im import summary_audit
@@ -731,7 +736,8 @@ def main(argv=None) -> None:
         pa.add_argument("action", choices=["sheet", "draft", "score"])
         pa.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
         pa.add_argument("--seed", type=int, default=9, help="the sample and shuffle's seed")
-        pa.add_argument("--model", default="claude-opus-5-5", help="draft: the model answering, e.g. z-ai/glm-5.3")
+        pa.add_argument("--model", default="claude-opus-5-5",
+                        help="draft: the model answering, e.g. z-ai/glm-5.3, or jev-1.14.0 (TypeSafe's Jev)")
         pa.add_argument("--effort", default="low", help="draft: its effort")
         pa.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names")
         pa.add_argument("--quotes-only", action="store_true", help="draft: show the model what was said, no summaries")

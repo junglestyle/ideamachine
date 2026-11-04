@@ -64,6 +64,10 @@ with any prompt switch, as one re-read.
 
 - Third parties' words now go to whichever provider a trial names, under OpenRouter's no-retention routing. That's
   my call; the egress log records the model, provider (`served_by`) and policy of every request.
+- Jev (TypeSafe, `im.jev`, 2026-11-04) takes typed yes/no questions about structured state, not chat, under the
+  same policy C. It goes through OpenRouter (`typesafe/jev-1.14`), which serves TypeSafe's own API with zero data
+  retention, on the OpenRouter key; TypeSafe directly (TYPESAFE_API_KEY) is the fallback, where zero retention is
+  for enterprise accounts only.
 - `IM_NAME_KEY` must never change: a new key changes every pseudonym, so every payload, so everything is re-read.
   It lives in `config/pipeline.env`, backed up with the rest of config.
 - Pseudonyms are linkable across requests by design. A provider could learn that `P-K3M7Q` comes up often, never

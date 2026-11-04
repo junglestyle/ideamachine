@@ -312,6 +312,71 @@ QUOTES_ONLY = ("Each side shows what was said, then a summary of it; judge by wh
                "be wrong.", "Each side shows what was said.")
 
 
+def _state(conn, question: str, p: dict, quotes_only: bool) -> dict:
+    """What Jev is asked about, as named fields: the two clusters, or a capture's lines, quote and summary."""
+    if question == "summary":
+        lines = conn.execute(
+            """SELECT s.speaker_kind = 'owner', s.text FROM unnest(%s::uuid[]) WITH ORDINALITY u(id, n)
+               JOIN im.source_segments s ON s.segment_id = u.id ORDER BY u.n""", (p["segments"],)).fetchall()
+        return {"lines": [{"by": "me" if me else "someone", "words": t} for me, t in lines],
+                "quote": p["quote"], "summary": p["gist"]}
+    sides = {}
+    for name, idea in zip("ab", p["sides"]):
+        side = edge_audit.side_data(conn, idea)
+        sides[name] = {k: v for k, v in side.items() if not (quotes_only and k == "summary")}
+    return sides
+
+
+def _scrubbed(state, scrubber):
+    """The state with names said pseudonymized in every string, consistently across them; and the map back."""
+    texts: list[str] = []
+
+    def walk(x, put):
+        if isinstance(x, dict):
+            return {k: walk(v, put) for k, v in x.items()}
+        if isinstance(x, list):
+            return [walk(v, put) for v in x]
+        if isinstance(x, str):
+            return put(x)
+        return x
+    walk(state, lambda t: texts.append(t) or t)
+    out, back, _ = scrubber.scrub(texts)
+    it = iter(out)
+    return walk(state, lambda t: next(it)), back
+
+
+def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: bool) -> dict:
+    """Jev drafts the sheet from structured state, one request of atomic Nouls per pair, combined in code."""
+    from im import jev
+
+    question = key["benchmark"]
+    out_path = folder / f"draft-{client.model}{'-quotes' if quotes_only else ''}.json"
+    got = json.loads(out_path.read_text()) if out_path.exists() else {}
+    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+    cost = 0.0
+    for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
+        if num in got:
+            continue
+        state = _state(conn, question, p, quotes_only)
+        if scrubber:
+            state, _ = _scrubbed(state, scrubber)
+        probs, meta = client.ask(question, state)
+        segs = p.get("segments") or [s for (s,) in conn.execute(
+            """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
+               WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
+        conn.execute(
+            """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version,
+                 payload, payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
+               VALUES (NULL, %s, %s, %s, %s, %s, %s, NULL, 'end_turn', %s, %s, %s, %s)""",
+            (segs, client.model, themes.version(json.dumps(jev.QUESTIONS[question]), {}, client.model, ""), policy,
+             meta["payload"], edge_audit._sha(meta["payload"]), meta["served_by"], meta["input_tokens"],
+             meta["output_tokens"], meta["cost_usd"]))
+        cost += meta["cost_usd"]
+        got[num] = {"answer": jev.answer(probs["p"]), "why": "", **{k: round(v, 3) for k, v in probs.items()}}
+        out_path.write_text(json.dumps(got, indent=2))
+    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 6), "policy": policy}
+
+
 def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=None, quotes_only: bool = False) -> dict:
     """A model answers the sheet's question for every pair, blind to my marks, into draft-<model>-<effort>.json, as
     it goes. Every request goes to the egress log; with a scrubber (policy C), names said are pseudonymized first.
@@ -320,6 +385,8 @@ def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=
     from im import names
 
     key = json.loads((folder / "key.json").read_text())
+    if model.startswith("jev"):
+        return _draft_jev(conn, client, folder, key, scrubber, quotes_only)
     question = key["benchmark"]
     shown = edge_audit._pairs_as_shown((folder / "sheet.md").read_text())
     out_path = folder / f"draft-{model.replace('/', '_')}-{effort}{'-quotes' if quotes_only else ''}.json"
