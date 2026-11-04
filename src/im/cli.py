@@ -378,6 +378,26 @@ def cmd_audit_edges(args) -> None:
         _print(edge_audit.write(conn, Path(args.folder), args.seed, args.size))
 
 
+def cmd_audit_probe(args) -> None:
+    """Analogy or tension: a blind sheet asking one question of pairs proposed several ways, then my marks tallied."""
+    from pathlib import Path
+
+    from im import probe_audit
+
+    folder = Path(args.folder)
+    if args.action == "score":
+        _print(probe_audit.score(folder))
+        return
+    cfg = config.load()
+    with db.connect(db.pipeline_dsn()) as conn:
+        import anthropic
+
+        from im.backends import SentenceEmbedder
+
+        embedder = SentenceEmbedder(cfg.lattice.embedding_model) if args.question == "analogy" else None
+        _print(probe_audit.write(conn, anthropic.Anthropic(), embedder, args.question, folder, args.seed))
+
+
 def cmd_analogy_spike(args) -> None:
     """Rank each `analogy:` pair's partner by structure and by topic (sends to Claude; writes into the folder)."""
     from pathlib import Path
@@ -687,6 +707,14 @@ def main(argv=None) -> None:
     ae.add_argument("--effort", default="low", help="draft: the candidate's effort")
     ae.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names said")
     ae.set_defaults(func=cmd_audit_edges)
+    for name, question, what in (("audit-analogies", "analogy", "analogies between unrelated ideas"),
+                                 ("audit-tension", "tension", "ideas that pull against each other")):
+        pa = sub.add_parser(name, help=f"a blind sheet of possible {what}, proposed several ways; score my marks "
+                                       "(sheet sends to Claude)")
+        pa.add_argument("action", choices=["sheet", "score"])
+        pa.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
+        pa.add_argument("--seed", type=int, default=9, help="the sample and shuffle's seed")
+        pa.set_defaults(func=cmd_audit_probe, question=question)
     sp = sub.add_parser("analogy-spike", help="can structure find my analogy pairs where topic can't? (sends to Claude)")
     sp.add_argument("folder", help="a marked B4 sheet's folder, e.g. /saved/b4-1")
     sp.add_argument("--others", type=int, default=300, help="other clusters to rank the partners among")

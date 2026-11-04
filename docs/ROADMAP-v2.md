@@ -57,3 +57,9 @@ model (B3; Opus stayed in 2026-10).
 7. ~~Does Emanation keep a stable global layout?~~ Yes (2026-11-02): one sky with stable positions, and a lens
    returns relevance, not a layout; the home sky is the lens with no seed
    ([0005, amended](decisions/0005-presentation-inside-idea-machine.md#amendment-one-sky-lenses-light-it-2026-11-02)).
+8. Can analogies between unrelated ideas be found? The spike (2026-11-04, `im analogy-spike`, 52¢) ranked my seven
+   analogy partners by one structure line per idea: median rank 55 of 314, against 3 by topic. But every B4 pair
+   was drawn from neighbourhoods, so those analogies were close by topic already, and one line per idea drops the
+   facet an analogy rests on. Open: `im audit-analogies` asks the question of unrelated pairs proposed by four
+   structure lines per idea, by a model reading every idea, and at random. `im audit-tension` does the same for
+   tension, which B4's first sheet found twice.
