@@ -346,9 +346,13 @@ def cmd_audit_edges(args) -> None:
 
     from im import edge_audit
 
+    folders = [Path(f) for f in args.folder]
     if args.action == "score":
-        _print(edge_audit.score(Path(args.folder)))
+        _print(edge_audit.score(folders[0]) if len(folders) == 1 else edge_audit.pooled(folders))
         return
+    if len(folders) > 1:
+        raise SystemExit("only score takes several folders")
+    args.folder = folders[0]
     with db.connect(db.pipeline_dsn()) as conn:
         if args.action == "draft":
             from im import llm, names
@@ -652,7 +656,8 @@ def main(argv=None) -> None:
     ae = sub.add_parser("audit-edges", help="B4: a blind sheet of pairs of clusters to type; tally my marks")
     ae.add_argument("action", choices=["sheet", "score", "draft"],
                     help="draft: a model marks the same sheet blind (sends to Claude); score then compares it with me")
-    ae.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
+    ae.add_argument("folder", nargs="+", help="where sheet.md and key.json go (it quotes people: keep it in saved/); "
+                    "score takes several, to score them as one")
     ae.add_argument("--seed", type=int, default=4, help="the sample and shuffle's seed")
     ae.add_argument("--size", type=int, default=50, help="how many pairs")
     ae.add_argument("--model", default="claude-opus-5-5", help="draft: the candidate model")

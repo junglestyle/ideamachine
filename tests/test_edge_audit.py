@@ -133,3 +133,24 @@ def test_the_analogy_spike_ranks_partners_by_structure_and_topic(lattice_with_cl
     r = analogy_spike.run(lattice_with_clusters, FakeTyper(), HashEmbedder(), tmp_path, others=10)
     assert r["pairs"] == 2 and (tmp_path / "structures.json").exists()
     assert all(1 <= p["rank_by_structure"] and 1 <= p["rank_by_topic"] for p in r["pairs_detail"])
+
+
+def test_sheets_pool_into_one_benchmark_counting_a_shared_pair_once(lattice_with_clusters, tmp_path):
+    one, two = tmp_path / "one", tmp_path / "two"
+    edge_audit.write(lattice_with_clusters, one, seed=1)
+    edge_audit.write(lattice_with_clusters, two, seed=2)
+    fill(one, lambda p: ("rel", ""))
+    fill(two, lambda p: ("none", ""))
+    keys = [json.loads((f / "key.json").read_text())["pairs"] for f in (one, two)]
+    first = {tuple(p["ideas"]) for p in keys[0].values()}
+    shared = first & {tuple(p["ideas"]) for p in keys[1].values()}
+    assert shared   # the fixture lattice is small: two sheets draw some of the same pairs
+    (one / "draft-m-low.json").write_text(json.dumps({n: {"label": "related", "analogy": ""} for n in keys[0]}))
+
+    r = edge_audit.pooled([one, two])
+    unique = len(first | {tuple(p["ideas"]) for p in keys[1].values()})
+    assert r["marked"] == unique and len(r["counted_once"]) == len(shared)
+    assert all(n.startswith("two/") for n in r["counted_once"])   # the first sheet's mark stands
+    assert r["labels"] == {"related": len(first), "none": unique - len(first)}
+    d = r["drafts"]["m-low"]   # only over the pairs that model drafted
+    assert d["pairs"] == len(first) and d["agree"] == 1.0
