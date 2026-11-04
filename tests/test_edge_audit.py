@@ -108,7 +108,19 @@ def test_agreement_scores_the_core_labels_and_counts_invented_ones():
     assert r["f1"] == {"none": 1.0, "related": 0.0, "elaborates": 1.0, "tension": 0.0}   # old extends: elaborates
     assert r["macro_f1_core"] == round(2 / 3, 3)
     assert r["invented_supports_or_tension"] == [2] and r["tension_precision"] == 0.0
-    assert r["analogies"]["both"] == [1]
+    assert r["analogies"]["both"] == [1] and (r["analogies"]["recall"], r["analogies"]["precision"]) == (1.0, 1.0)
+    # The bar is whether there's an edge: a related it calls tension is still the edge I'd make.
+    assert r["connection"] == {"agree": 1.0, "precision": 1.0, "recall": 1.0, "invented": [], "missed": []}
+    assert r["tension"] == {"mine": 0, "theirs": 1, "both": 0}
+    wrong = edge_audit.agreement(mine, {"1": {"label": "related", "analogy": ""}, "2": {"label": "none", "analogy": ""},
+                                        "3": {"label": "supports", "analogy": ""}})
+    assert wrong["connection"] == {"agree": round(1 / 3, 3), "precision": 0.5, "recall": 0.5, "invented": [1],
+                                   "missed": [2]}
+
+
+def test_a_mark_that_isnt_a_label_is_reported_not_skipped():
+    got = edge_audit.marks("## 1\nmark: evolves A>B\nnote: a later telling\n\n## 2\nmark: \nnote: \n")
+    assert got == {"1": {"unreadable": "evolves A>B", "note": "a later telling"}}
 
 
 def test_a_draft_sees_the_sheet_without_my_marks_and_score_compares(lattice_with_clusters, tmp_path):
