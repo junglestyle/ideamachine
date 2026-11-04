@@ -59,7 +59,8 @@ def test_a_trial_scores_a_candidate_against_a_reference_on_the_same_sample(pipe,
     assert r["recall"] == 0.5 and r["recall_by_kind"] == {"idea": 0.5}
     assert r["missed"] == ["idea: Who's got the coffee order?"]
     assert r["extra_examples"] == ["idea: We should pin the cache key to the lockfile hash."]
-    assert r["episodes_reference_captured_in"] == 2 and r["of_those_candidate_captured_nothing"] == 1
+    # The lockfile line is in the coffee's episode: the candidate missed the coffee there, but not the episode.
+    assert r["episodes_reference_captured_in"] == 2 and r["of_those_candidate_captured_nothing"] == 0
     assert r["cost_vs_reference"] == 1.0   # the fake answers as Opus, at Opus's price, for both
 
     assert trial.run(pipe, sonnet, v3, model="claude-sonnet-5-5")["read"] == 0   # read once per payload
