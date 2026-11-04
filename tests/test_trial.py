@@ -112,8 +112,8 @@ def test_recall_is_split_by_how_far_each_captures_idea_reaches(seeded_lattice):
     assert all(r["recall"] in (1.0, None) for r in reach.values())
     assert all(r["recall"] in (0.0, None) for r in trial.report(conn, haiku, opus, egress.POLICY_VERSION)
                ["recall_by_reach"].values())
-    expected = {"recurring" if n >= 2 else "one_off" for (n,) in table(conn, """
-        SELECT count(DISTINCT conversation) FROM im.idea_observations WHERE idea_id IN (
-          SELECT ev.idea_id FROM im.idea_evidence ev JOIN im.items i USING (item_id) WHERE i.quote LIKE '%%LoRa%%')
-        GROUP BY idea_id""")}
-    assert expected <= {r for r, v in reach.items() if v["captures"]}
+    # The LoRa idea is new, said once: a one-off.
+    lora = [it for (items,) in table(conn, "SELECT items FROM im.prompt_trials") for it in items if "LoRa" in it["quote"]]
+    assert trial.by_reach(conn, [(e, lora[0], True) for (e,) in table(
+        conn, "SELECT episode_id FROM im.prompt_trials WHERE items::text LIKE '%%LoRa%%' LIMIT 1")])["one_off"] == \
+        {"captures": 1, "recall": 1.0}

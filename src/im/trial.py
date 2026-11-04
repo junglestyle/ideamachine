@@ -118,8 +118,17 @@ def _live_reach(conn, episode_ids: list) -> dict:
     the most conversations any cluster they're evidence for has been said in."""
     out: dict = {}
     for eid, segs, quote, conversations in conn.execute(
-            """WITH reach AS (SELECT idea_id, count(DISTINCT conversation) AS conversations
-                              FROM im.idea_observations GROUP BY idea_id)
+            # Conversations from each cluster's current captures' own lines, and its observations that aren't speech:
+            # a capture counts whether or not the observation stage has placed it yet.
+            """WITH reach AS (
+                 SELECT idea_id, count(DISTINCT conversation) AS conversations FROM (
+                   SELECT ev.idea_id, s.conversation_id::text AS conversation
+                   FROM im.idea_evidence ev JOIN im.items i USING (item_id)
+                   JOIN im.episodes e ON e.episode_id = i.episode_id AND e.current
+                   JOIN im.source_segments s ON s.segment_id = ANY(i.source_segment_ids)
+                   UNION ALL
+                   SELECT o.idea_id, o.conversation::text FROM im.observations o WHERE o.source <> 'speech') x
+                 GROUP BY idea_id)
                SELECT i.episode_id, i.source_segment_ids, i.quote, max(r.conversations)
                FROM im.items i JOIN im.idea_evidence ev USING (item_id) JOIN reach r USING (idea_id)
                WHERE i.episode_id = ANY(%s)
