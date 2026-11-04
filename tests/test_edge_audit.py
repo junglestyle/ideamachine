@@ -155,3 +155,24 @@ def test_sheets_pool_into_one_benchmark_counting_a_shared_pair_once(lattice_with
     assert r["labels"] == {label: k for label, k in expected.items() if k}   # the second sheet may add none
     d = r["drafts"]["m-low"]   # only over the pairs that model drafted
     assert d["pairs"] == len(first) and d["agree"] == 1.0
+
+
+def test_a_pair_the_model_cant_answer_is_skipped_and_asked_again_next_time(lattice_with_clusters, tmp_path):
+    from im import llm
+
+    edge_audit.write(lattice_with_clusters, tmp_path, size=3)
+    good = json.dumps({"label": "related", "direction": "none", "analogy": ""})
+    calls = []
+
+    def post(body):   # the first pair's two attempts come back empty: the model spent its tokens reasoning
+        calls.append(body)
+        empty = len(calls) <= 2
+        return {"id": "g", "model": "x/y", "usage": {"cost": 0.001}, "choices": [
+            {"finish_reason": "length" if empty else "stop",
+             "message": {"content": None, "reasoning": "hmm"} if empty else {"content": good}}]}
+
+    out = edge_audit.draft(lattice_with_clusters, llm.OpenRouter(post=post), tmp_path, model="x/y")
+    assert out["pairs"] == 2 and [f["pair"] for f in out["failed"]] == [1]
+    assert "stopped: length, it reasoned but wrote no answer" in out["failed"][0]["error"]
+    again = edge_audit.draft(lattice_with_clusters, llm.OpenRouter(post=post), tmp_path, model="x/y")
+    assert again["pairs"] == 3 and "failed" not in again and len(calls) == 5
