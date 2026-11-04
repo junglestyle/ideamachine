@@ -137,8 +137,8 @@ def _spread(pairs: list[dict], n: int) -> list[dict]:
     return [pairs[round(k * (len(pairs) - 1) / max(n - 1, 1))] for k in range(n)]
 
 
-def _side(conn, idea_id: str) -> list[str]:
-    """A cluster on the sheet: up to two things said, mine first, with when; then Claude's summary, and my note."""
+def side_data(conn, idea_id: str) -> dict:
+    """A cluster as shown: up to two things said, mine first, with who and when; Claude's summary; my note."""
     title, statement, note = conn.execute(
         "SELECT title, statement, my_note FROM im.idea_text WHERE idea_id = %s", (idea_id,)).fetchone()
     quotes = conn.execute(
@@ -151,8 +151,15 @@ def _side(conn, idea_id: str) -> list[str]:
            UNION ALL
            SELECT quote, said_at::date, said_by = 'me' FROM im.observations WHERE idea_id = %(id)s
            ORDER BY me DESC, said_on, quote LIMIT 2""", {"id": idea_id}).fetchall()
-    lines = [f"> \"{q}\" ({'me' if me else 'someone'}, {on})" for q, on, me in quotes]
-    lines += [f"   Claude's summary: {title}. {statement}"] + ([f"   My note: {note}"] if note else [])
+    return {"said": [{"by": "me" if me else "someone", "on": str(on), "words": q} for q, on, me in quotes],
+            "summary": f"{title}. {statement}", **({"my_note": note} if note else {})}
+
+
+def _side(conn, idea_id: str) -> list[str]:
+    """A cluster on the sheet: up to two things said, mine first, with when; then Claude's summary, and my note."""
+    d = side_data(conn, idea_id)
+    lines = [f"> \"{q['words']}\" ({q['by']}, {q['on']})" for q in d["said"]]
+    lines += [f"   Claude's summary: {d['summary']}"] + ([f"   My note: {d['my_note']}"] if "my_note" in d else [])
     return lines
 
 

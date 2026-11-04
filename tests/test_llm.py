@@ -52,3 +52,28 @@ def test_a_refusal_and_a_rate_limit():
     client, _ = router({"error": {"code": 429, "message": "slow down"}})
     with pytest.raises(llm.Unavailable):
         llm.complete(client, "openai/gpt-6.1-terra", "low", "s", SCHEMA, "t")
+
+
+def test_a_model_that_takes_no_schema_is_asked_with_it_in_the_prompt():
+    llm.NO_SCHEMA.discard("some/no-schema-model")
+    sent = []
+
+    def post(body):
+        sent.append(body)
+        if "response_format" in body:
+            raise RuntimeError("OpenRouter HTTP 404: No endpoints found that can handle the requested parameters")
+        return answer('```json\n{"items": []}\n```')
+    client = llm.OpenRouter(post=post)
+    r = llm.complete(client, "some/no-schema-model", "low", "decide", SCHEMA, "text")
+    assert r.text == '{"items": []}' and len(sent) == 2
+    assert "JSON Schema" in sent[1]["messages"][0]["content"] and not sent[1]["provider"]["require_parameters"]
+    assert sent[1]["provider"]["data_collection"] == "deny"
+    llm.complete(client, "some/no-schema-model", "low", "decide", SCHEMA, "text")
+    assert len(sent) == 3   # remembered: no second try with a schema
+
+
+def test_no_provider_that_keeps_nothing_is_said_plainly():
+    def post(body):
+        raise RuntimeError("OpenRouter HTTP 404: No endpoints found matching your data policy")
+    with pytest.raises(RuntimeError, match="keeps nothing sent"):
+        llm.complete(llm.OpenRouter(post=post), "some/model", "low", "s", SCHEMA, "t")

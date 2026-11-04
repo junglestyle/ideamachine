@@ -7,6 +7,7 @@ every request the same way. OpenRouter reports what each request cost, so its mo
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -80,9 +81,14 @@ def complete(client, model: str, effort: str, system: str, schema: dict, text: s
                  r.usage.output_tokens, cost(served, r.usage))
 
 
+NO_SCHEMA: set[str] = set()   # models found, in this process, to take no JSON schema: asked with it in the prompt
+
+
 class OpenRouter:
     """OpenRouter's chat completions, asking for strict JSON-schema output and the request's cost. An answer that
-    isn't JSON is asked for once more: models differ in how well they keep to a schema."""
+    isn't JSON is asked for once more: models differ in how well they keep to a schema. A model with no provider
+    that takes a schema is asked again with the schema in its instructions instead. (Jev isn't a chat model: it
+    has its own client, im.jev.)"""
 
     def __init__(self, key: str | None = None, post=None):
         self.key = key or os.environ.get("OPENROUTER_API_KEY")
@@ -106,13 +112,29 @@ class OpenRouter:
             raise Unavailable(f"OpenRouter: {e}") from None
 
     def complete(self, model, effort, system, schema, text, max_tokens) -> Reply:
+        if model not in NO_SCHEMA:
+            try:
+                return self._complete(model, effort, system, schema, text, max_tokens, in_prompt=False)
+            except RuntimeError as e:
+                if "data policy" in str(e):
+                    raise RuntimeError(f"{model}: no provider that keeps nothing sent ({e})") from None
+                if "No endpoints found" not in str(e):
+                    raise
+                NO_SCHEMA.add(model)
+        return self._complete(model, effort, system, schema, text, max_tokens, in_prompt=True)
+
+    def _complete(self, model, effort, system, schema, text, max_tokens, in_prompt: bool) -> Reply:
+        if in_prompt:
+            system += ("\n\nAnswer with only a JSON object, no other text, matching this JSON Schema:\n"
+                       + json.dumps(schema))
         body = {"model": model, "max_tokens": max_tokens,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}],
-                "response_format": {"type": "json_schema",
-                                    "json_schema": {"name": "answer", "strict": True, "schema": schema}},
                 "reasoning": {"effort": effort}, "usage": {"include": True},
                 # Only providers that honour the schema, and none that keep or train on what's sent.
-                "provider": {"require_parameters": True, "data_collection": "deny"}}
+                "provider": {"require_parameters": not in_prompt, "data_collection": "deny"}}
+        if not in_prompt:
+            body["response_format"] = {"type": "json_schema",
+                                       "json_schema": {"name": "answer", "strict": True, "schema": schema}}
         spent, tokens_in, tokens_out = 0.0, 0, 0
         for attempt in (1, 2):
             r = self.post(body)
@@ -126,7 +148,7 @@ class OpenRouter:
             tokens_out += usage.get("completion_tokens") or 0
             choice = r["choices"][0]
             stop = FINISH.get(choice.get("finish_reason"), choice.get("finish_reason") or "end_turn")
-            answer = (choice.get("message") or {}).get("content")
+            answer = _unfenced((choice.get("message") or {}).get("content"))
             if stop == "refusal" or (choice.get("message") or {}).get("refusal"):
                 answer, stop = None, "refusal"
             elif not _is_json(answer) and attempt == 1:
@@ -139,6 +161,13 @@ class OpenRouter:
             return Reply(answer, stop, r.get("model") or model, r.get("id"), tokens_in, tokens_out,
                          round(spent, 6))
         raise AssertionError("unreachable")
+
+
+def _unfenced(text):
+    """A JSON answer without the ```json fence some models wrap it in when asked in the prompt."""
+    if isinstance(text, str) and (m := re.fullmatch(r"\s*```(?:json)?\s*(.*?)\s*```\s*", text, re.S)):
+        return m.group(1)
+    return text
 
 
 def _is_json(text) -> bool:
