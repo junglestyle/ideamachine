@@ -124,7 +124,8 @@ def test_a_quotes_only_draft_never_shows_the_summaries(lattice_with_clusters, tm
     d = probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-sonnet-5-5", quotes_only=True)
     assert d["draft"].endswith("-low-quotes.json") and model.calls
     assert not any("Claude's summary" in c["messages"][0]["content"] for c in model.calls)
-    assert "then a summary" not in model.calls[0]["system"] and "> \"" in model.calls[0]["messages"][0]["content"]
+    assert "then a summary" not in model.calls[0]["system"]
+    assert any("> \"" in c["messages"][0]["content"] for c in model.calls)   # quotes still go, where there are any
 
 
 def test_new_and_known_both_hold_and_only_new_counts_as_novel(lattice_with_clusters, tmp_path):  # noqa: F811
