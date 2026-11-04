@@ -8,6 +8,7 @@ from im import egress, extract, names, trial
 from helpers import run, table
 from test_carry import DATABASE, capture
 from test_extract import FakeClaude
+from test_lattice import items_for, seeded, seeded_lattice  # noqa: F401 (fixtures)
 
 
 def test_the_first_prompt_keeps_its_version():
@@ -96,3 +97,23 @@ def test_under_policy_c_names_said_go_out_pseudonymized_and_come_back(pipe, cfg,
 
     # The same model and prompt under policy B is another trial, read again.
     assert trial.run(pipe, claude, v3)["read"] == table(pipe, "SELECT count(*) FROM im.episodes WHERE current")[0][0]
+
+
+def test_recall_is_split_by_how_far_each_captures_idea_reaches(seeded_lattice):
+    conn = seeded_lattice
+    v3 = extract.system_prompt("v3")
+    trial.run(conn, FakeClaude(items_for), v3)                          # the reference: what live captured
+    trial.run(conn, FakeClaude(), v3, model="claude-haiku-5-5")          # a candidate that captures nothing
+    opus, haiku = ((extract.prompt_version(m, "medium", v3), m) for m in ("claude-opus-5-5", "claude-haiku-5-5"))
+    itself = trial.report(conn, opus, opus, egress.POLICY_VERSION)
+    reach = itself["recall_by_reach"]
+    assert sum(r["captures"] for r in reach.values()) == itself["reference_captures"] == 3
+    assert reach["unplaced"]["captures"] == 0   # live matched every one into a cluster
+    assert all(r["recall"] in (1.0, None) for r in reach.values())
+    assert all(r["recall"] in (0.0, None) for r in trial.report(conn, haiku, opus, egress.POLICY_VERSION)
+               ["recall_by_reach"].values())
+    expected = {"recurring" if n >= 2 else "one_off" for (n,) in table(conn, """
+        SELECT count(DISTINCT conversation) FROM im.idea_observations WHERE idea_id IN (
+          SELECT ev.idea_id FROM im.idea_evidence ev JOIN im.items i USING (item_id) WHERE i.quote LIKE '%%LoRa%%')
+        GROUP BY idea_id""")}
+    assert expected <= {r for r, v in reach.items() if v["captures"]}

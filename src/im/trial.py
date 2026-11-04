@@ -10,6 +10,11 @@ reference's captures it also found, matched the way verdicts are carried forward
 the lattice's relationships decide what matters. Which of two models captures better where they differ is what
 the blind pairs are for.
 
+Recall is also split by how far each reference capture's idea reaches in the live lattice: the captures on the same
+lines in live extraction, and the number of conversations their cluster has been said in. Missing a capture whose
+idea recurs costs something; missing a one-off mostly saves matching and noise. Captures live extraction didn't
+place in a cluster are counted apart.
+
 A replicate (`replicate=2`) is a second, independent read by the same model and prompt, filed apart. The reference
 against its own replicate is the ceiling: models don't capture exactly the same things twice, so a candidate's
 recall means something only next to it.
@@ -105,6 +110,39 @@ def _matched(ref: list[dict], cand: list[dict]) -> dict:
     return out
 
 
+REACHES = ("recurring", "one_off", "unplaced")
+
+
+def _live_reach(conn, episode_ids: list) -> dict:
+    """episode_id -> [(segment ids, quote, conversations)] for the live captures there that are in a cluster:
+    the most conversations any cluster they're evidence for has been said in."""
+    out: dict = {}
+    for eid, segs, quote, conversations in conn.execute(
+            """WITH reach AS (SELECT idea_id, count(DISTINCT conversation) AS conversations
+                              FROM im.idea_observations GROUP BY idea_id)
+               SELECT i.episode_id, i.source_segment_ids, i.quote, max(r.conversations)
+               FROM im.items i JOIN im.idea_evidence ev USING (item_id) JOIN reach r USING (idea_id)
+               WHERE i.episode_id = ANY(%s)
+               GROUP BY i.item_id, i.episode_id, i.source_segment_ids, i.quote""", (episode_ids,)):
+        out.setdefault(eid, []).append(({str(x) for x in segs}, quote, conversations))
+    return out
+
+
+def by_reach(conn, found: list) -> dict:
+    """Recall of the reference's captures split by reach: `recurring` (its idea said in two or more conversations),
+    `one_off` (in one), `unplaced` (no live capture on its lines in a cluster). `found` is [(episode, capture,
+    found by the candidate)]."""
+    live = _live_reach(conn, list({eid for eid, _, _ in found}))
+    n = {r: [0, 0] for r in REACHES}
+    for eid, it, hit in found:
+        best = max(((quote_score(it["quote"], q), c) for segs, q, c in live.get(eid, [])
+                    if segs & set(it["source_segment_ids"])), default=(0.0, None))
+        reach = "unplaced" if best[0] < CARRY_MIN_SCORE else "recurring" if best[1] >= 2 else "one_off"
+        n[reach][0] += 1
+        n[reach][1] += hit
+    return {r: {"captures": t, "recall": round(f / t, 3) if t else None} for r, (t, f) in n.items()}
+
+
 def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy: str) -> dict:
     """How a candidate's captures compare with a reference's, on the episodes both read with the same payload.
     `candidate` and `reference` are (prompt_version, model)."""
@@ -113,7 +151,7 @@ def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy:
     n = {"reference_captures": 0, "found": 0, "candidate_captures": 0, "extra": 0,
          "episodes_reference_captured_in": 0, "of_those_candidate_captured_nothing": 0}
     by_kind: dict = {}
-    missed, extra = [], []
+    missed, extra, found_by_reach = [], [], []
     for eid in both:
         r_items, c_items = ref[eid][1], cand[eid][1]
         m = _matched(r_items, c_items)
@@ -128,6 +166,7 @@ def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy:
             k = by_kind.setdefault(it["kind"], [0, 0])
             k[0] += 1
             k[1] += i in m
+            found_by_reach.append((eid, it, i in m))
             if i not in m:
                 missed.append(f"{it['kind']}: {it['quote']}")
         used = set(m.values())
@@ -138,6 +177,7 @@ def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy:
             "candidate_only_read": len(cand) - len(both)} | n | {
         "recall": rate(n["found"], n["reference_captures"]),
         "recall_by_kind": {k: rate(f, t) for k, (t, f) in sorted(by_kind.items())},
+        "recall_by_reach": by_reach(conn, found_by_reach),
         "cost_usd": round(cost(cand), 4), "reference_cost_usd": round(cost(ref), 4),
         "cost_vs_reference": rate(cost(cand), cost(ref)),
         "missed": missed[:EXAMPLES], "extra_examples": extra[:EXAMPLES]}
