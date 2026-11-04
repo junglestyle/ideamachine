@@ -16,6 +16,8 @@ uv run im load-fixtures           # a synthetic Hearsay stream in $IM_STREAM_DIR
 uv run im run                     # import + segment + extract ideas with Claude + route; idempotent
 uv run im ideas                   # what Claude captured; --review to keep or discard each item
 uv run im ideas --discards        # what I discarded and why: material for revising the extraction prompt
+uv run im trial v3 --model openai/gpt-6.1-sol   # B3: a model on the trial sample, names pseudonymized, vs Opus
+                                  # (OpenRouter models need OPENROUTER_API_KEY; policy C needs IM_NAME_KEY)
 uv run im seed ~/.local/share/ideamachine/seeds/chatgpt-archive.md   # seed the idea lattice (once)
 uv run im lattice                 # lattice counts: ideas, evidence, connections
 uv run im themes                  # themes; im themes pin|unpin|reject <name>, im themes rename <name> <new name>

@@ -310,20 +310,25 @@ def cmd_pending(args) -> None:
 
 
 def cmd_trial(args) -> None:
-    """Try a candidate extraction prompt on the episodes I've judged, and compare its captures with my verdicts."""
-    import anthropic
+    """Try a candidate extraction model or prompt on a fixed sample of episodes, and compare it with a reference."""
+    from im import egress, extract, llm, names, trial
 
-    from im import extract, trial
-
-    x = config.load().extract
+    cfg = config.load()
+    x = cfg.extract
     system = extract.system_prompt(args.prompt, x.interests)
     model, effort = args.model or x.model, args.effort or x.effort
+    ref_model, _, ref_effort = (args.against or f"{x.model}:{x.effort}").partition(":")
+    ref_effort = ref_effort or x.effort
     cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
     with db.connect(db.pipeline_dsn()) as conn:
+        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
+        policy = scrubber.policy if scrubber else egress.POLICY_VERSION
         out = {}
         if not args.report:
-            out["trial"] = trial.run(conn, anthropic.Anthropic(), system, model, effort, cap, args.limit)
-        out["report"] = trial.report(conn, extract.prompt_version(model, effort, system), model)
+            out["trial"] = trial.run(conn, llm.client_for(model), system, model, effort, cap, args.limit,
+                                     args.sample, scrubber)
+        out["report"] = trial.report(conn, (extract.prompt_version(model, effort, system), model),
+                                     (extract.prompt_version(ref_model, ref_effort, system), ref_model), policy)
     _print(out)
 
 
@@ -346,9 +351,11 @@ def cmd_audit_edges(args) -> None:
         return
     with db.connect(db.pipeline_dsn()) as conn:
         if args.action == "draft":
-            import anthropic
+            from im import llm, names
 
-            _print(edge_audit.draft(conn, anthropic.Anthropic(), Path(args.folder), args.model, args.effort))
+            scrubber = names.for_trials(conn, config.load().egress) if args.policy == "C" else None
+            _print(edge_audit.draft(conn, llm.client_for(args.model), Path(args.folder), args.model, args.effort,
+                                    scrubber))
             return
         _print(edge_audit.write(conn, Path(args.folder), args.seed, args.size))
 
@@ -620,11 +627,16 @@ def main(argv=None) -> None:
     dg.add_argument("--write", action="store_true", help="write the week's digest if it isn't written (sends to Claude)")
     dg.add_argument("--again", action="store_true", help="rewrite the week's digest (sends to Claude)")
     dg.set_defaults(func=cmd_digest)
-    tr = sub.add_parser("trial", help="try a candidate extraction prompt on episodes I've judged (sends to Claude)")
-    tr.add_argument("prompt", help="a name in extract.PROMPTS, e.g. v2")
+    tr = sub.add_parser("trial", help="try an extraction model or prompt on a sample of episodes, against a reference")
+    tr.add_argument("prompt", help="a name in extract.PROMPTS, e.g. v3")
     tr.add_argument("--limit", type=int, help="read at most this many episodes this time")
     tr.add_argument("--report", action="store_true", help="only report on what's been read; send nothing")
-    tr.add_argument("--model", help="the candidate model, e.g. claude-sonnet-5-5 (default: the configured one)")
+    tr.add_argument("--model", help="the candidate model: claude-sonnet-5-5, or through OpenRouter, e.g. "
+                    "openai/gpt-6.1-sol (default: the configured one)")
+    tr.add_argument("--against", help="the reference, model[:effort] (default: the configured model and effort)")
+    tr.add_argument("--policy", choices=["B", "C"], default="C",
+                    help="C (default) pseudonymizes names said, as every trial for decision 0008 does")
+    tr.add_argument("--sample", type=int, default=150, help="how many episodes, the same for every model")
     tr.add_argument("--effort", help="the candidate's effort (default: the configured one)")
     tr.add_argument("--monthly-cap-usd", type=float, help="stop before the month's spend passes this (default: config)")
     tr.set_defaults(func=cmd_trial)
@@ -645,6 +657,7 @@ def main(argv=None) -> None:
     ae.add_argument("--size", type=int, default=50, help="how many pairs")
     ae.add_argument("--model", default="claude-opus-5-5", help="draft: the candidate model")
     ae.add_argument("--effort", default="low", help="draft: the candidate's effort")
+    ae.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names said")
     ae.set_defaults(func=cmd_audit_edges)
     sp = sub.add_parser("analogy-spike", help="can structure find my analogy pairs where topic can't? (sends to Claude)")
     sp.add_argument("folder", help="a marked B4 sheet's folder, e.g. /saved/b4-1")

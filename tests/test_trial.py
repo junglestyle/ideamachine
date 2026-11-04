@@ -1,6 +1,9 @@
-"""Candidate extraction prompts: v1 never changes, and a trial reads judged episodes without touching my queue."""
+"""Candidate extraction prompts and models: v1 never changes, and a trial reads a fixed sample without touching
+the lattice, scored against a reference model."""
 
-from im import extract, trial
+from dataclasses import replace
+
+from im import egress, extract, names, trial
 
 from helpers import run, table
 from test_carry import DATABASE, capture
@@ -33,39 +36,57 @@ def both(*needles):
     return lambda text: [i for n in needles for i in capture(n)(text)]
 
 
-def test_a_trial_compares_the_candidate_with_my_verdicts(pipe, cfg, stream):
+def test_a_trial_scores_a_candidate_against_a_reference_on_the_same_sample(pipe, cfg, stream):
     run(pipe, cfg, stream)
-    extract.run_stage(pipe, FakeClaude(both(DATABASE, "coffee")))
-    verdicts = {"keep": DATABASE, "discard": "coffee"}
-    for verdict, needle in verdicts.items():
-        (item,) = [r[0] for r in table(pipe, "SELECT item_id FROM im.items WHERE quote LIKE %s", f"%{needle}%")]
-        extract.decide(pipe, item, verdict)
     items_before = table(pipe, "SELECT count(*) FROM im.items")
+    episodes = table(pipe, "SELECT count(*) FROM im.episodes WHERE current")[0][0]
+    assert trial.sample(pipe, 2) == trial.sample(pipe, 5)[:2]   # a smaller sample is a prefix of a larger one
 
-    v2 = extract.system_prompt("v2")
-    candidate = FakeClaude(both(DATABASE, "lockfile"))   # keeps the keep, skips the discard, finds something new
-    stats = trial.run(pipe, candidate, v2)
-    assert stats["read"] == 2 and all(c["system"] == v2 for c in candidate.calls)
-    pv = extract.prompt_version("claude-opus-5-5", "medium", v2)
-    assert table(pipe, "SELECT count(*) FROM im.egress_log WHERE prompt_version = %s", pv) == [(2,)]
-    assert table(pipe, "SELECT count(*) FROM im.items") == items_before   # nothing reaches my queue
-
-    r = trial.report(pipe, pv)
-    assert (r["kept"], r["kept_found"], r["discarded"], r["discarded_found"], r["unjudged"]) == (1, 1, 1, 0, 1)
-    assert (r["keep_rate_before"], r["keep_rate_on_judged"], r["keep_rate_if_unjudged_are_discards"]) == (0.5, 1.0, 0.5)
-    assert r["skipped_discards"] == ["Who's got the coffee order?"]
-    assert r["unjudged_captures"] == ["idea: We should pin the cache key to the lockfile hash."]
-    assert r["cost_vs_live"] == 1.0   # same model, same tokens as the live reads of the judged episodes
-
-    # A cheaper candidate model (B3) is filed apart, and doesn't ask for Opus's refusal fallback.
-    sonnet = FakeClaude(both(DATABASE))
-    assert trial.run(pipe, sonnet, v2, model="claude-sonnet-5-5")["read"] == 2
+    v3 = extract.system_prompt("v3")
+    opus = FakeClaude(both(DATABASE, "coffee"))
+    assert trial.run(pipe, opus, v3)["read"] == episodes and all(c["system"] == v3 for c in opus.calls)
+    assert "fallbacks" in opus.calls[0]
+    sonnet = FakeClaude(both(DATABASE, "lockfile"))   # finds one of Opus's two, and one of its own
+    assert trial.run(pipe, sonnet, v3, model="claude-sonnet-5-5")["read"] == episodes
     assert {c["model"] for c in sonnet.calls} == {"claude-sonnet-5-5"} and not any("fallbacks" in c for c in sonnet.calls)
-    assert "fallbacks" in candidate.calls[0]
+    assert table(pipe, "SELECT count(*) FROM im.items") == items_before   # nothing reaches the lattice
 
-    # A keep in bulk wasn't read: it isn't a judgment to compare a prompt against.
-    pipe.execute("UPDATE im.item_verdicts SET how = 'bulk' WHERE verdict = 'keep'")
-    assert [v for vs in trial.judged(pipe).values() for v, *_ in vs] == ["discard"]
+    pv = lambda model: extract.prompt_version(model, "medium", v3)  # noqa: E731
+    r = trial.report(pipe, (pv("claude-sonnet-5-5"), "claude-sonnet-5-5"), (pv("claude-opus-5-5"), "claude-opus-5-5"),
+                     egress.POLICY_VERSION)
+    assert (r["episodes"], r["reference_captures"], r["found"], r["candidate_captures"], r["extra"]) == \
+        (episodes, 2, 1, 2, 1)
+    assert r["recall"] == 0.5 and r["recall_by_kind"] == {"idea": 0.5}
+    assert r["missed"] == ["idea: Who's got the coffee order?"]
+    assert r["extra_examples"] == ["idea: We should pin the cache key to the lockfile hash."]
+    assert r["episodes_reference_captured_in"] == 2 and r["of_those_candidate_captured_nothing"] == 1
+    assert r["cost_vs_reference"] == 1.0   # the fake answers as Opus, at Opus's price, for both
 
-    assert trial.run(pipe, candidate, v2)["read"] == 0   # read once per payload
-    assert trial.run(pipe, candidate, extract.system_prompt("v2", "x"), monthly_cap_usd=0)["stopped"]
+    assert trial.run(pipe, sonnet, v3, model="claude-sonnet-5-5")["read"] == 0   # read once per payload
+    assert trial.run(pipe, opus, extract.system_prompt("v3", "x"), monthly_cap_usd=0)["stopped"]
+
+
+def test_under_policy_c_names_said_go_out_pseudonymized_and_come_back(pipe, cfg, stream):
+    turns = stream.conversations["c-conv"].turns
+    turns[0] = replace(turns[0], text="Did you see the build broke again, Bob?")
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    v3 = extract.system_prompt("v3")
+    scrubber = names.Scrubber(b"k", egress.known_names(pipe), mine=["Nathan"])
+    assert egress.known_names(pipe) == ["Alice", "Bob"]
+
+    claude = FakeClaude(both("build broke"))
+    trial.run(pipe, claude, v3, scrubber=scrubber)
+    (sent,) = [c["messages"][0]["content"] for c in claude.calls if "build broke" in c["messages"][0]["content"]]
+    bob = names.token("Bob", b"k")
+    assert "Bob" not in sent and f"broke again, {bob}?" in sent and "Names said are pseudonyms (P-...)." in sent
+    assert "S1:" in sent and "Alice" not in sent   # speakers are still pseudonymized as before
+
+    (items,) = [i for (i,) in table(pipe, "SELECT items FROM im.prompt_trials WHERE privacy_policy_version = %s",
+                                    scrubber.policy) if i]
+    assert items[0]["quote"] == "Did you see the build broke again, Bob?"
+    logged = table(pipe, "SELECT payload FROM im.egress_log WHERE privacy_policy_version = %s", scrubber.policy)
+    assert logged and not any("Bob" in p for (p,) in logged)
+
+    # The same model and prompt under policy B is another trial, read again.
+    assert trial.run(pipe, claude, v3)["read"] == table(pipe, "SELECT count(*) FROM im.episodes WHERE current")[0][0]

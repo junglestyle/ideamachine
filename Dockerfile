@@ -22,6 +22,14 @@ RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(
     && printf '%s' "$BGE_REVISION" > /models/hf/hub/models--BAAI--bge-small-en-v1.5/refs/main \
     && HF_HUB_OFFLINE=1 python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-en-v1.5', device='cpu')" \
     && chmod -R a+rX /models
+# GLiNER, for names said under policy C (im.names, decision 0008), the same way; it fetches its tokenizer on first load.
+ARG GLINER_REVISION=40ec419335d09393f298636f471328b722c6da9e
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('urchade/gliner_medium-v2.1', revision='$GLINER_REVISION')" \
+    && mkdir -p /models/hf/hub/models--urchade--gliner_medium-v2.1/refs \
+    && printf '%s' "$GLINER_REVISION" > /models/hf/hub/models--urchade--gliner_medium-v2.1/refs/main \
+    && python -c "from gliner import GLiNER; GLiNER.from_pretrained('urchade/gliner_medium-v2.1')" \
+    && HF_HUB_OFFLINE=1 python -c "from gliner import GLiNER; GLiNER.from_pretrained('urchade/gliner_medium-v2.1')" \
+    && chmod -R a+rX /models
 ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 
 # Then Idea Machine itself, into the same environment.

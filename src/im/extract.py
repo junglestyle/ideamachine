@@ -10,16 +10,13 @@ import hashlib
 import json
 import uuid
 
-from im import egress
+from im import egress, llm, names
 
 SCHEMA_VERSION = 1
 STAGE_VERSION = "extract/1"
 ITEM_NS = uuid.UUID("3c1e8a52-7d0f-4b6e-9f21-5a8c4e7d1b90")
 KINDS = ["idea", "aphorism", "joke", "observation", "project", "task", "decision"]
-# $ per million tokens (input, output); a refusal fallback may answer on another model.
-PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-opus-4-8": (5.0, 25.0), "claude-sonnet-5-5": (2.0, 10.0),
-          "claude-haiku-5-5": (0.10, 0.50)}   # Haiku 5.5: prompts up to 100K tokens, which every episode is
-FALLBACK_MODEL = "claude-opus-4-8"
+PRICES, FALLBACK_MODEL = llm.PRICES, llm.FALLBACK_MODEL
 
 # v1: the first prompt (58% of its captures kept). Its text must never change: its hash is the prompt_version every
 # extraction so far is filed under, and a new version re-reads every episode.
@@ -198,13 +195,7 @@ def spent_this_month(conn) -> float:
     ).fetchone()[0])
 
 
-def _cost(model: str, usage) -> float | None:
-    price = PRICES.get(model)
-    if price is None or usage is None:
-        return None
-    tokens_in = (usage.input_tokens or 0) + (getattr(usage, "cache_creation_input_tokens", 0) or 0) * 1.25 \
-        + (getattr(usage, "cache_read_input_tokens", 0) or 0) * 0.1
-    return round(tokens_in * price[0] / 1e6 + (usage.output_tokens or 0) * price[1] / 1e6, 6)
+_cost = llm.cost
 
 
 def _pending(conn, model: str, pv: str) -> list:
@@ -232,7 +223,7 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict
         """SELECT episode_id, egress_id FROM im.extractions
            WHERE input_hash = %s AND model = %s AND prompt_version = %s AND privacy_policy_version = %s
              AND episode_id <> %s ORDER BY created_at DESC LIMIT 1""",
-        (p.sha256, model, pv, egress.POLICY_VERSION, p.episode_id)).fetchone()
+        (p.sha256, model, pv, p.policy, p.episode_id)).fetchone()
     if row is None:
         return None
     old = egress.build(conn, row[0])
@@ -244,7 +235,7 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict
         """SELECT item_id, kind, w.said_by, quote, gist, themes, confidence, source_segment_ids
            FROM im.items JOIN im.item_said_by w USING (item_id)
            WHERE episode_id = %s AND model = %s AND prompt_version = %s AND privacy_policy_version = %s
-           ORDER BY item_id""", (row[0], model, pv, egress.POLICY_VERSION)).fetchall()
+           ORDER BY item_id""", (row[0], model, pv, p.policy)).fetchall()
     return row[1], [{"from_item_id": i, "kind": k, "said_by": p.speakers.get(alias.get(by), by), "quote": q,
                      "gist": g, "themes": t, "confidence": c,
                      "source_segment_ids": [p.segment_ids[line[s]] for s in segs]}
@@ -254,20 +245,23 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict
 def _log(conn, p: egress.Payload, model: str, pv: str, **fields) -> int:
     cols = ["episode_id", "segment_ids", "model", "prompt_version", "privacy_policy_version", "payload",
             "payload_sha256"] + list(fields)
-    vals = [p.episode_id, p.segment_ids, model, pv, egress.POLICY_VERSION, p.text, p.sha256] + list(fields.values())
+    vals = [p.episode_id, p.segment_ids, model, pv, p.policy, p.text, p.sha256] + list(fields.values())
     return conn.execute(
         f"INSERT INTO im.egress_log ({', '.join(cols)}) VALUES ({', '.join(['%s'] * len(cols))}) RETURNING egress_id",
         vals).fetchone()[0]
 
 
 def _items(p: egress.Payload, raw: list[dict]) -> list[dict]:
-    """Claude's items, mapped back to segments and local speakers. Items citing no real line are dropped."""
+    """The model's items, mapped back to segments, local speakers and the names said (policy C). Items citing no
+    real line are dropped."""
     out = []
     for item in raw:
         lines = sorted({n for n in item["lines"] if 1 <= n <= len(p.segment_ids)})
         if not lines:
             continue
         out.append(item | {
+            "quote": names.unscrub(item["quote"], p.names), "gist": names.unscrub(item["gist"], p.names),
+            "themes": [names.unscrub(t, p.names) for t in item.get("themes", [])],
             "said_by": p.speakers.get(item["said_by"], item["said_by"]),
             "source_segment_ids": [p.segment_ids[n - 1] for n in lines],
             "confidence": min(max(float(item["confidence"]), 0.0), 1.0),
@@ -276,7 +270,7 @@ def _items(p: egress.Payload, raw: list[dict]) -> list[dict]:
 
 
 def _item_id(p: egress.Payload, model: str, pv: str, i: int) -> uuid.UUID:
-    return uuid.uuid5(ITEM_NS, f"{p.episode_id}|{model}|{pv}|{egress.POLICY_VERSION}|{p.sha256}|{i}")
+    return uuid.uuid5(ITEM_NS, f"{p.episode_id}|{model}|{pv}|{p.policy}|{p.sha256}|{i}")
 
 
 def _carry_matches(conn, p: egress.Payload, model: str, pv: str, items: list[dict]) -> None:
@@ -305,7 +299,7 @@ def _carry_matches(conn, p: egress.Payload, model: str, pv: str, items: list[dic
 def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: list[dict]) -> None:
     with conn.transaction():
         conn.execute("""DELETE FROM im.items WHERE episode_id = %s AND model = %s AND prompt_version = %s
-                        AND privacy_policy_version = %s""", (p.episode_id, model, pv, egress.POLICY_VERSION))
+                        AND privacy_policy_version = %s""", (p.episode_id, model, pv, p.policy))
         for i, it in enumerate(items):
             # said_by_segment_id: the first cited segment the speaker said, so a later rename reaches the item.
             conn.execute(
@@ -318,7 +312,7 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
                       WHERE s.speaker_label = %s ORDER BY u.n LIMIT 1))""",
                 (_item_id(p, model, pv, i),
                  p.episode_id, it["kind"], it["said_by"], it["quote"], it["gist"], it["themes"], it["confidence"],
-                 it["source_segment_ids"], egress_id, model, pv, egress.POLICY_VERSION, SCHEMA_VERSION,
+                 it["source_segment_ids"], egress_id, model, pv, p.policy, SCHEMA_VERSION,
                  STAGE_VERSION, p.sha256, it["source_segment_ids"], it["said_by"]))
         conn.execute(
             """INSERT INTO im.extractions (episode_id, model, prompt_version, privacy_policy_version, input_hash,
@@ -326,24 +320,17 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
                ON CONFLICT (episode_id, model, prompt_version, privacy_policy_version) DO UPDATE
                SET input_hash = excluded.input_hash, egress_id = excluded.egress_id, n_items = excluded.n_items,
                    created_at = now()""",
-            (p.episode_id, model, pv, egress.POLICY_VERSION, p.sha256, egress_id, len(items)))
+            (p.episode_id, model, pv, p.policy, p.sha256, egress_id, len(items)))
 
 
-def call(client, model: str, effort: str, system: str, text: str):
-    """Opus falls back to FALLBACK_MODEL on a refusal. Sonnet and Haiku (trials only) don't take that fallback, so
-    a refusal there is counted as one."""
-    fallback = {"betas": ["server-side-fallback-2026-06-01"], "fallbacks": [{"model": FALLBACK_MODEL}]} \
-        if model.startswith("claude-opus") else {}
-    return client.beta.messages.create(
-        model=model, max_tokens=16000, system=system,
-        messages=[{"role": "user", "content": text}],
-        output_config={"effort": effort, "format": {"type": "json_schema", "schema": SCHEMA}}, **fallback)
+def call(client, model: str, effort: str, system: str, text: str) -> llm.Reply:
+    """Opus falls back to FALLBACK_MODEL on a refusal. Other models (trials only) don't take that fallback, so a
+    refusal there is counted as one."""
+    return llm.complete(client, model, effort, system, SCHEMA, text)
 
 
 def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "medium",
               monthly_cap_usd: float = 20.0, limit: int | None = None, system: str = SYSTEM) -> dict:
-    import anthropic
-
     pv = prompt_version(model, effort, system)
     todo = _pending(conn, model, pv)
     stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "reused": 0, "items": 0,
@@ -360,23 +347,20 @@ def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "mediu
             break
         try:
             r = call(client, model, effort, system, p.text)
-        except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError) as e:
-            _log(conn, p, model, pv, error=f"{type(e).__name__}: {e}"[:500])
-            stats["stopped"] = f"API unavailable, will retry next run: {type(e).__name__}"
+        except llm.Unavailable as e:
+            _log(conn, p, model, pv, error=str(e)[:500])
+            stats["stopped"] = f"API unavailable, will retry next run: {e}"[:200]
             break
-        served = getattr(r, "model", model) or model
-        cost = _cost(served, r.usage)
-        egress_id = _log(conn, p, model, pv, request_id=getattr(r, "_request_id", None), stop_reason=r.stop_reason,
-                         served_by=served, input_tokens=r.usage.input_tokens, output_tokens=r.usage.output_tokens,
-                         cost_usd=cost)
-        stats["cost_usd"] += cost or 0.0
+        egress_id = _log(conn, p, model, pv, request_id=r.request_id, stop_reason=r.stop_reason,
+                         served_by=r.served_by, input_tokens=r.input_tokens, output_tokens=r.output_tokens,
+                         cost_usd=r.cost_usd)
+        stats["cost_usd"] += r.cost_usd or 0.0
         stats["read"] += 1
-        if r.stop_reason == "refusal":  # the whole chain declined: record it read, with nothing captured
+        if r.refused:  # the whole chain declined: record it read, with nothing captured
             stats["refused"] += 1
             _save(conn, p, model, pv, egress_id, [])
             continue
-        text = next(b.text for b in r.content if b.type == "text")
-        items = _items(p, json.loads(text)["items"])
+        items = _items(p, json.loads(r.text)["items"])
         _save(conn, p, model, pv, egress_id, items)
         stats["items"] += len(items)
     stats["cost_usd"] = round(stats["cost_usd"], 4)

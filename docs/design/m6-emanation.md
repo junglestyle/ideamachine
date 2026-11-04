@@ -20,6 +20,10 @@ For M6:
 3. **Bridge proposals as faint dashed links.** The "negative space": connections the evidence suggests that I haven't
    made. These are hypotheses, never edges, until I keep them.
 
+**2D, not 3D** (2026-11-04). Depth hides neighbours and makes you orbit to find them; motion (replay, new evidence
+arriving, the camera flying to a lens) earns more than a third axis of meaning. A faster renderer (WebGL) doesn't
+need 3D positions, and changing the pipeline's stable positions to 3D later would reset where everything is.
+
 ## Encodings
 
 | Channel | Shows | Why it's safe |

@@ -289,44 +289,45 @@ def _pairs_as_shown(text: str) -> dict[str, str]:
     return out
 
 
-def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: str = "low") -> dict:
+def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: str = "low", scrubber=None) -> dict:
     """A model marks every pair on the sheet, blind to my marks, into draft-<model>-<effort>.json. Each request goes
-    to the egress log, like every other call that sends what was said."""
-    from im import themes
-    from im.extract import _cost
+    to the egress log, like every other call that sends what was said; with a scrubber (policy C), names said are
+    pseudonymized first."""
+    from im import llm, names, themes
 
     key = json.loads((folder / "key.json").read_text())
     shown = _pairs_as_shown((folder / "sheet.md").read_text())
-    out_path = folder / f"draft-{model}-{effort}.json"
+    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}.json"
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     pv = themes.version(DRAFT_SYSTEM, DRAFT_SCHEMA, model, effort)
-    fallback = {"betas": ["server-side-fallback-2026-06-01"], "fallbacks": [{"model": "claude-opus-4-8"}]} \
-        if model.startswith("claude-opus") else {}
+    policy = scrubber.policy if scrubber else _policy()
     cost = 0.0
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         if num in got or num not in shown:
             continue
-        r = client.beta.messages.create(
-            model=model, max_tokens=4000, system=DRAFT_SYSTEM, messages=[{"role": "user", "content": shown[num]}],
-            output_config={"effort": effort, "format": {"type": "json_schema", "schema": DRAFT_SCHEMA}}, **fallback)
-        served = getattr(r, "model", model) or model
+        text, back = shown[num], {}
+        if scrubber:
+            (text,), back, _ = scrubber.scrub([text])
+        r = llm.complete(client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, text, max_tokens=4000)
         segs = [s for (s,) in conn.execute(
             """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
                WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
-        c = _cost(served, r.usage)
         conn.execute(
             """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version,
                  payload, payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
                VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (segs, model, pv, _policy(), shown[num], _sha(shown[num]), getattr(r, "_request_id", None),
-             r.stop_reason, served, r.usage.input_tokens, r.usage.output_tokens, c))
-        cost += c or 0.0
-        if r.stop_reason == "refusal":
+            (segs, model, pv, policy, text, _sha(text), r.request_id, r.stop_reason, r.served_by, r.input_tokens,
+             r.output_tokens, r.cost_usd))
+        cost += r.cost_usd or 0.0
+        if r.refused:
             got[num] = {"label": "unsure", "direction": "none", "analogy": "", "refused": True}
         else:
-            got[num] = json.loads(next(b.text for b in r.content if b.type == "text"))
+            got[num] = json.loads(r.text)
+            if got[num].get("analogy"):
+                got[num]["analogy"] = names.unscrub(got[num]["analogy"], back)
         out_path.write_text(json.dumps(got, indent=2))   # as it goes: a rerun picks up where this stopped
-    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "prompt_version": pv}
+    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "prompt_version": pv,
+            "policy": policy}
 
 
 def _policy() -> str:
