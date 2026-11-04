@@ -288,7 +288,8 @@ DRAFT_SCHEMA = {
 }
 
 
-SUMMARY_LINE = re.compile(r"^\s*Claude's summary:.*$", re.M)
+# On its own line under the quotes, or straight after "A." when nothing said is on record: the label stays.
+SUMMARY_LINE = re.compile(r"^(\s*(?:[AB]\.\s*)?)Claude's summary:.*$", re.M)
 QUOTES_ONLY = ("Each side shows what was said, then a summary of it; judge by what was said, since the summary can "
                "be wrong.", "Each side shows what was said.")
 
@@ -307,7 +308,8 @@ def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     system = DRAFT_SYSTEM[question].replace(*QUOTES_ONLY) if quotes_only else DRAFT_SYSTEM[question]
     if quotes_only:
-        shown = {n: SUMMARY_LINE.sub("", t) for n, t in shown.items()}
+        shown = {n: SUMMARY_LINE.sub(lambda m: m.group(1) + ("(nothing said on record)" if m.group(1).strip() else ""),
+                                     t) for n, t in shown.items()}
     policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     cost, failed = 0.0, []
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
