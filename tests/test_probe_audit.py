@@ -104,3 +104,23 @@ def test_agreement_counts_only_pairs_both_answered():
     r = probe_audit.agreement(mine, theirs)
     assert (r["pairs"], r["agree"], r["precision"], r["recall"]) == (2, 0.5, 0.5, 1.0)
     assert (r["found"], r["invented"], r["missed"]) == ([1], [2], [])
+
+
+def test_a_sheet_from_one_set_leaves_out_pairs_already_asked(lattice_with_clusters, tmp_path):  # noqa: F811
+    first, second = tmp_path / "one", tmp_path / "two"
+    probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", first)
+    out = probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", second, only="model", size=5,
+                            exclude_folders=[first])
+    asked = probe_audit.earlier([first])
+    pairs = json.loads((second / "key.json").read_text())["pairs"].values()
+    assert out["by_set"] == {"model": len(pairs)} and all(p["set"] == "model" for p in pairs)
+    assert not {tuple(p["ideas"]) for p in pairs} & asked
+
+
+def test_a_quotes_only_draft_never_shows_the_summaries(lattice_with_clusters, tmp_path):  # noqa: F811
+    probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", tmp_path)
+    model = FakeProposer()
+    d = probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-sonnet-5-5", quotes_only=True)
+    assert d["draft"].endswith("-low-quotes.json") and model.calls
+    assert not any("Claude's summary" in c["messages"][0]["content"] for c in model.calls)
+    assert "then a summary" not in model.calls[0]["system"] and "> \"" in model.calls[0]["messages"][0]["content"]

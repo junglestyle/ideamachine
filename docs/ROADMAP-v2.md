@@ -63,3 +63,10 @@ model (B3; Opus stayed in 2026-10).
    facet an analogy rests on. Open: `im audit-analogies` asks the question of unrelated pairs proposed by four
    structure lines per idea, by a model reading every idea, and at random. `im audit-tension` does the same for
    tension, which B4's first sheet found twice.
+9. Do summaries say more than the quotes? The first tension sheet (2026-11-04): the two tensions three models agreed
+   on and I didn't were made by the summaries ("comfort beats the stigma" for "they're pretty comfy"), and only
+   Sonnet beat chance at all (2 of my 5, precision 0.5), so a tension pass proposes for me to keep, not links on
+   its own. Every stage that reads summaries (matching, links, the sky, these sheets) inherits what they add.
+   Plan: a faithfulness pass after extraction, a cheap decision model like Jev, asking of each capture whether its
+   summary claims anything its quotes don't; an unfaithful summary is rejected and rewritten, not kept. Measure
+   first: how often it happens on a sample, checked by me, and whether the extraction prompt alone fixes it.
