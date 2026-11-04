@@ -30,7 +30,7 @@ NER_THRESHOLD = 0.5
 FINDER = f"{NER_MODEL}@{NER_THRESHOLD}"
 CHUNK_WORDS = 200        # GLiNER sees 384 tokens: a longer line is read in pieces of about this many words
 BATCH = 32
-THREADS_ENV = "IM_NER_THREADS"   # torch threads per process on the CPU (default 2), so parallel runs share cores
+THREADS_ENV = "IM_NER_THREADS"   # torch threads on the CPU: overrides the default, 2 (or every core for `warm`)
 COMMON = 4.5             # Zipf: "will" and "may" are above, "julie" and "mark" below
 TOKEN = re.compile(r"\bP-[A-Z2-7]{5}\b")
 NOT_NAMES = {"i", "me", "my", "you", "he", "she", "they", "we", "him", "her", "them", "us", "mom", "dad", "god"}
@@ -222,14 +222,18 @@ class Gliner:
 
     id = FINDER
 
-    def __init__(self, model: str = NER_MODEL, threshold: float = NER_THRESHOLD, batch: int = BATCH):
+    def __init__(self, model: str = NER_MODEL, threshold: float = NER_THRESHOLD, batch: int = BATCH,
+                 threads: int = 2):
+        """`threads`: torch threads on the CPU. Two by default, so runs and trials in parallel share the cores;
+        `warm`, which runs alone, takes them all. IM_NER_THREADS overrides either."""
         self.model_name, self.threshold, self.batch, self._model = model, threshold, batch, None
+        self.threads = int(os.environ.get(THREADS_ENV) or threads)
 
     def _load(self):
         if self._model is None:
             import torch
             from gliner import GLiNER
-            torch.set_num_threads(int(os.environ.get(THREADS_ENV, "2")))
+            torch.set_num_threads(self.threads)
             self._model = GLiNER.from_pretrained(self.model_name, revision=NER_REVISION)
             if torch.cuda.is_available():
                 self._model = self._model.to("cuda")
