@@ -397,6 +397,11 @@ def cmd_audit_probe(args) -> None:
             _print(probe_audit.draft(conn, llm.client_for(args.model), folder, args.model, args.effort, scrubber,
                                      args.quotes_only))
             return
+        if args.question == "summary":
+            from im import summary_audit
+
+            _print(summary_audit.write(conn, folder, args.seed, args.size or summary_audit.SIZE))
+            return
         import anthropic
 
         from im.backends import SentenceEmbedder
@@ -715,10 +720,14 @@ def main(argv=None) -> None:
     ae.add_argument("--effort", default="low", help="draft: the candidate's effort")
     ae.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names said")
     ae.set_defaults(func=cmd_audit_edges)
-    for name, question, what in (("audit-analogies", "analogy", "analogies between unrelated ideas"),
-                                 ("audit-tension", "tension", "ideas that pull against each other")):
-        pa = sub.add_parser(name, help=f"a blind sheet of possible {what}, proposed several ways; score my marks "
-                                       "(sheet sends to Claude)")
+    for name, question, what in (
+            ("audit-analogies", "analogy", "a blind sheet of possible analogies between unrelated ideas, proposed "
+                                           "several ways (sends to Claude); score my marks"),
+            ("audit-tension", "tension", "a blind sheet of possible tensions, proposed several ways (sends to "
+                                         "Claude); score my marks"),
+            ("audit-summaries", "summary", "a blind sheet of extraction trials' summaries: do they say more than "
+                                           "what was said? (sends nothing); score my marks")):
+        pa = sub.add_parser(name, help=what)
         pa.add_argument("action", choices=["sheet", "draft", "score"])
         pa.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
         pa.add_argument("--seed", type=int, default=9, help="the sample and shuffle's seed")
