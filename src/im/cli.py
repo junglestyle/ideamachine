@@ -345,7 +345,30 @@ def cmd_audit_edges(args) -> None:
         _print(edge_audit.score(Path(args.folder)))
         return
     with db.connect(db.pipeline_dsn()) as conn:
+        if args.action == "draft":
+            import anthropic
+
+            _print(edge_audit.draft(conn, anthropic.Anthropic(), Path(args.folder), args.model, args.effort))
+            return
         _print(edge_audit.write(conn, Path(args.folder), args.seed, args.size))
+
+
+def cmd_analogy_spike(args) -> None:
+    """Rank each `analogy:` pair's partner by structure and by topic (sends to Claude; writes into the folder)."""
+    from pathlib import Path
+
+    import anthropic
+
+    from im import analogy_spike
+    from im.backends import SentenceEmbedder
+
+    cfg = config.load()
+    with db.connect(db.pipeline_dsn()) as conn:
+        out = analogy_spike.run(conn, anthropic.Anthropic(), SentenceEmbedder(cfg.lattice.embedding_model),
+                                Path(args.folder), args.others)
+    _print({k: v for k, v in out.items() if k != "pairs_detail"} | {"pairs": [
+        {k: r[k] for k in ("pair", "rank_by_structure", "rank_by_topic", "note", "structure_a", "structure_b")}
+        for r in out["pairs_detail"]]})
 
 
 def cmd_audit_dedupe(args) -> None:
@@ -615,11 +638,18 @@ def main(argv=None) -> None:
     ad.add_argument("--seed", type=int, default=5, help="the sample and shuffle's seed")
     ad.set_defaults(func=cmd_audit_dedupe)
     ae = sub.add_parser("audit-edges", help="B4: a blind sheet of pairs of clusters to type; tally my marks")
-    ae.add_argument("action", choices=["sheet", "score"])
+    ae.add_argument("action", choices=["sheet", "score", "draft"],
+                    help="draft: a model marks the same sheet blind (sends to Claude); score then compares it with me")
     ae.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
     ae.add_argument("--seed", type=int, default=4, help="the sample and shuffle's seed")
     ae.add_argument("--size", type=int, default=50, help="how many pairs")
+    ae.add_argument("--model", default="claude-opus-5-5", help="draft: the candidate model")
+    ae.add_argument("--effort", default="low", help="draft: the candidate's effort")
     ae.set_defaults(func=cmd_audit_edges)
+    sp = sub.add_parser("analogy-spike", help="can structure find my analogy pairs where topic can't? (sends to Claude)")
+    sp.add_argument("folder", help="a marked B4 sheet's folder, e.g. /saved/b4-1")
+    sp.add_argument("--others", type=int, default=300, help="other clusters to rank the partners among")
+    sp.set_defaults(func=cmd_analogy_spike)
     so = sub.add_parser("seed-observations",
                         help="what I said into the ChatGPT Idea Machine, from its export, as archive observations")
     so.add_argument("path", help="the conversation's export (Markdown), e.g. /saved/chatgpt-idea-machine.md")

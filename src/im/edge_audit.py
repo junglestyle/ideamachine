@@ -238,6 +238,132 @@ def score(folder: Path) -> dict:
     for c in counts.values():
         for label, k in c.items():
             total[label] = total.get(label, 0) + k
+    mine = {num: {"label": m.get("label"), "note": m.get("note")} for num, m in got.items()}
+    drafts = {d.stem.removeprefix("draft-"): agreement(mine, json.loads(d.read_text()))
+              for d in sorted(folder.glob("draft-*.json"))}
     return {"benchmark": key["benchmark"], "marked": len(labels), "missing": missing, "labels": total,
             "by_set": {s: c for s, c in counts.items() if c},
-            "direction_given": f"{directed['given']} of {directed['of']}", "notes": notes, "marks": labels}
+            "direction_given": f"{directed['given']} of {directed['of']}", "notes": notes,
+            **({"drafts": drafts} if drafts else {}), "marks": labels}
+
+
+# --- A model's marks on the same sheet (B4's agreement test) ---------------------------------------------------------
+
+DRAFT_SYSTEM = """You type the relationship between two clusters from my idea lattice, captured from my \
+conversations. Each side shows what was said, then a summary of it; judge by what was said, since the summary can \
+be wrong. "me" is me, "someone" anyone else. Choose one label:
+- supports: one is a reason to believe the other: evidence, an example, an argument. Test: if A is true, is B more \
+believable, while still saying the same thing?
+- extends: one takes the other further: applies it, generalizes it, builds on it, or is a later version of it. \
+Test: does A say something new that B made possible?
+- contradicts: they can't both be held as stated, including a change of mind.
+- related: the same subject, but none of the above. Test: knowing one doesn't change how you read the other.
+- none: no real connection. Sharing a broad area (relationships, emotions, work) isn't a connection.
+- same: the same idea said twice.
+- unsure.
+For supports and extends, give the direction: "A>B" if A supports or extends B, "B>A" the other way, or "both" if \
+it runs both ways or you can't say; otherwise "none".
+Separately, say whether the two are analogous: about different subjects, but with the same underlying structure \
+(the same move, pattern or mechanism in two domains). If they are, name the shared structure in a few words; \
+otherwise leave it empty. Don't evaluate the ideas."""
+
+DRAFT_SCHEMA = {
+    "type": "object",
+    "properties": {"label": {"type": "string", "enum": ["supports", "extends", "contradicts", "related", "none",
+                                                          "same", "unsure"]},
+                   "direction": {"type": "string", "enum": ["A>B", "B>A", "both", "none"]},
+                   "analogy": {"type": "string"}},
+    "required": ["label", "direction", "analogy"], "additionalProperties": False,
+}
+CORE = ("none", "related", "extends")   # what B4's revised bar would score (macro-F1)
+
+
+def _pairs_as_shown(text: str) -> dict[str, str]:
+    """Pair number -> what the sheet showed for it, without my mark or note: what the model sees is what I saw."""
+    out, n, lines = {}, None, []
+    for line in text.split("\n## ")[1:]:
+        head, _, body = line.partition("\n")
+        n = head.strip()
+        lines = [x for x in body.splitlines() if not re.match(r"\s*(mark|note):", x, re.I)]
+        out[n] = "\n".join(lines).strip()
+    return out
+
+
+def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: str = "low") -> dict:
+    """A model marks every pair on the sheet, blind to my marks, into draft-<model>-<effort>.json. Each request goes
+    to the egress log, like every other call that sends what was said."""
+    from im import themes
+    from im.extract import _cost
+
+    key = json.loads((folder / "key.json").read_text())
+    shown = _pairs_as_shown((folder / "sheet.md").read_text())
+    out_path = folder / f"draft-{model}-{effort}.json"
+    got = json.loads(out_path.read_text()) if out_path.exists() else {}
+    pv = themes.version(DRAFT_SYSTEM, DRAFT_SCHEMA, model, effort)
+    fallback = {"betas": ["server-side-fallback-2026-06-01"], "fallbacks": [{"model": "claude-opus-4-8"}]} \
+        if model.startswith("claude-opus") else {}
+    cost = 0.0
+    for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
+        if num in got or num not in shown:
+            continue
+        r = client.beta.messages.create(
+            model=model, max_tokens=4000, system=DRAFT_SYSTEM, messages=[{"role": "user", "content": shown[num]}],
+            output_config={"effort": effort, "format": {"type": "json_schema", "schema": DRAFT_SCHEMA}}, **fallback)
+        served = getattr(r, "model", model) or model
+        segs = [s for (s,) in conn.execute(
+            """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
+               WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
+        c = _cost(served, r.usage)
+        conn.execute(
+            """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version,
+                 payload, payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
+               VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (segs, model, pv, _policy(), shown[num], _sha(shown[num]), getattr(r, "_request_id", None),
+             r.stop_reason, served, r.usage.input_tokens, r.usage.output_tokens, c))
+        cost += c or 0.0
+        if r.stop_reason == "refusal":
+            got[num] = {"label": "unsure", "direction": "none", "analogy": "", "refused": True}
+        else:
+            got[num] = json.loads(next(b.text for b in r.content if b.type == "text"))
+        out_path.write_text(json.dumps(got, indent=2))   # as it goes: a rerun picks up where this stopped
+    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "prompt_version": pv}
+
+
+def _policy() -> str:
+    from im import egress
+    return egress.POLICY_VERSION
+
+
+def _sha(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def agreement(mine: dict, theirs: dict) -> dict:
+    """How a model's marks compare with mine, on the pairs I didn't mark unsure.
+
+    mine: pair -> {"label", "note"}; theirs: pair -> {"label", "analogy"}."""
+    pairs = [n for n, m in mine.items() if m.get("label") not in (None, "unsure") and n in theirs]
+    confusion: dict = {}
+    for n in pairs:
+        row = confusion.setdefault(mine[n]["label"], {})
+        row[theirs[n]["label"]] = row.get(theirs[n]["label"], 0) + 1
+    f1 = {}
+    for label in CORE:
+        tp = sum(mine[n]["label"] == label and theirs[n]["label"] == label for n in pairs)
+        fp = sum(mine[n]["label"] != label and theirs[n]["label"] == label for n in pairs)
+        fn = sum(mine[n]["label"] == label and theirs[n]["label"] != label for n in pairs)
+        f1[label] = round(2 * tp / (2 * tp + fp + fn), 3) if tp + fp + fn else None
+    scored = [v for v in f1.values() if v is not None]
+    invented = [int(n) for n in pairs if theirs[n]["label"] in ("supports", "contradicts")
+                and mine[n]["label"] not in ("supports", "contradicts")]
+    my_analogies = {n for n, m in mine.items() if (m.get("note") or "").lower().startswith("analogy")}
+    their_analogies = {n for n in theirs if (theirs[n].get("analogy") or "").strip()}
+    return {"pairs": len(pairs),
+            "agree": round(sum(mine[n]["label"] == theirs[n]["label"] for n in pairs) / len(pairs), 3)
+            if pairs else None,
+            "f1": f1, "macro_f1_core": round(sum(scored) / len(scored), 3) if scored else None,
+            "invented_supports_or_contradicts": sorted(invented),
+            "analogies": {"mine": sorted(map(int, my_analogies)), "theirs": sorted(map(int, their_analogies)),
+                          "both": sorted(map(int, my_analogies & their_analogies))},
+            "confusion_mine_to_theirs": confusion}

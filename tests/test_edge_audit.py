@@ -7,6 +7,7 @@ import pytest
 
 from im import edge_audit, observations
 
+from helpers import table
 from test_lattice import lat_setup
 
 
@@ -71,3 +72,64 @@ def test_marks_read_shorthand_and_ignore_blanks():
     sheet = "## 1\n\nmark: sup A>B\nnote: \n\n## 2\n\nmark: \nnote: \n\n## 3\n\nmark: rel B>A\nnote: odd one\n"
     assert edge_audit.marks(sheet) == {"1": {"label": "supports", "direction": "A>B"},
                                        "3": {"label": "related", "direction": None, "note": "odd one"}}
+
+
+class FakeTyper:
+    """Answers every pair with the same label, calls one analogous, and records what it was shown."""
+
+    def __init__(self, label="related"):
+        import json as _json
+        from types import SimpleNamespace
+        self.calls, self.label, self._json, self._ns = [], label, _json, SimpleNamespace
+        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self.create))
+
+    def create(self, **kw):
+        self.calls.append(kw)
+        ns = self._ns
+        if "structures" in kw["output_config"]["format"]["schema"]["properties"]:
+            n = kw["messages"][0]["content"].count("\n")
+            text = self._json.dumps({"structures": [{"idea": i, "structure": "an agent picks the safe option"}
+                                                    for i in range(1, n + 1)]})
+        else:
+            text = self._json.dumps({"label": self.label, "direction": "none",
+                                     "analogy": "same move" if len(self.calls) == 1 else ""})
+        return ns(content=[ns(type="text", text=text)], stop_reason="end_turn", model="claude-opus-5-5",
+                  _request_id="r", usage=ns(input_tokens=500, output_tokens=40))
+
+
+def test_agreement_scores_the_core_labels_and_counts_invented_ones():
+    mine = {"1": {"label": "none", "note": "analogy: x"}, "2": {"label": "related", "note": None},
+            "3": {"label": "extends", "note": None}, "4": {"label": "unsure", "note": None}}
+    theirs = {"1": {"label": "none", "analogy": "x"}, "2": {"label": "contradicts", "analogy": ""},
+              "3": {"label": "extends", "analogy": ""}, "4": {"label": "none", "analogy": ""}}
+    r = edge_audit.agreement(mine, theirs)
+    assert r["pairs"] == 3 and r["agree"] == round(2 / 3, 3)   # my unsure doesn't count either way
+    assert r["f1"] == {"none": 1.0, "related": 0.0, "extends": 1.0} and r["macro_f1_core"] == round(2 / 3, 3)
+    assert r["invented_supports_or_contradicts"] == [2]
+    assert r["analogies"]["both"] == [1]
+
+
+def test_a_draft_sees_the_sheet_without_my_marks_and_score_compares(lattice_with_clusters, tmp_path):
+    edge_audit.write(lattice_with_clusters, tmp_path, size=4)
+    fill(tmp_path, lambda p: ("rel", "analogy: secret note"))
+    claude = FakeTyper()
+    out = edge_audit.draft(lattice_with_clusters, claude, tmp_path)
+    assert out["pairs"] == 4 and len(claude.calls) == 4
+    sent = "\n".join(c["messages"][0]["content"] for c in claude.calls)
+    assert "secret note" not in sent and "mark:" not in sent and "Claude's summary" in sent
+    assert table(lattice_with_clusters, "SELECT count(*) FROM im.egress_log WHERE prompt_version = %s",
+                 out["prompt_version"]) == [(4,)]
+    assert edge_audit.draft(lattice_with_clusters, claude, tmp_path)["pairs"] == 4 and len(claude.calls) == 4
+    d = edge_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low"]
+    assert d["agree"] == 1.0 and d["analogies"]["both"] == [1]
+
+
+def test_the_analogy_spike_ranks_partners_by_structure_and_topic(lattice_with_clusters, tmp_path):
+    from im import analogy_spike
+    from test_triage import HashEmbedder
+
+    edge_audit.write(lattice_with_clusters, tmp_path, size=2)
+    fill(tmp_path, lambda p: ("none", "analogy: same move"))
+    r = analogy_spike.run(lattice_with_clusters, FakeTyper(), HashEmbedder(), tmp_path, others=10)
+    assert r["pairs"] == 2 and (tmp_path / "structures.json").exists()
+    assert all(1 <= p["rank_by_structure"] and 1 <= p["rank_by_topic"] for p in r["pairs_detail"])
