@@ -349,14 +349,18 @@ def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: st
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     pv = themes.version(DRAFT_SYSTEM, DRAFT_SCHEMA, model, effort)
     policy = scrubber.policy if scrubber else _policy()
-    cost = 0.0
+    cost, failed = 0.0, []
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         if num in got or num not in shown:
             continue
         text, back = shown[num], {}
         if scrubber:
             (text,), back, _ = scrubber.scrub([text])
-        r = llm.complete(client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, text, max_tokens=4000)
+        try:
+            r = llm.complete(client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, text, max_tokens=4000)
+        except RuntimeError as e:   # an answer that never kept to the schema: skipped, so a rerun asks again
+            failed.append({"pair": int(num), "error": str(e)[:300]})
+            continue
         segs = [s for (s,) in conn.execute(
             """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
                WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
@@ -375,7 +379,7 @@ def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: st
                 got[num]["analogy"] = names.unscrub(got[num]["analogy"], back)
         out_path.write_text(json.dumps(got, indent=2))   # as it goes: a rerun picks up where this stopped
     return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "prompt_version": pv,
-            "policy": policy}
+            "policy": policy, **({"failed": failed} if failed else {})}
 
 
 def _policy() -> str:
