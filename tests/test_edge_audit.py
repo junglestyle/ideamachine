@@ -151,6 +151,7 @@ def test_sheets_pool_into_one_benchmark_counting_a_shared_pair_once(lattice_with
     unique = len(first | {tuple(p["ideas"]) for p in keys[1].values()})
     assert r["marked"] == unique and len(r["counted_once"]) == len(shared)
     assert all(n.startswith("two/") for n in r["counted_once"])   # the first sheet's mark stands
-    assert r["labels"] == {"related": len(first), "none": unique - len(first)}
+    expected = {"related": len(first), "none": unique - len(first)}
+    assert r["labels"] == {label: k for label, k in expected.items() if k}   # the second sheet may add none
     d = r["drafts"]["m-low"]   # only over the pairs that model drafted
     assert d["pairs"] == len(first) and d["agree"] == 1.0
