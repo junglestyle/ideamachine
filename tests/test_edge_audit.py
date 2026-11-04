@@ -64,7 +64,7 @@ def test_scoring_tallies_labels_direction_and_notes(lattice_with_clusters, tmp_p
     assert r["missing"] == [] and r["by_set"]["evolves"] == {"extends": 1}
     assert r["direction_given"] == "1 of 1" and [m["direction"] for m in r["marks"] if m["set"] == "evolves"] == ["B>A"]
     near = sum(r["by_set"]["near"].values())
-    assert near and r["by_set"]["near"] == {"contradicts": near}
+    assert near and r["by_set"]["near"] == {"tension": near}   # `con`, from before labels 2, reads as tension
     assert [n["note"] for n in r["notes"]] == ["a later version, not an extension"]
 
 
@@ -104,8 +104,10 @@ def test_agreement_scores_the_core_labels_and_counts_invented_ones():
               "3": {"label": "extends", "analogy": ""}, "4": {"label": "none", "analogy": ""}}
     r = edge_audit.agreement(mine, theirs)
     assert r["pairs"] == 3 and r["agree"] == round(2 / 3, 3)   # my unsure doesn't count either way
-    assert r["f1"] == {"none": 1.0, "related": 0.0, "extends": 1.0} and r["macro_f1_core"] == round(2 / 3, 3)
-    assert r["invented_supports_or_contradicts"] == [2]
+    # An old draft's `contradicts` is `tension`; a label I never gave scores but isn't averaged in.
+    assert r["f1"] == {"none": 1.0, "related": 0.0, "extends": 1.0, "tension": 0.0}
+    assert r["macro_f1_core"] == round(2 / 3, 3)
+    assert r["invented_supports_or_tension"] == [2] and r["tension_precision"] == 0.0
     assert r["analogies"]["both"] == [1]
 
 
@@ -120,7 +122,7 @@ def test_a_draft_sees_the_sheet_without_my_marks_and_score_compares(lattice_with
     assert table(lattice_with_clusters, "SELECT count(*) FROM im.egress_log WHERE prompt_version = %s",
                  out["prompt_version"]) == [(4,)]
     assert edge_audit.draft(lattice_with_clusters, claude, tmp_path)["pairs"] == 4 and len(claude.calls) == 4
-    d = edge_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low"]
+    d = edge_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low-labels2"]
     assert d["agree"] == 1.0 and d["analogies"]["both"] == [1]
 
 
