@@ -146,3 +146,13 @@ def test_a_filter_that_drops_what_was_new_to_me_says_so():
     theirs = {"1": {"answer": "yes"}, "2": {"answer": "yes"}, "3": {"answer": "no"}, "4": {"answer": "no"}}
     r = probe_audit.agreement(mine, theirs)
     assert (r["precision"], r["recall"], r["recall_new"], r["new_dropped"]) == (1.0, round(2 / 3, 3), 0.5, [4])
+
+
+def test_a_draft_with_probabilities_is_read_at_each_cut_over_every_pair():
+    mine = {"1": "yes", "2": "no", "3": "new", "4": "no"}
+    theirs = {"1": {"answer": "unsure", "p": 0.55}, "2": {"answer": "unsure", "p": 0.62},
+              "3": {"answer": "yes", "p": 0.9}, "4": {"answer": "no", "p": 0.1}}
+    r = probe_audit.at_cuts(mine, theirs)
+    assert r["pairs"] == 4
+    assert r["cuts"]["0.5"] == {"flagged": 3, "precision": round(2 / 3, 3), "recall": 1.0, "recall_new": 1.0}
+    assert r["cuts"]["0.7"] == {"flagged": 1, "precision": 1.0, "recall": 0.5, "recall_new": 1.0}
