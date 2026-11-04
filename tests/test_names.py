@@ -92,3 +92,10 @@ def test_the_backlog_goes_in_chunks_newest_first_until_none_are_left(pipe, cfg, 
         r = names.pending(pipe, finder, 4)
         chunks, more = chunks + 1, r["more"]
     assert len(finder.asked) == total and names.pending(pipe, finder, 4) == {"items": 0, "more": False}
+
+
+def test_threads_default_to_two_and_the_environment_overrides(monkeypatch):
+    monkeypatch.delenv(names.THREADS_ENV, raising=False)
+    assert names.Gliner().threads == 2 and names.Gliner(threads=16).threads == 16
+    monkeypatch.setenv(names.THREADS_ENV, "4")
+    assert names.Gliner(threads=16).threads == 4

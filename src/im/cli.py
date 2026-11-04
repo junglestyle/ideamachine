@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from im import config, db, fixtures, label, migrate, pipeline, projects, triage
@@ -350,7 +351,7 @@ def cmd_names(args) -> None:
     with db.connect(db.pipeline_dsn()) as conn:
         episodes = [eid for (eid,) in conn.execute("SELECT episode_id FROM im.episodes WHERE current")] \
             if args.all else trial.sample(conn, args.sample)
-        _print(names.warm(conn, names.Gliner(), episodes))
+        _print(names.warm(conn, names.Gliner(threads=os.cpu_count() or 2), episodes))   # alone: every core
 
 
 def cmd_audit_edges(args) -> None:
