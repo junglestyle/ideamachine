@@ -394,14 +394,16 @@ def cmd_audit_probe(args) -> None:
             from im import llm, names
 
             scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
-            _print(probe_audit.draft(conn, llm.client_for(args.model), folder, args.model, args.effort, scrubber))
+            _print(probe_audit.draft(conn, llm.client_for(args.model), folder, args.model, args.effort, scrubber,
+                                     args.quotes_only))
             return
         import anthropic
 
         from im.backends import SentenceEmbedder
 
         embedder = SentenceEmbedder(cfg.lattice.embedding_model) if args.question == "analogy" else None
-        _print(probe_audit.write(conn, anthropic.Anthropic(), embedder, args.question, folder, args.seed))
+        _print(probe_audit.write(conn, anthropic.Anthropic(), embedder, args.question, folder, args.seed, args.only,
+                                 args.size, [Path(f) for f in args.exclude]))
 
 
 def cmd_analogy_spike(args) -> None:
@@ -723,6 +725,10 @@ def main(argv=None) -> None:
         pa.add_argument("--model", default="claude-opus-5-5", help="draft: the model answering, e.g. z-ai/glm-5.3")
         pa.add_argument("--effort", default="low", help="draft: its effort")
         pa.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names")
+        pa.add_argument("--quotes-only", action="store_true", help="draft: show the model what was said, no summaries")
+        pa.add_argument("--only", help="sheet: draw every pair from one set, e.g. model")
+        pa.add_argument("--size", type=int, help="sheet, with --only: how many pairs (default 30)")
+        pa.add_argument("--exclude", nargs="*", default=[], help="sheet: leave out pairs on these earlier sheets")
         pa.set_defaults(func=cmd_audit_probe, question=question)
     sp = sub.add_parser("analogy-spike", help="can structure find my analogy pairs where topic can't? (sends to Claude)")
     sp.add_argument("folder", help="a marked B4 sheet's folder, e.g. /saved/b4-1")

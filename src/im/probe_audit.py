@@ -134,10 +134,10 @@ def facets(conn, client, ids: list[str], folder: Path) -> dict[str, list[str]]:
     return out
 
 
-def picks(conn, client, question: str, ids: list[str]) -> list[dict]:
+def picks(conn, client, question: str, ids: list[str], n: int = PICKS) -> list[dict]:
     """A model's proposed pairs, reading every idea at once: [{"ideas": [a, b], "why": ...}], a < b."""
-    text = "Ideas:\n" + "\n".join(f"{n}. {_summary(conn, i)}" for n, i in enumerate(ids, 1))
-    answer = _ask(conn, client, PICK_MODEL, PICK_EFFORT, PICK_SYSTEM[question].format(n=PICKS), PICK_SCHEMA, text,
+    text = "Ideas:\n" + "\n".join(f"{k}. {_summary(conn, i)}" for k, i in enumerate(ids, 1))
+    answer = _ask(conn, client, PICK_MODEL, PICK_EFFORT, PICK_SYSTEM[question].format(n=n), PICK_SCHEMA, text,
                   ids) or {"pairs": []}
     out, seen = [], set()
     for p in answer["pairs"]:
@@ -196,25 +196,41 @@ def _limited(pairs: list[dict], n: int, taken: set) -> list[dict]:
     return out
 
 
-def build(conn, client, embedder, question: str, folder: Path, seed: int = 9) -> tuple[str, dict]:
+def earlier(folders: list[Path]) -> set[tuple]:
+    """The pairs already on these sheets, so a new one asks about new pairs."""
+    return {tuple(p["ideas"]) for f in folders for p in json.loads((f / "key.json").read_text())["pairs"].values()}
+
+
+def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, only: str | None = None,
+          size: int | None = None, exclude: set | None = None) -> tuple[str, dict]:
+    """`only` draws every pair from one set (e.g. `model`, the one that found tensions), `size` of them; `exclude`
+    leaves out pairs already asked about."""
     rng = random.Random(seed)
     rows = edge_audit._clusters(conn)
     mine = [r[0] for r in rows if r[2]]
     pool = edge_audit.candidates(conn) if question == "tension" else {}
-    sizes = SIZES[question]
+    sizes = {only: size or 30} if only else SIZES[question]
+    if only and only not in SIZES[question]:
+        raise SystemExit(f"--only is one of {', '.join(SIZES[question])}")
+    wanted = lambda kind: kind in sizes  # noqa: E731
+    n_picks = max(PICKS, 2 * sizes.get("model", 0) + len(exclude or ()))   # enough left after the excluded
     proposed: dict[str, list[dict]] = {}
     if question == "analogy":
         apart = unrelated(rows)
         far = {tuple(p["ideas"]) for p in apart}
-        proposed["facets"] = _facet_pairs(embedder, facets(conn, client, mine, folder), far)
-        proposed["model"] = [p for p in picks(conn, client, "analogy", mine) if tuple(p["ideas"]) in far]
-        proposed["random"] = rng.sample(apart, min(len(apart), 20 * sizes["random"]))
+        if wanted("facets"):
+            proposed["facets"] = _facet_pairs(embedder, facets(conn, client, mine, folder), far)
+        if wanted("model"):
+            proposed["model"] = [p for p in picks(conn, client, "analogy", mine, n_picks) if tuple(p["ideas"]) in far]
+        if wanted("random"):
+            proposed["random"] = rng.sample(apart, min(len(apart), 20 * sizes["random"]))
     else:
-        proposed["apart"] = rng.sample(pool["apart"], len(pool["apart"]))
-        proposed["levels"] = rng.sample(pool["levels"], len(pool["levels"]))
-        proposed["model"] = picks(conn, client, "tension", mine)
-        proposed["near"] = rng.sample(pool["near"], len(pool["near"]))
-    taken, picked = set(), []
+        for kind in ("apart", "levels", "near"):
+            if wanted(kind):
+                proposed[kind] = rng.sample(pool[kind], len(pool[kind]))
+        if wanted("model"):
+            proposed["model"] = picks(conn, client, "tension", mine, n_picks)
+    taken, picked = set(exclude or ()), []
     for kind, n in sizes.items():
         picked += [p | {"set": kind} for p in _limited(proposed[kind], n, taken)]
     lists = {kind: {tuple(p["ideas"]) for p in ps} for kind, ps in proposed.items() if kind not in ("random", "near")}
@@ -233,22 +249,23 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9) ->
             first, *rest = edge_audit._side(conn, idea) or ["(nothing said on record)"]
             lines += [f"{side}. {first.strip()}", *[f"   {x}" if x.startswith(">") else x for x in rest], ""]
         lines += ["mark: ", "note: ", ""]
-    key = {"benchmark": question, "seed": seed, "sizes": sizes,
+    key = {"benchmark": question, "seed": seed, "sizes": sizes, "excluded": len(exclude or ()),
            "available": {k: len(v) for k, v in proposed.items()},
            "pairs": {str(n): p for n, p in enumerate(picked, 1)}}
     return "\n".join(lines), key
 
 
-def write(conn, client, embedder, question: str, out: Path, seed: int = 9) -> dict:
+def write(conn, client, embedder, question: str, out: Path, seed: int = 9, only: str | None = None,
+          size: int | None = None, exclude_folders: list[Path] = ()) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     sheet, key = out / "sheet.md", out / "key.json"
     if sheet.exists() or key.exists():
         raise SystemExit(f"{out} already has a sheet; score it, or pick another folder")
-    text, k = build(conn, client, embedder, question, out, seed)
+    text, k = build(conn, client, embedder, question, out, seed, only, size, earlier(list(exclude_folders)))
     sheet.write_text(text)
     key.write_text(json.dumps(k, indent=2))
     sets = [p["set"] for p in k["pairs"].values()]
-    return {"sheet": str(sheet), "pairs": len(sets), "by_set": {s: sets.count(s) for s in SIZES[question]},
+    return {"sheet": str(sheet), "pairs": len(sets), "by_set": {s: sets.count(s) for s in k["sizes"]},
             "available": k["available"]}
 
 
@@ -271,17 +288,26 @@ DRAFT_SCHEMA = {
 }
 
 
-def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=None) -> dict:
+SUMMARY_LINE = re.compile(r"^\s*Claude's summary:.*$", re.M)
+QUOTES_ONLY = ("Each side shows what was said, then a summary of it; judge by what was said, since the summary can "
+               "be wrong.", "Each side shows what was said.")
+
+
+def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=None, quotes_only: bool = False) -> dict:
     """A model answers the sheet's question for every pair, blind to my marks, into draft-<model>-<effort>.json, as
-    it goes. Every request goes to the egress log; with a scrubber (policy C), names said are pseudonymized first."""
+    it goes. Every request goes to the egress log; with a scrubber (policy C), names said are pseudonymized first.
+    `quotes_only` leaves out Claude's summaries (into ...-quotes.json): a summary that says more than the quotes
+    can manufacture the very relation asked about."""
     from im import names
 
     key = json.loads((folder / "key.json").read_text())
     question = key["benchmark"]
     shown = edge_audit._pairs_as_shown((folder / "sheet.md").read_text())
-    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}.json"
+    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}{'-quotes' if quotes_only else ''}.json"
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
-    system = DRAFT_SYSTEM[question]
+    system = DRAFT_SYSTEM[question].replace(*QUOTES_ONLY) if quotes_only else DRAFT_SYSTEM[question]
+    if quotes_only:
+        shown = {n: SUMMARY_LINE.sub("", t) for n, t in shown.items()}
     policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     cost, failed = 0.0, []
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
