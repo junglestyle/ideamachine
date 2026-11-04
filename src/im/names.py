@@ -8,7 +8,9 @@ be turned back into a name. What comes back is mapped through the same table, lo
 Where names come from:
 - the people Hearsay knows as speakers (their labels);
 - my own names, and any others, from config (`[egress] my_names`, `names`);
-- a local entity model (GLiNER, pinned in the policy version), for anyone else.
+- a local entity model (GLiNER, pinned in the policy version), for anyone else. What it finds in each segment is
+  kept (im.segment_names), so a segment is looked at once, not once per process per run; `warm` fills it ahead
+  of a batch of trials. GLiNER reads lines in batches, and long ones in chunks it can see whole.
 
 Names are replaced where they're capitalized, as speech-to-text writes them. A name that's also a common word
 ("Will", "May") is left alone at the start of a line or sentence, where it's most likely the word.
@@ -19,13 +21,15 @@ import hashlib
 import hmac
 import os
 import re
-from functools import lru_cache
-
 from wordfreq import zipf_frequency
 
 KEY_ENV = "IM_NAME_KEY"
 NER_MODEL = "urchade/gliner_medium-v2.1"
 NER_THRESHOLD = 0.5
+FINDER = f"{NER_MODEL}@{NER_THRESHOLD}"
+CHUNK_WORDS = 200        # GLiNER sees 384 tokens: a longer line is read in pieces of about this many words
+BATCH = 32
+THREADS_ENV = "IM_NER_THREADS"   # torch threads per process on the CPU (default 2), so parallel runs share cores
 COMMON = 4.5             # Zipf: "will" and "may" are above, "julie" and "mark" below
 TOKEN = re.compile(r"\bP-[A-Z2-7]{5}\b")
 NOT_NAMES = {"i", "me", "my", "you", "he", "she", "they", "we", "him", "her", "them", "us", "mom", "dad", "god"}
@@ -59,11 +63,20 @@ class Scrubber:
         self.policy = policy or POLICY.format(model=NER_MODEL if finder else "none",
                                               threshold=NER_THRESHOLD if finder else 0)
 
-    def scrub(self, texts: list[str]) -> tuple[list[str], dict, list[str]]:
-        """The texts with names replaced; pseudonym -> the name as first said; and my pseudonyms, if I'm named."""
-        found = set(self.known)
-        if self.finder:
-            found |= {w for n in self.finder(texts) for w in words(n)}
+    def find(self, conn, segments: list[tuple]) -> set[str]:
+        """The names the finder sees in these (segment_id, text) pairs, through the cache when it's GLiNER's."""
+        if not self.finder:
+            return set()
+        if not hasattr(self.finder, "per_text"):
+            return set(self.finder([t for _, t in segments]))
+        return cached(conn, self.finder, segments)
+
+    def scrub(self, texts: list[str], found: set | None = None) -> tuple[list[str], dict, list[str]]:
+        """The texts with names replaced; pseudonym -> the name as first said; and my pseudonyms, if I'm named.
+        `found` is what the finder saw in them already (`find`); otherwise the finder reads them now."""
+        if found is None:
+            found = set(self.finder(texts)) if self.finder else set()
+        found = set(self.known) | {w for n in found for w in words(n)}
         if not found:
             return texts, {}, []
         alternation = "|".join(re.escape(w) for w in sorted(found, key=len, reverse=True))
@@ -91,22 +104,92 @@ def for_trials(conn, egress_config, finder=None) -> Scrubber:
                     finder or Gliner())
 
 
+def cached(conn, finder, segments: list[tuple]) -> set[str]:
+    """Names in these (segment_id, text) pairs: kept ones whose text hasn't changed, the rest found now and kept."""
+    sha = {sid: hashlib.sha256(text.encode()).hexdigest() for sid, text in segments}
+    have = {sid: found for sid, h, found in conn.execute(
+        "SELECT segment_id, text_sha256, names FROM im.segment_names WHERE finder = %s AND segment_id = ANY(%s)",
+        (finder.id, list(sha))) if h == sha[sid]}
+    todo = [(sid, text) for sid, text in dict(segments).items() if sid not in have]
+    if todo:
+        found = finder.per_text([text for _, text in todo])
+        with conn.cursor() as cur:
+            cur.executemany(
+                """INSERT INTO im.segment_names (segment_id, finder, text_sha256, names) VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (segment_id, finder) DO UPDATE SET text_sha256 = excluded.text_sha256,
+                     names = excluded.names, found_at = now()""",
+                [(sid, finder.id, sha[sid], f) for (sid, _), f in zip(todo, found)])
+        have |= {sid: f for (sid, _), f in zip(todo, found)}
+    return {n for found in have.values() for n in found}
+
+
+def warm(conn, finder, episode_ids: list, batch: int = 512) -> dict:
+    """Find the names in these episodes' segments ahead of time, in large batches."""
+    import time
+
+    start = time.monotonic()
+    rows = conn.execute(
+        """SELECT DISTINCT s.segment_id, s.text FROM im.episode_segments es
+           JOIN im.source_segments s USING (segment_id) WHERE es.episode_id = ANY(%s)""", (episode_ids,)).fetchall()
+    before = conn.execute("SELECT count(*) FROM im.segment_names WHERE finder = %s", (finder.id,)).fetchone()[0]
+    for i in range(0, len(rows), batch):
+        cached(conn, finder, rows[i:i + batch])
+    after = conn.execute("SELECT count(*) FROM im.segment_names WHERE finder = %s", (finder.id,)).fetchone()[0]
+    return {"episodes": len(episode_ids), "segments": len(rows), "newly_read": after - before,
+            "seconds": round(time.monotonic() - start, 1)}
+
+
+def chunks(text: str, size: int = CHUNK_WORDS) -> list[str]:
+    """A text in pieces of at most about `size` words, split between sentences where it can."""
+    out, cur = [], []
+    for sentence in re.split(r"(?<=[.!?])\s+", text.strip()):
+        w = sentence.split()
+        while len(w) > size:   # one sentence too long on its own
+            if cur:
+                out.append(" ".join(cur))
+                cur = []
+            out.append(" ".join(w[:size]))
+            w = w[size:]
+        if cur and len(cur) + len(w) > size:
+            out.append(" ".join(cur))
+            cur = []
+        cur += w
+    if cur:
+        out.append(" ".join(cur))
+    return out
+
+
 def unscrub(text: str, back: dict) -> str:
     return TOKEN.sub(lambda m: back.get(m.group(0), m.group(0)), text) if back else text
 
 
 class Gliner:
-    """People's names in each text, by GLiNER on the CPU. Loaded on first use; results cached by text."""
+    """People's names in each text, by GLiNER: on the GPU if there is one, else the CPU with a few threads."""
 
-    def __init__(self, model: str = NER_MODEL, threshold: float = NER_THRESHOLD):
-        self.model_name, self.threshold, self._model = model, threshold, None
+    id = FINDER
+
+    def __init__(self, model: str = NER_MODEL, threshold: float = NER_THRESHOLD, batch: int = BATCH):
+        self.model_name, self.threshold, self.batch, self._model = model, threshold, batch, None
+
+    def _load(self):
+        if self._model is None:
+            import torch
+            from gliner import GLiNER
+            torch.set_num_threads(int(os.environ.get(THREADS_ENV, "2")))
+            self._model = GLiNER.from_pretrained(self.model_name)
+            if torch.cuda.is_available():
+                self._model = self._model.to("cuda")
+        return self._model
+
+    def per_text(self, texts: list[str]) -> list[list[str]]:
+        pieces = [(i, c) for i, t in enumerate(texts) for c in chunks(t)]
+        out: list[list[str]] = [[] for _ in texts]
+        if pieces:
+            found = self._load().inference([c for _, c in pieces], ["person"], threshold=self.threshold,
+                                           batch_size=self.batch)
+            for (i, _), entities in zip(pieces, found):
+                out[i] += [e["text"] for e in entities]
+        return out
 
     def __call__(self, texts: list[str]) -> set[str]:
-        return {n for t in texts for n in self._names(t)}
-
-    @lru_cache(maxsize=200_000)  # noqa: B019 (one finder per process)
-    def _names(self, text: str) -> tuple[str, ...]:
-        if self._model is None:
-            from gliner import GLiNER
-            self._model = GLiNER.from_pretrained(self.model_name)
-        return tuple(e["text"] for e in self._model.predict_entities(text, ["person"], threshold=self.threshold))
+        return {n for found in self.per_text(texts) for n in found}
