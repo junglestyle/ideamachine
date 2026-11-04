@@ -61,7 +61,7 @@ def test_scoring_tallies_labels_direction_and_notes(lattice_with_clusters, tmp_p
     fill(tmp_path, lambda p: ("ext b > a", "a later version, not an extension") if p["set"] == "evolves"
          else ("none", "") if p["set"] == "far" else ("`con`", ""))
     r = edge_audit.score(tmp_path)
-    assert r["missing"] == [] and r["by_set"]["evolves"] == {"extends": 1}
+    assert r["missing"] == [] and r["by_set"]["evolves"] == {"elaborates": 1}
     assert r["direction_given"] == "1 of 1" and [m["direction"] for m in r["marks"] if m["set"] == "evolves"] == ["B>A"]
     near = sum(r["by_set"]["near"].values())
     assert near and r["by_set"]["near"] == {"tension": near}   # `con`, from before labels 2, reads as tension
@@ -104,8 +104,8 @@ def test_agreement_scores_the_core_labels_and_counts_invented_ones():
               "3": {"label": "extends", "analogy": ""}, "4": {"label": "none", "analogy": ""}}
     r = edge_audit.agreement(mine, theirs)
     assert r["pairs"] == 3 and r["agree"] == round(2 / 3, 3)   # my unsure doesn't count either way
-    # An old draft's `contradicts` is `tension`; a label I never gave scores but isn't averaged in.
-    assert r["f1"] == {"none": 1.0, "related": 0.0, "extends": 1.0, "tension": 0.0}
+    # Old `extends` is `elaborates` and `contradicts` is `tension`; a label I never gave scores but isn't averaged in.
+    assert r["f1"] == {"none": 1.0, "related": 0.0, "elaborates": 1.0, "tension": 0.0}   # old extends: elaborates
     assert r["macro_f1_core"] == round(2 / 3, 3)
     assert r["invented_supports_or_tension"] == [2] and r["tension_precision"] == 0.0
     assert r["analogies"]["both"] == [1]

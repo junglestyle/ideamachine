@@ -9,7 +9,7 @@ typing. The build order and the bar each step has to clear are in [ROADMAP-v2.md
 V2 turns the lattice into a graph with a lifecycle: **utterances → observations → candidates → ideas**
 ([M2 design](design/m2-observations-candidates-ideas.md)). Everything extracted is an observation; observations of
 the same point cluster; a cluster of mine is a candidate with a computed weight; and only I make ideas, from the
-candidates the system proposes. Edges between ideas say how they relate (supports, tension, extends) and
+candidates the system proposes. Edges between ideas say how they relate (supports, tension, elaborates) and
 cite the evidence for it. **Lenses** show the graph from one idea or theme outward. Presentation and the MCP server
 move into this repo ([decision 0005](decisions/0005-presentation-inside-idea-machine.md)), and Lattice is archived.
 
@@ -90,7 +90,7 @@ Proposed shapes. Each is settled in its milestone's design doc, and every new ta
 | Cluster | Today's `im.ideas` row, ids kept. Maturity `observation`, `candidate` or `idea`; an idea is kept as `canonical` or `pinned`; `merged`, `rejected` stay | M2 |
 | Weight | `im.weights`: cluster, formula version, weight, the signals it read, when | M2 |
 | Proposals | `im.proposals`: cluster, weight, formula version, when, outcome (canonical, pinned, dismissed) | M2 |
-| Edges | `im.idea_links` gains `supports`, `tension`, `extends` beside `evolves`, `related`, `archive`, plus `cited_observation_ids`, `confidence`, and `method` with the model version, so a rerun can be diffed | M2, M4 |
+| Edges | `im.idea_links` gains `supports`, `tension`, `elaborates` beside `evolves`, `related`, `archive`, plus `cited_observation_ids`, `confidence`, and `method` with the model version, so a rerun can be diffed | M2, M4 |
 | Lens cache | `im.lens_cache(seed, graph_version, result)` | M5 |
 
 ## 4. Proposals
@@ -107,10 +107,10 @@ A cheap, fast decision model ("Jev") types and weights edges: structured input (
 instructions), a choice out.
 
 - Embeddings nominate pairs: top-k neighbours plus shared evidence.
-- Jev answers `supports`, `tension`, `extends`, `related` or `none`. `none` is a real answer, and a confidence
-  floor keeps weak `related` edges out of the graph. `extends` is elaboration (an instance, a description, an
-  application, a later version); `tension` is two ideas pulling against each other, contradiction included (B4's
-  first sheet, 2026-11-04).
+- Jev answers `supports`, `tension`, `elaborates`, `related` or `none`. `none` is a real answer, and a confidence
+  floor keeps weak `related` edges out of the graph. `elaborates` fills one idea in with another (an instance, a
+  description, an application); `tension` is two ideas pulling against each other, contradiction included. A later
+  version stays the matcher's `evolves` (B4's first sheet, 2026-11-04).
 - Every edge records `method` and model version, so it can be rerun and diffed.
 - Jev's weights feed lenses and cluster weight. Jev does not make ideas.
 - The bottleneck is labels: about 200 operator-labelled pairs (B4) before its weights are trusted.
