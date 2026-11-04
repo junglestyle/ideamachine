@@ -11,12 +11,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The triage backends (Laya, the fallback classifier) and their embeddings. CPU-only torch.
+# The triage backends (Laya, the fallback classifier), embeddings, and GLiNER for names. CPU-only torch.
 models = [
     "laya==0.3.23",
     "torch>=2.8",
     "sentence-transformers>=5",
     "scikit-learn>=1.6",
+    "gliner>=0.2.30",          # names said, for policy C (im.names)
 ]
 
 [project.scripts]

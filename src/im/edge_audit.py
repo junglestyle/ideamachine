@@ -247,6 +247,39 @@ def score(folder: Path) -> dict:
             **({"drafts": drafts} if drafts else {}), "marks": labels}
 
 
+def pooled(folders: list[Path]) -> dict:
+    """Several sheets' marks scored as one benchmark (B4's bar is for 200 pairs): label counts, and each model's
+    agreement over every pair it drafted. A pair of clusters drawn by more than one sheet counts once, by the
+    first sheet's mark. Pairs are named `<folder>/<number>`."""
+    mine, drafts, seen, dupes = {}, {}, set(), []
+    by_set = {s: {} for s in SETS}
+    for folder in folders:
+        key = json.loads((folder / "key.json").read_text())
+        got = marks((folder / "sheet.md").read_text())
+        theirs = {d.stem.removeprefix("draft-"): json.loads(d.read_text()) for d in sorted(folder.glob("draft-*.json"))}
+        for num, p in key["pairs"].items():
+            name, label = f"{folder.name}/{num}", got.get(num, {}).get("label")
+            if label is None:
+                continue
+            if tuple(p["ideas"]) in seen:
+                dupes.append(name)
+                continue
+            seen.add(tuple(p["ideas"]))
+            mine[name] = {"label": label, "note": got[num].get("note")}
+            by_set[p["set"]][label] = by_set[p["set"]].get(label, 0) + 1
+            for model, marked in theirs.items():
+                if num in marked:
+                    drafts.setdefault(model, {})[name] = marked[num]
+    labels: dict = {}
+    for c in by_set.values():
+        for label, k in c.items():
+            labels[label] = labels.get(label, 0) + k
+    return {"sheets": [str(f) for f in folders], "marked": len(mine), "counted_once": dupes, "labels": labels,
+            "by_set": {s: c for s, c in by_set.items() if c},
+            "drafts": {model: agreement({n: m for n, m in mine.items() if n in theirs}, theirs)
+                       for model, theirs in sorted(drafts.items())}}
+
+
 # --- A model's marks on the same sheet (B4's agreement test) ---------------------------------------------------------
 
 DRAFT_SYSTEM = """You type the relationship between two clusters from my idea lattice, captured from my \
@@ -289,44 +322,45 @@ def _pairs_as_shown(text: str) -> dict[str, str]:
     return out
 
 
-def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: str = "low") -> dict:
+def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: str = "low", scrubber=None) -> dict:
     """A model marks every pair on the sheet, blind to my marks, into draft-<model>-<effort>.json. Each request goes
-    to the egress log, like every other call that sends what was said."""
-    from im import themes
-    from im.extract import _cost
+    to the egress log, like every other call that sends what was said; with a scrubber (policy C), names said are
+    pseudonymized first."""
+    from im import llm, names, themes
 
     key = json.loads((folder / "key.json").read_text())
     shown = _pairs_as_shown((folder / "sheet.md").read_text())
-    out_path = folder / f"draft-{model}-{effort}.json"
+    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}.json"
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     pv = themes.version(DRAFT_SYSTEM, DRAFT_SCHEMA, model, effort)
-    fallback = {"betas": ["server-side-fallback-2026-06-01"], "fallbacks": [{"model": "claude-opus-4-8"}]} \
-        if model.startswith("claude-opus") else {}
+    policy = scrubber.policy if scrubber else _policy()
     cost = 0.0
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         if num in got or num not in shown:
             continue
-        r = client.beta.messages.create(
-            model=model, max_tokens=4000, system=DRAFT_SYSTEM, messages=[{"role": "user", "content": shown[num]}],
-            output_config={"effort": effort, "format": {"type": "json_schema", "schema": DRAFT_SCHEMA}}, **fallback)
-        served = getattr(r, "model", model) or model
+        text, back = shown[num], {}
+        if scrubber:
+            (text,), back, _ = scrubber.scrub([text])
+        r = llm.complete(client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, text, max_tokens=4000)
         segs = [s for (s,) in conn.execute(
             """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
                WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
-        c = _cost(served, r.usage)
         conn.execute(
             """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version,
                  payload, payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
                VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (segs, model, pv, _policy(), shown[num], _sha(shown[num]), getattr(r, "_request_id", None),
-             r.stop_reason, served, r.usage.input_tokens, r.usage.output_tokens, c))
-        cost += c or 0.0
-        if r.stop_reason == "refusal":
+            (segs, model, pv, policy, text, _sha(text), r.request_id, r.stop_reason, r.served_by, r.input_tokens,
+             r.output_tokens, r.cost_usd))
+        cost += r.cost_usd or 0.0
+        if r.refused:
             got[num] = {"label": "unsure", "direction": "none", "analogy": "", "refused": True}
         else:
-            got[num] = json.loads(next(b.text for b in r.content if b.type == "text"))
+            got[num] = json.loads(r.text)
+            if got[num].get("analogy"):
+                got[num]["analogy"] = names.unscrub(got[num]["analogy"], back)
         out_path.write_text(json.dumps(got, indent=2))   # as it goes: a rerun picks up where this stopped
-    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "prompt_version": pv}
+    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "prompt_version": pv,
+            "policy": policy}
 
 
 def _policy() -> str:
@@ -337,6 +371,11 @@ def _policy() -> str:
 def _sha(text: str) -> str:
     import hashlib
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _num(name: str):
+    """A pair's number on one sheet; `<folder>/<number>` when sheets are pooled."""
+    return int(name) if name.isdigit() else name
 
 
 def agreement(mine: dict, theirs: dict) -> dict:
@@ -355,7 +394,7 @@ def agreement(mine: dict, theirs: dict) -> dict:
         fn = sum(mine[n]["label"] == label and theirs[n]["label"] != label for n in pairs)
         f1[label] = round(2 * tp / (2 * tp + fp + fn), 3) if tp + fp + fn else None
     scored = [v for v in f1.values() if v is not None]
-    invented = [int(n) for n in pairs if theirs[n]["label"] in ("supports", "contradicts")
+    invented = [_num(n) for n in pairs if theirs[n]["label"] in ("supports", "contradicts")
                 and mine[n]["label"] not in ("supports", "contradicts")]
     my_analogies = {n for n, m in mine.items() if (m.get("note") or "").lower().startswith("analogy")}
     their_analogies = {n for n in theirs if (theirs[n].get("analogy") or "").strip()}
@@ -364,6 +403,6 @@ def agreement(mine: dict, theirs: dict) -> dict:
             if pairs else None,
             "f1": f1, "macro_f1_core": round(sum(scored) / len(scored), 3) if scored else None,
             "invented_supports_or_contradicts": sorted(invented),
-            "analogies": {"mine": sorted(map(int, my_analogies)), "theirs": sorted(map(int, their_analogies)),
-                          "both": sorted(map(int, my_analogies & their_analogies))},
+            "analogies": {"mine": sorted(map(_num, my_analogies)), "theirs": sorted(map(_num, their_analogies)),
+                          "both": sorted(map(_num, my_analogies & their_analogies))},
             "confusion_mine_to_theirs": confusion}

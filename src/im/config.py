@@ -77,12 +77,19 @@ class WeightConfig:
 
 
 @dataclass(frozen=True)
+class EgressConfig:
+    my_names: tuple[str, ...] = ()       # what people call me: pseudonymized under policy C, and the model told it's me
+    names: tuple[str, ...] = ()          # other names to pseudonymize under policy C, beyond Hearsay's and GLiNER's
+
+
+@dataclass(frozen=True)
 class Config:
     segment: SegmentConfig = SegmentConfig()
     triage: TriageConfig = TriageConfig()
     extract: ExtractConfig = ExtractConfig()
     lattice: LatticeConfig = LatticeConfig()
     weight: WeightConfig = WeightConfig()
+    egress: EgressConfig = EgressConfig()
 
 
 def load() -> Config:
@@ -94,6 +101,7 @@ def load() -> Config:
     triage = data.get("triage", {})
     if "backends" in triage:
         triage["backends"] = tuple(triage["backends"])
+    egress = {k: tuple(v) for k, v in data.get("egress", {}).items()}
     return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
                   extract=ExtractConfig(**data.get("extract", {})), lattice=LatticeConfig(**data.get("lattice", {})),
-                  weight=WeightConfig(**data.get("weight", {})))
+                  weight=WeightConfig(**data.get("weight", {})), egress=EgressConfig(**egress))

@@ -5,12 +5,15 @@ Policy B (`POLICY_VERSION`):
 - Speakers are pseudonymized per request: "me", "unknown", and S1, S2... in order of first appearance.
   The mapping back to names stays local and is applied to what comes back.
 - Names *spoken* in the text are not scrubbed (that needs entity extraction, ROADMAP Phase 3).
+
+Policy C (decision 0008) is policy B with names said pseudonymized too (`im.names`). It's what a payload is built
+under when a `Scrubber` is passed; trials only, until every stage that sends what was said uses it.
 - Nothing from the projects registry goes out.
 - Every request is logged in im.egress_log with the segment IDs it carried.
 """
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from im.triage import _part_of_day
@@ -24,6 +27,8 @@ class Payload:
     text: str                   # exactly what goes out as the user message
     segment_ids: list           # line n of the transcript is segment_ids[n - 1]
     speakers: dict              # pseudonym -> local speaker label (never sent)
+    policy: str = POLICY_VERSION
+    names: dict = field(default_factory=dict)   # name pseudonym -> the name as said (never sent), policy C
 
     @property
     def sha256(self) -> str:
@@ -42,7 +47,13 @@ def pseudonyms(speakers) -> dict:
     return alias
 
 
-def build(conn, episode_id) -> Payload:
+def known_names(conn) -> list[str]:
+    """Everyone Hearsay knows by name, as speakers."""
+    return [n for (n,) in conn.execute(
+        "SELECT DISTINCT speaker_label FROM im.source_segments WHERE speaker_kind = 'person' ORDER BY 1")]
+
+
+def build(conn, episode_id, scrubber=None) -> Payload:
     rows = conn.execute(
         """SELECT s.segment_id, s.speaker_label, s.speaker_kind, s.text, s.started_at, s.ended_at
            FROM im.episode_segments es JOIN im.source_segments s USING (segment_id)
@@ -58,7 +69,10 @@ def build(conn, episode_id) -> Payload:
         (episode_id,)).fetchone()[0]
 
     alias = pseudonyms((label, kind) for _, label, kind, *_ in rows)
-    lines = [f"[{n}] {alias[label]}: {text}" for n, (_, label, _, text, _, _) in enumerate(rows, 1)]
+    said, names, mine = [r[3] for r in rows], {}, []
+    if scrubber:
+        said, names, mine = scrubber.scrub(said)
+    lines = [f"[{n}] {alias[r[1]]}: {text}" for n, (r, text) in enumerate(zip(rows, said), 1)]
 
     start: datetime = min(r[4] for r in rows).astimezone()
     end: datetime = max(r[5] for r in rows).astimezone()
@@ -67,5 +81,8 @@ def build(conn, episode_id) -> Payload:
                f"Speakers: {', '.join(dict.fromkeys(alias.values()))}.")
     if taps:
         context += " I tapped the pendant at " + ", ".join(f"{t.astimezone():%H:%M:%S}" for t in taps) + "."
+    if names:
+        context += " Names said are pseudonyms (P-...)" + (f"; mine is {' '.join(mine)}." if mine else ".")
     text = f"Context: {context}\n\nTranscript:\n" + "\n".join(lines)
-    return Payload(episode_id, text, [r[0] for r in rows], {v: k for k, v in alias.items()})
+    return Payload(episode_id, text, [r[0] for r in rows], {v: k for k, v in alias.items()},
+                   scrubber.policy if scrubber else POLICY_VERSION, names)
