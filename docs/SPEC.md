@@ -107,10 +107,11 @@ A cheap, fast decision model ("Jev") types and weights edges: structured input (
 instructions), a choice out.
 
 - Embeddings nominate pairs: top-k neighbours plus shared evidence.
-- Jev answers `supports`, `tension`, `elaborates`, `related` or `none`. `none` is a real answer, and a confidence
-  floor keeps weak `related` edges out of the graph. `elaborates` fills one idea in with another (an instance, a
-  description, an application); `tension` is two ideas pulling against each other, contradiction included. A later
-  version stays the matcher's `evolves` (B4's first sheet, 2026-11-04).
+- Jev decides whether there's an edge: connected or `none`. `none` is a real answer, and a confidence floor keeps
+  weak edges out of the graph. It also suggests a kind (`supports`, `elaborates`, `related`), shown on the edge and
+  never deciding whether it exists ([decision 0009](decisions/0009-edges-connection-graded-kind-suggested.md)).
+- Tension (two ideas pulling against each other, contradiction included) and analogy (the same structure in
+  different subjects) are passes of their own over pairs, each with its own model.
 - Every edge records `method` and model version, so it can be rerun and diffed.
 - Jev's weights feed lenses and cluster weight. Jev does not make ideas.
 - The bottleneck is labels: about 200 operator-labelled pairs (B4) before its weights are trusted.

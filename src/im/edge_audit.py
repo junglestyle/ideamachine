@@ -209,7 +209,8 @@ def write(conn, out: Path, seed: int = 4, size: int = SIZE) -> dict:
 
 
 def marks(text: str) -> dict:
-    """Pair number -> {"label", "direction", "note"} from a filled-in sheet. A blank or unreadable mark is missing."""
+    """Pair number -> {"label", "direction", "note"} from a filled-in sheet. A blank mark is missing; one that isn't
+    a label is kept as {"unreadable": what was written}, so a typo doesn't hide among the pairs I skipped."""
     out, n = {}, None
     for line in text.splitlines():
         line = line.strip()
@@ -217,13 +218,15 @@ def marks(text: str) -> dict:
             n = m.group(1)
         elif n and (m := re.match(r"mark:\s*`?([a-z?]+)`?\s*([AB]\s*>\s*[AB])?", line, re.I)):
             label = LABELS.get(m.group(1).lower())
+            if not label:
+                out.setdefault(n, {})["unreadable"] = line.split(":", 1)[1].strip()
             if label:
                 arrow = re.sub(r"\s", "", m.group(2) or "").upper()
                 out.setdefault(n, {})["label"] = label
                 out[n]["direction"] = arrow if label in DIRECTED and arrow in ("A>B", "B>A") else None
         elif n and (m := re.match(r"note:\s*(.+)$", line, re.I)):
             out.setdefault(n, {})["note"] = m.group(1).strip()
-    return {k: v for k, v in out.items() if "label" in v or "note" in v}
+    return {k: v for k, v in out.items() if "label" in v or "note" in v or "unreadable" in v}
 
 
 def score(folder: Path) -> dict:
@@ -231,11 +234,13 @@ def score(folder: Path) -> dict:
     key = json.loads((folder / "key.json").read_text())
     got = marks((folder / "sheet.md").read_text())
     counts = {s: {} for s in SETS}
-    missing, notes, directed, labels = [], [], {"given": 0, "of": 0}, []
+    missing, unreadable, notes, directed, labels = [], [], [], {"given": 0, "of": 0}, []
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         mark = got.get(num, {})
         label = mark.get("label")
-        if label is None:
+        if label is None and "unreadable" in mark:
+            unreadable.append({"pair": int(num), "mark": mark["unreadable"]})
+        elif label is None:
             missing.append(int(num))
         else:
             counts[p["set"]][label] = counts[p["set"]].get(label, 0) + 1
@@ -253,7 +258,8 @@ def score(folder: Path) -> dict:
     mine = {num: {"label": m.get("label"), "note": m.get("note")} for num, m in got.items()}
     drafts = {d.stem.removeprefix("draft-"): agreement(mine, json.loads(d.read_text()))
               for d in sorted(folder.glob("draft-*.json"))}
-    return {"benchmark": key["benchmark"], "marked": len(labels), "missing": missing, "labels": total,
+    return {"benchmark": key["benchmark"], "marked": len(labels), "missing": missing,
+            **({"unreadable": unreadable} if unreadable else {}), "labels": total,
             "by_set": {s: c for s, c in counts.items() if c},
             "direction_given": f"{directed['given']} of {directed['of']}", "notes": notes,
             **({"drafts": drafts} if drafts else {}), "marks": labels}
@@ -263,7 +269,7 @@ def pooled(folders: list[Path]) -> dict:
     """Several sheets' marks scored as one benchmark (B4's bar is for 200 pairs): label counts, and each model's
     agreement over every pair it drafted. A pair of clusters drawn by more than one sheet counts once, by the
     first sheet's mark. Pairs are named `<folder>/<number>`."""
-    mine, drafts, seen, dupes = {}, {}, set(), []
+    mine, drafts, seen, dupes, unreadable = {}, {}, set(), [], []
     by_set = {s: {} for s in SETS}
     for folder in folders:
         key = json.loads((folder / "key.json").read_text())
@@ -272,6 +278,8 @@ def pooled(folders: list[Path]) -> dict:
         for num, p in key["pairs"].items():
             name, label = f"{folder.name}/{num}", got.get(num, {}).get("label")
             if label is None:
+                if "unreadable" in got.get(num, {}):
+                    unreadable.append({"pair": name, "mark": got[num]["unreadable"]})
                 continue
             if tuple(p["ideas"]) in seen:
                 dupes.append(name)
@@ -286,7 +294,8 @@ def pooled(folders: list[Path]) -> dict:
     for c in by_set.values():
         for label, k in c.items():
             labels[label] = labels.get(label, 0) + k
-    return {"sheets": [str(f) for f in folders], "marked": len(mine), "counted_once": dupes, "labels": labels,
+    return {"sheets": [str(f) for f in folders], "marked": len(mine), "counted_once": dupes,
+            **({"unreadable": unreadable} if unreadable else {}), "labels": labels,
             "by_set": {s: c for s, c in by_set.items() if c},
             "drafts": {model: agreement({n: m for n, m in mine.items() if n in theirs}, theirs)
                        for model, theirs in sorted(drafts.items())}}
@@ -417,12 +426,25 @@ def agreement(mine: dict, theirs: dict) -> dict:
         f1[label] = round(2 * tp / (2 * tp + fp + fn), 3) if tp + fp + fn else None
     used = {mine[n]["label"] for n in pairs}
     scored = [f1[label] for label in CORE if label in used]   # a label I never gave can't be averaged in
+    linked = lambda label: label not in ("none", "unsure")  # noqa: E731 (an edge exists)
+    mine_linked = {n for n in pairs if linked(mine[n]["label"])}
+    their_linked = {n for n in pairs if linked(theirs[n]["label"])}
     invented = [_num(n) for n in pairs if theirs[n]["label"] in ("supports", "tension")
                 and mine[n]["label"] not in ("supports", "tension")]
     said_tension = [n for n in pairs if theirs[n]["label"] == "tension"]
     my_analogies = {n for n, m in mine.items() if (m.get("note") or "").lower().startswith("analogy")}
     their_analogies = {n for n in theirs if (theirs[n].get("analogy") or "").strip()}
+    ratio = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
+    my_tensions = {n for n in pairs if mine[n]["label"] == "tension"}
     return {"pairs": len(pairs),
+            # B4's bar (labels 3): whether there's an edge. The kind is a suggestion; it's reported below.
+            "connection": {"agree": ratio(sum((n in mine_linked) == (n in their_linked) for n in pairs), len(pairs)),
+                           "precision": ratio(len(mine_linked & their_linked), len(their_linked)),
+                           "recall": ratio(len(mine_linked & their_linked), len(mine_linked)),
+                           "invented": sorted(map(_num, their_linked - mine_linked)),
+                           "missed": sorted(map(_num, mine_linked - their_linked))},
+            "tension": {"mine": len(my_tensions), "theirs": len(said_tension),
+                        "both": len(my_tensions & set(said_tension))},
             "agree": round(sum(mine[n]["label"] == theirs[n]["label"] for n in pairs) / len(pairs), 3)
             if pairs else None,
             "f1": f1, "macro_f1_core": round(sum(scored) / len(scored), 3) if scored else None,
@@ -430,5 +452,7 @@ def agreement(mine: dict, theirs: dict) -> dict:
             "tension_precision": round(sum(mine[n]["label"] == "tension" for n in said_tension) / len(said_tension), 3)
             if said_tension else None,
             "analogies": {"mine": sorted(map(_num, my_analogies)), "theirs": sorted(map(_num, their_analogies)),
-                          "both": sorted(map(_num, my_analogies & their_analogies))},
+                          "both": sorted(map(_num, my_analogies & their_analogies)),
+                          "recall": ratio(len(my_analogies & their_analogies), len(my_analogies)),
+                          "precision": ratio(len(my_analogies & their_analogies), len(their_analogies))},
             "confusion_mine_to_theirs": confusion}
