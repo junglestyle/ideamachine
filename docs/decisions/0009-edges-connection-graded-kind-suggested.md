@@ -34,3 +34,27 @@ after `extends` became `elaborates` and `contradicts` became `tension`).
 - Terra is the edge model on this evidence (94–96% on connection, no invented edges, under $2 a month at today's
   volume). The next 150 pairs confirm or overturn that.
 - Marking stays the same; the sheet still asks for the kind, which keeps the suggestions measurable.
+
+## Amendment: agreement for structure, novelty for discovery (2026-11-04)
+
+The point of Idea Machine includes surfacing what my own reading of the lattice wouldn't: I already know how my
+ideas connect, so a system that agrees with me perfectly on everything adds nothing. Two kinds of relation are
+scored two ways:
+
+| Relation | It's for | Scored by |
+|---|---|---|
+| Links by content (B4) | The graph that lenses, the sky and weight read | Agreement with me |
+| Themes I've named | How I group my own ideas | Agreement with me |
+| Structural analogies, tensions, throughlines I haven't named | Showing me something | Novelty: `new`, `known` or `no` |
+
+Discovery sheets (`im audit-analogies`, `im audit-tension`) ask whether a pair is worth seeing: `new` (it holds,
+and I hadn't connected it), `known` (it holds, I had it), `no`. A proposer or filter is chosen for how much `new`
+it brings, at a noise I'll tolerate, not for agreeing with me: a filter that drops what was new to me filters out
+the point.
+
+What the tension sheets showed (70 pairs, 2026-11-04): random neighbours 0 in 10, neighbours said far apart and
+claims beside observations 1 in 10 each, Sonnet reading every idea 11 in 39. Checking Sonnet's proposals, the cheap
+models did best (GLM-5.3-flash precision 0.55, recall 0.67; DeepSeek V4.1 Flash 0.57, 0.44) and the large ones
+barely beat keeping everything (0.30), finding a pull almost everywhere. That was agreement; whether a filter is
+worth having is decided on novelty, once those marks are `new` or `known`. Discoveries arrive as proposals I keep
+or dismiss, like candidates ([0007](0007-neutral-proposals.md)); none becomes an edge without me.
