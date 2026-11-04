@@ -198,6 +198,28 @@ if [ -f "$ROWS_BEFORE" ] && [ ! -f "$ROWS_AFTER" ]; then
 fi
 im migrate
 
+say "The names role, for the GPU worker's names job (install/gpu.sh)"
+# It finds names said for policy C (decision 0008) on the dev box's GPU, through `ssh nas` to Postgres on this
+# box's loopback. It can read segments and episodes and write names, nothing else. Granted on every run: grants on
+# a table don't survive a restore, and the role may predate the table.
+env_ensure "$NAS_DB_ENV" IM_NAMES_PASSWORD "$(openssl rand -hex 24)"
+"${COMPOSE[@]}" exec -T db psql -q -v ON_ERROR_STOP=1 -U postgres -d im \
+    -v pw="$(env_get "$NAS_DB_ENV" IM_NAMES_PASSWORD)" <<'SQL'
+SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'im_names') AS missing \gset
+\if :missing
+CREATE ROLE im_names LOGIN;
+\endif
+ALTER ROLE im_names PASSWORD :'pw';
+GRANT USAGE ON SCHEMA im TO im_names;
+GRANT SELECT ON im.episodes, im.episode_segments, im.source_segments TO im_names;
+GRANT SELECT, INSERT, UPDATE ON im.segment_names TO im_names;
+SQL
+# Where `ssh nas` (the clones' owner) can read it, and nobody else.
+CLONE_OWNER="$(stat -c %U "$REPO_DIR")"
+install -d -o "$CLONE_OWNER" -m 700 "$NAS_ROOT/gpu"
+printf 'IM_DATABASE_URL=postgresql://im_names:%s@127.0.0.1:55433/im\n' "$(env_get "$NAS_DB_ENV" IM_NAMES_PASSWORD)" \
+    | install -o "$CLONE_OWNER" -m 600 /dev/stdin "$NAS_ROOT/gpu/names.env"
+
 say "Checking that nothing already sent to Claude would be sent again"
 # After a move, a different time zone or locale would change every payload: the next run would re-send every
 # episode and orphan my verdicts. Stop before the cron job exists.

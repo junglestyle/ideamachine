@@ -53,8 +53,11 @@ with any prompt switch, as one re-read.
 
 1. Every stage that sends what was said scrubs it: matching (`lattice.py`), themes, vocabulary, and the analogy
    spike. Today they send stored quotes, which keep real names.
-2. GLiNER's results are cached by segment text in the database: the live run rebuilds every pending payload each
-   hour.
+2. ~~GLiNER's results are cached by segment in the database: the live run rebuilds every pending payload each
+   hour.~~ Done 2026-11-04 (`im.segment_names`, `im names warm`), after ten trials in parallel each ran GLiNER over
+   the same sample on the NAS's CPU and sent nothing for 40 minutes. Batched, with long lines chunked, and two
+   torch threads per process. The dev box's GPU fills it for backlogs as a corral job (`install/gpu.sh`,
+   deploy.md), through `ssh nas` as a role that can only read segments and write names.
 3. A look at what GLiNER misses and over-matches on a few hundred real segments.
 
 ## Consequences

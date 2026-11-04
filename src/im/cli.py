@@ -340,6 +340,19 @@ def cmd_tune(args) -> None:
         _print(weight.tune(conn, config.load().weight, weight.parse_overrides(args.knobs), args.top))
 
 
+def cmd_names(args) -> None:
+    """Policy C: find the names GLiNER sees in a set of episodes ahead of time, so trials and runs only look them up."""
+    from im import names, trial
+
+    if args.action == "job":
+        _print(names.job())
+        return
+    with db.connect(db.pipeline_dsn()) as conn:
+        episodes = [eid for (eid,) in conn.execute("SELECT episode_id FROM im.episodes WHERE current")] \
+            if args.all else trial.sample(conn, args.sample)
+        _print(names.warm(conn, names.Gliner(), episodes))
+
+
 def cmd_audit_edges(args) -> None:
     """B4: a blind sheet of pairs of clusters for me to type, then my marks tallied."""
     from pathlib import Path
@@ -656,6 +669,12 @@ def main(argv=None) -> None:
     ad.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
     ad.add_argument("--seed", type=int, default=5, help="the sample and shuffle's seed")
     ad.set_defaults(func=cmd_audit_dedupe)
+    nm = sub.add_parser("names", help="policy C: find names in episodes ahead of time (GLiNER, cached per segment)")
+    nm.add_argument("action", choices=["warm", "job"],
+                    help="warm: these episodes now; job: one chunk of the backlog, as corral runs it (install/gpu.sh)")
+    nm.add_argument("--sample", type=int, default=150, help="the trial sample's first N episodes (default 150)")
+    nm.add_argument("--all", action="store_true", help="every current episode instead")
+    nm.set_defaults(func=cmd_names)
     ae = sub.add_parser("audit-edges", help="B4: a blind sheet of pairs of clusters to type; tally my marks")
     ae.add_argument("action", choices=["sheet", "score", "draft"],
                     help="draft: a model marks the same sheet blind (sends to Claude); score then compares it with me")

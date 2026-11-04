@@ -21,6 +21,14 @@ models = [
     "protobuf>=5",             # GLiNER's DeBERTa tokenizer converts through it on load
 ]
 
+# Only what finds names said (im.names), for the GPU worker's environment (install/gpu.sh), which installs it
+# without this project's CPU-only torch index, so torch comes from PyPI with CUDA.
+ner = [
+    "torch>=2.8",
+    "gliner>=0.2.30",
+    "protobuf>=5",
+]
+
 [project.scripts]
 im = "im.cli:main"
 

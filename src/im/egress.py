@@ -71,7 +71,7 @@ def build(conn, episode_id, scrubber=None) -> Payload:
     alias = pseudonyms((label, kind) for _, label, kind, *_ in rows)
     said, names, mine = [r[3] for r in rows], {}, []
     if scrubber:
-        said, names, mine = scrubber.scrub(said)
+        said, names, mine = scrubber.scrub(said, scrubber.find(conn, [(r[0], r[3]) for r in rows]))
     lines = [f"[{n}] {alias[r[1]]}: {text}" for n, (r, text) in enumerate(zip(rows, said), 1)]
 
     start: datetime = min(r[4] for r in rows).astimezone()
