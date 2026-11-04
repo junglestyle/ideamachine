@@ -17,6 +17,7 @@ uv run im run                     # import + segment + extract ideas with Claude
 uv run im ideas                   # what Claude captured; --review to keep or discard each item
 uv run im ideas --discards        # what I discarded and why: material for revising the extraction prompt
 uv run im trial v3 --model openai/gpt-6.1-sol   # B3: a model on the trial sample, names pseudonymized, vs Opus
+uv run im trial v3 --model claude-opus-5-5 --replicate 2   # Opus against itself: the ceiling for recall
                                   # (OpenRouter models need OPENROUTER_API_KEY; policy C needs IM_NAME_KEY)
 uv run im seed ~/.local/share/ideamachine/seeds/chatgpt-archive.md   # seed the idea lattice (once)
 uv run im lattice                 # lattice counts: ideas, evidence, connections
