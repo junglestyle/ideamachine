@@ -155,6 +155,8 @@ def pending(conn, finder, limit: int) -> dict:
 
 
 TUNNEL_PORT = 55433   # Postgres on the NAS's loopback (install/compose.yaml), and the tunnel's end here
+NO_FORWARDING = ("the NAS's ssh server doesn't allow TCP forwarding: in TrueNAS, System > Services > SSH, tick "
+                 "Allow TCP Port Forwarding, then enqueue again")
 
 
 def job(finder=None) -> dict:
@@ -171,6 +173,11 @@ def job(finder=None) -> dict:
     host, tunnel = os.environ.get("IM_SSH_TUNNEL"), None
     try:
         if host:
+            # ssh listens here even when the far end refuses to forward, so ask it first: -W fails at once if so.
+            probe = subprocess.run(["ssh", "-o", "BatchMode=yes", "-W", f"127.0.0.1:{TUNNEL_PORT}", host],
+                                   input=b"", capture_output=True, timeout=30)
+            if b"administratively prohibited" in probe.stderr:
+                raise SystemExit(NO_FORWARDING)
             tunnel = subprocess.Popen(
                 ["ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes",
                  "-L", f"127.0.0.1:{TUNNEL_PORT}:127.0.0.1:{TUNNEL_PORT}", host])

@@ -25,6 +25,12 @@ env -u SSH_AUTH_SOCK ssh -o BatchMode=yes nas true \
 say "The names role's connection, from the NAS (install/nas.sh writes it)"
 url="$(ssh -o BatchMode=yes nas "cat '$NAS_ROOT/gpu/names.env'" | sed -n 's/^IM_DATABASE_URL=//p')" \
     && [ -n "$url" ] || die "can't read $NAS_ROOT/gpu/names.env over ssh: run install/nas.sh there, then re-run."
+say "Checking the NAS lets ssh forward to Postgres on its loopback"
+# TrueNAS turns forwarding off by default. -W opens one forwarded connection and fails at once if it's refused.
+if ssh -o BatchMode=yes -W 127.0.0.1:55433 nas </dev/null 2>&1 >/dev/null | grep -q "administratively prohibited"; then
+    die "the NAS's ssh server doesn't allow TCP forwarding. In TrueNAS: System > Services > SSH, tick Allow TCP
+Port Forwarding, save, then re-run."
+fi
 mkdir -p "$(dirname "$GPU_ENV")"
 (umask 077; printf 'IM_DATABASE_URL=%s\nIM_SSH_TUNNEL=nas\n' "$url" > "$GPU_ENV")
 
