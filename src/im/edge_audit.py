@@ -5,6 +5,12 @@ with the matcher's `evolves` counted as `extends`; direction is cheap to give; a
 don't turn up among nearest neighbours, so the sheet goes looking for them. Marks must be mine, made blind: a
 model's marks would score Jev against another model.
 
+What the first sheet (50 pairs, 2026-11-04, ten models drafting) changed, labels 2: `extends` becomes `elaborates`,
+as I mark it (an instance, a description, an application), where every model read "extends" as something narrower
+and answered `related`; a later version is the matcher's `evolves`, not an elaboration. And `contradicts` becomes
+`tension`, which includes contradiction: I found none, but noted two pairs pulling against each other. Old marks and
+drafts read `extends` as `elaborates` and `contradicts` as `tension`.
+
 The pairs come in five sets:
 - near: nearest neighbours by embedding among candidates and ideas (SPEC §5: embeddings nominate pairs), spread
   across the range of similarity rather than only the closest;
@@ -31,28 +37,34 @@ SHARE = {"evolves": 0.12, "apart": 0.16, "levels": 0.16, "far": 0.08}   # the re
 SETS = ("near", "evolves", "apart", "levels", "far")
 CONCRETE = ("observation",)          # item kinds that are about a case, not a claim
 CLAIMS = ("idea", "aphorism")
-LABELS = {"supports": "supports", "sup": "supports", "contradicts": "contradicts", "con": "contradicts",
-          "extends": "extends", "ext": "extends", "related": "related", "rel": "related", "none": "none",
+LABELSET = 2   # see the module docstring; drafts under a later set go to their own files
+LABELS = {"supports": "supports", "sup": "supports", "tension": "tension", "ten": "tension",
+          "contradicts": "tension", "con": "tension", "elaborates": "elaborates", "ela": "elaborates",
+          "extends": "elaborates", "ext": "elaborates", "related": "related", "rel": "related", "none": "none",
           "same": "same", "unsure": "unsure", "?": "unsure"}
-DIRECTED = ("supports", "extends")
+DIRECTED = ("supports", "elaborates")
 
 HEADER = """# B4: typing edges (blind)
 
 Each pair is two clusters from the lattice: what was said, then Claude's summary of it. Judge by what was said;
 the summary can be wrong. How does A relate to B? After `mark:`, write one of:
 
-- `supports` (`sup`): one is a reason to believe the other: evidence, an example, an argument. Test: if A is true,
-  is B more believable, while still saying the same thing?
-- `extends` (`ext`): one takes the other further: applies it, generalizes it, builds on it, or is a later version
-  of it. Test: does A say something new that B made possible?
-- `contradicts` (`con`): they can't both be held as stated, including a change of mind.
+- `supports` (`sup`): one is a reason to believe the other: evidence or an argument for it. Test: if A is true,
+  is B more believable, while still saying the same thing? (A case that only illustrates it is `elaborates`.)
+- `elaborates` (`ela`): one fills in the other: a specific case or example of it, a description of how it works,
+  an application, a generalization, or something built on it. Test: does one fill in or carry forward the other?
+- `tension` (`ten`): they pull against each other: a contradiction, a change of mind, a trade-off, or two pulls
+  that would have to be balanced. Test: does holding one make the other harder to hold as stated?
 - `related` (`rel`): the same subject, but none of the above. Test: knowing one doesn't change how you read the
   other.
 - `none`: no real connection.
 - `same`: the same idea said twice (a merge the matcher missed).
 - `unsure` (`?`).
 
-For `supports` and `extends`, add `A>B` if A supports or extends B, or `B>A` the other way; leave it off if it
+A later version of an idea is `elaborates` if it refines it, `tension` if it reverses it, and `same` if it only
+says it again.
+
+For `supports` and `elaborates`, add `A>B` if A supports or elaborates B, or `B>A` the other way; leave it off if it
 runs both ways or you can't say. Use `note:` for anything worth saying, such as a summary that misstates the quotes.
 Mark it yourself, without a model's help: these marks are what Jev is scored against.
 Then run `im audit-edges score` on this folder. "me" is me, "someone" anyone else.
@@ -285,16 +297,19 @@ def pooled(folders: list[Path]) -> dict:
 DRAFT_SYSTEM = """You type the relationship between two clusters from my idea lattice, captured from my \
 conversations. Each side shows what was said, then a summary of it; judge by what was said, since the summary can \
 be wrong. "me" is me, "someone" anyone else. Choose one label:
-- supports: one is a reason to believe the other: evidence, an example, an argument. Test: if A is true, is B more \
-believable, while still saying the same thing?
-- extends: one takes the other further: applies it, generalizes it, builds on it, or is a later version of it. \
-Test: does A say something new that B made possible?
-- contradicts: they can't both be held as stated, including a change of mind.
+- supports: one is a reason to believe the other: evidence or an argument for it. Test: if A is true, is B more \
+believable, while still saying the same thing? A case that only illustrates it is elaborates.
+- elaborates: one fills in the other: a specific case or example of it, a description of how it works, an \
+application, a generalization, or something built on it. Test: does one fill in or carry forward the other?
+- tension: they pull against each other: a contradiction, a change of mind, a trade-off, or two pulls that would \
+have to be balanced. Test: does holding one make the other harder to hold as stated?
 - related: the same subject, but none of the above. Test: knowing one doesn't change how you read the other.
 - none: no real connection. Sharing a broad area (relationships, emotions, work) isn't a connection.
 - same: the same idea said twice.
 - unsure.
-For supports and extends, give the direction: "A>B" if A supports or extends B, "B>A" the other way, or "both" if \
+A later version of an idea is elaborates if it refines it, tension if it reverses it, and same if it only says it \
+again.
+For supports and elaborates, give the direction: "A>B" if A supports or elaborates B, "B>A" the other way, or "both" if \
 it runs both ways or you can't say; otherwise "none".
 Separately, say whether the two are analogous: about different subjects, but with the same underlying structure \
 (the same move, pattern or mechanism in two domains). If they are, name the shared structure in a few words; \
@@ -302,13 +317,13 @@ otherwise leave it empty. Don't evaluate the ideas."""
 
 DRAFT_SCHEMA = {
     "type": "object",
-    "properties": {"label": {"type": "string", "enum": ["supports", "extends", "contradicts", "related", "none",
+    "properties": {"label": {"type": "string", "enum": ["supports", "elaborates", "tension", "related", "none",
                                                           "same", "unsure"]},
                    "direction": {"type": "string", "enum": ["A>B", "B>A", "both", "none"]},
                    "analogy": {"type": "string"}},
     "required": ["label", "direction", "analogy"], "additionalProperties": False,
 }
-CORE = ("none", "related", "extends")   # what B4's revised bar would score (macro-F1)
+CORE = ("none", "related", "elaborates", "tension")   # what B4's bar scores (macro-F1, over labels I've used)
 
 
 def _pairs_as_shown(text: str) -> dict[str, str]:
@@ -330,7 +345,7 @@ def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: st
 
     key = json.loads((folder / "key.json").read_text())
     shown = _pairs_as_shown((folder / "sheet.md").read_text())
-    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}.json"
+    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}-labels{LABELSET}.json"
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     pv = themes.version(DRAFT_SYSTEM, DRAFT_SCHEMA, model, effort)
     policy = scrubber.policy if scrubber else _policy()
@@ -386,6 +401,9 @@ def agreement(mine: dict, theirs: dict) -> dict:
     """How a model's marks compare with mine, on the pairs I didn't mark unsure.
 
     mine: pair -> {"label", "note"}; theirs: pair -> {"label", "analogy"}."""
+    # Old marks and drafts in labels 2's words: extends is elaborates, contradicts is tension.
+    mine = {n: m | {"label": LABELS.get(m.get("label"), m.get("label"))} for n, m in mine.items()}
+    theirs = {n: t | {"label": LABELS.get(t["label"], t["label"])} for n, t in theirs.items()}
     pairs = [n for n, m in mine.items() if m.get("label") not in (None, "unsure") and n in theirs]
     confusion: dict = {}
     for n in pairs:
@@ -397,16 +415,20 @@ def agreement(mine: dict, theirs: dict) -> dict:
         fp = sum(mine[n]["label"] != label and theirs[n]["label"] == label for n in pairs)
         fn = sum(mine[n]["label"] == label and theirs[n]["label"] != label for n in pairs)
         f1[label] = round(2 * tp / (2 * tp + fp + fn), 3) if tp + fp + fn else None
-    scored = [v for v in f1.values() if v is not None]
-    invented = [_num(n) for n in pairs if theirs[n]["label"] in ("supports", "contradicts")
-                and mine[n]["label"] not in ("supports", "contradicts")]
+    used = {mine[n]["label"] for n in pairs}
+    scored = [f1[label] for label in CORE if label in used]   # a label I never gave can't be averaged in
+    invented = [_num(n) for n in pairs if theirs[n]["label"] in ("supports", "tension")
+                and mine[n]["label"] not in ("supports", "tension")]
+    said_tension = [n for n in pairs if theirs[n]["label"] == "tension"]
     my_analogies = {n for n, m in mine.items() if (m.get("note") or "").lower().startswith("analogy")}
     their_analogies = {n for n in theirs if (theirs[n].get("analogy") or "").strip()}
     return {"pairs": len(pairs),
             "agree": round(sum(mine[n]["label"] == theirs[n]["label"] for n in pairs) / len(pairs), 3)
             if pairs else None,
             "f1": f1, "macro_f1_core": round(sum(scored) / len(scored), 3) if scored else None,
-            "invented_supports_or_contradicts": sorted(invented),
+            "invented_supports_or_tension": sorted(invented),
+            "tension_precision": round(sum(mine[n]["label"] == "tension" for n in said_tension) / len(said_tension), 3)
+            if said_tension else None,
             "analogies": {"mine": sorted(map(_num, my_analogies)), "theirs": sorted(map(_num, their_analogies)),
                           "both": sorted(map(_num, my_analogies & their_analogies))},
             "confusion_mine_to_theirs": confusion}

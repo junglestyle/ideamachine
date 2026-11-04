@@ -53,8 +53,9 @@ without touching the records, comes from the write rule above.
   `confidence`; it doesn't add a parallel edge.
 - An edge's properties are fixed columns (`kind`, `confidence`, `evidence_item_ids`, `method`). A new property is a
   migration. A free-form property bag is out.
-- Direction is per kind. `supports`, `contradicts`, `extends` and `evolves` point from `a` to `b`. `related` is
-  symmetric and stored once, with `a < b`.
+- Direction is per kind. `supports`, `elaborates` and `evolves` point from `a` to `b`. `related` and `tension` are
+  symmetric and stored once, with `a < b`. (On 2026-11-04, after B4's first sheet, `elaborates` replaced `extends`
+  and `tension` replaced `contradicts`.)
 - Graph-wide results (community, PageRank) are columns written per run and keyed by a graph version, the way map
   positions are today. Between runs they are stale.
 
