@@ -64,6 +64,11 @@ def test_a_trial_scores_a_candidate_against_a_reference_on_the_same_sample(pipe,
     assert r["cost_vs_reference"] == 1.0   # the fake answers as Opus, at Opus's price, for both
 
     assert trial.run(pipe, sonnet, v3, model="claude-sonnet-5-5")["read"] == 0   # read once per payload
+    again = FakeClaude(both(DATABASE))   # a replicate reads everything again, filed apart, scored against the first
+    assert trial.run(pipe, again, v3, replicate=2)["read"] == episodes
+    r2 = trial.report(pipe, (trial.version("claude-opus-5-5", "medium", v3, 2), "claude-opus-5-5"),
+                      (pv("claude-opus-5-5"), "claude-opus-5-5"), egress.POLICY_VERSION)
+    assert r2["recall"] == 0.5 and trial.version("claude-opus-5-5", "medium", v3, 2) == pv("claude-opus-5-5") + "~2"
     assert trial.run(pipe, opus, extract.system_prompt("v3", "x"), monthly_cap_usd=0)["stopped"]
 
 

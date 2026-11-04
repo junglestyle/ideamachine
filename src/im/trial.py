@@ -9,6 +9,10 @@ reference's captures it also found, matched the way verdicts are carried forward
 `quote_score`), and what it found that the reference didn't. My keeps aren't the target: capture is the soup, and
 the lattice's relationships decide what matters. Which of two models captures better where they differ is what
 the blind pairs are for.
+
+A replicate (`replicate=2`) is a second, independent read by the same model and prompt, filed apart. The reference
+against its own replicate is the ceiling: models don't capture exactly the same things twice, so a candidate's
+recall means something only next to it.
 """
 
 import json
@@ -27,9 +31,10 @@ def sample(conn, n: int = SAMPLE) -> list:
 
 
 def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str = "medium",
-        monthly_cap_usd: float = 20.0, limit: int | None = None, n: int = SAMPLE, scrubber=None) -> dict:
+        monthly_cap_usd: float = 20.0, limit: int | None = None, n: int = SAMPLE, scrubber=None,
+        replicate: int = 1) -> dict:
     """Send the sampled episodes this model hasn't read yet under this prompt and policy (or whose payload changed)."""
-    pv = extract.prompt_version(model, effort, system)
+    pv = version(model, effort, system, replicate)
     policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     done = {r[0]: r[1] for r in conn.execute(
         """SELECT episode_id, payload_sha256 FROM im.prompt_trials
@@ -71,6 +76,12 @@ def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str =
         stats["cost_usd"] += r.cost_usd or 0.0
     stats["cost_usd"] = round(stats["cost_usd"], 4)
     return stats
+
+
+def version(model: str, effort: str, system: str, replicate: int = 1) -> str:
+    """The prompt version a trial is filed under; a replicate's is marked `~n`."""
+    pv = extract.prompt_version(model, effort, system)
+    return pv if replicate == 1 else f"{pv}~{replicate}"
 
 
 def _reads(conn, pv: str, model: str, policy: str) -> dict:

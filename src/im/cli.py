@@ -326,9 +326,9 @@ def cmd_trial(args) -> None:
         out = {}
         if not args.report:
             out["trial"] = trial.run(conn, llm.client_for(model), system, model, effort, cap, args.limit,
-                                     args.sample, scrubber)
-        out["report"] = trial.report(conn, (extract.prompt_version(model, effort, system), model),
-                                     (extract.prompt_version(ref_model, ref_effort, system), ref_model), policy)
+                                     args.sample, scrubber, args.replicate)
+        out["report"] = trial.report(conn, (trial.version(model, effort, system, args.replicate), model),
+                                     (trial.version(ref_model, ref_effort, system), ref_model), policy)
     _print(out)
 
 
@@ -641,6 +641,9 @@ def main(argv=None) -> None:
     tr.add_argument("--policy", choices=["B", "C"], default="C",
                     help="C (default) pseudonymizes names said, as every trial for decision 0008 does")
     tr.add_argument("--sample", type=int, default=150, help="how many episodes, the same for every model")
+    tr.add_argument("--replicate", type=int, default=1,
+                    help="a further independent read by the same model (2, 3...): the reference against its own "
+                         "replicate is the ceiling for every candidate's recall")
     tr.add_argument("--effort", help="the candidate's effort (default: the configured one)")
     tr.add_argument("--monthly-cap-usd", type=float, help="stop before the month's spend passes this (default: config)")
     tr.set_defaults(func=cmd_trial)
