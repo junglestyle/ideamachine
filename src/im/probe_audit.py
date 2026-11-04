@@ -1,0 +1,289 @@
+"""Sheets that ask one question of a pair of clusters: is there an analogy, or a tension? (decision 0009)
+
+B4 drew its pairs from neighbourhoods, so every analogy I found there was between ideas already close by topic,
+and the spike that ranked them by structure couldn't say anything about analogies between unrelated ideas
+(2026-11-04). And two tensions in 50 pairs can't choose a model. These sheets go looking: each set is a way of
+proposing pairs, and a random set beside them says how often the answer is yes by chance.
+
+Analogy (pairs from ideas below the median similarity by topic, so unrelated):
+- facets: a model writes each idea's structure as four lines, subject matter removed, so the one an analogy rests
+  on is likelier to be there; pairs whose closest lines are closest;
+- model: a model reads every idea at once and proposes pairs from different subjects with the same structure;
+- random: pairs drawn at random, the base rate.
+Tension (any similarity):
+- apart: neighbours first said far apart in time, where a change of mind would show;
+- levels: a claim beside a nearby concrete observation;
+- model: a model reads every idea at once and proposes pairs that pull against each other;
+- near: neighbours drawn at random, the base rate among related ideas.
+
+The sheet is blind and shuffled like B4's, and the mark is one word: yes, no or unsure. Each pair records which
+sets proposed it, so the score says which ways of looking find what, and whether they find the same things. The
+sheet quotes people: keep it, and the key, in saved/.
+"""
+
+import json
+import random
+import re
+from pathlib import Path
+
+import numpy as np
+
+from im import edge_audit, egress, llm, themes
+
+FACETS = 4
+FACET_BATCH = 25
+FACET_MODEL, FACET_EFFORT = "claude-opus-5-5", "low"
+PICK_MODEL, PICK_EFFORT = "claude-sonnet-5-5", "medium"
+PICKS = 30
+PER_IDEA = 2          # an idea appears at most this many times in a proposed set, so one idea can't fill it
+SIZES = {"analogy": {"facets": 15, "model": 15, "random": 10},
+         "tension": {"apart": 10, "levels": 10, "model": 10, "near": 10}}
+MARKS = {"yes": "yes", "y": "yes", "no": "no", "n": "no", "unsure": "unsure", "?": "unsure"}
+
+QUESTION = {
+    "analogy": ("Is there an analogy between A and B: different subjects, the same underlying structure (the same "
+                "move, pattern or mechanism)?",
+                "If yes, name the shared structure in a few words in `note:`."),
+    "tension": ("Do A and B pull against each other: a contradiction, a change of mind, a trade-off, or two pulls "
+                "that would have to be balanced?",
+                "If yes, say in a few words where they pull in `note:`."),
+}
+
+HEADER = """# {title} (blind)
+
+Each pair is two clusters from the lattice: what was said, then Claude's summary of it. Judge by what was said;
+the summary can be wrong.
+
+{question}
+
+After `mark:`, write `yes`, `no` or `unsure` (`?`). {note} Mark it yourself, without a model's help.
+Then run `im audit-{command} score` on this folder. "me" is me, "someone" anyone else.
+"""
+
+FACET_SYSTEM = """For each idea from my idea lattice, captured from my conversations, write its structure four \
+ways, each in one line with the subject matter removed: the general pattern, mechanism or move it rests on, in \
+abstract terms (an agent, an option, a cost, a system, a signal, a group), never the specific domain, people, \
+products or things. An idea usually rests on more than one: give four different ones, the most central first. Two \
+ideas from different domains that make the same move should share a line. Keep each under 20 words. Don't \
+evaluate the ideas."""
+
+FACET_SCHEMA = {
+    "type": "object",
+    "properties": {"ideas": {"type": "array", "items": {
+        "type": "object", "properties": {"idea": {"type": "integer"},
+                                         "structures": {"type": "array", "items": {"type": "string"}}},
+        "required": ["idea", "structures"], "additionalProperties": False}}},
+    "required": ["ideas"], "additionalProperties": False,
+}
+
+PICK_SYSTEM = {
+    "analogy": """Below are ideas from my idea lattice, captured from my conversations, numbered. Find pairs that are \
+analogous: about different subjects, with the same underlying structure (the same move, pattern or mechanism in \
+two domains). Only pairs whose subjects differ; similar topics aren't analogies. For each, name the shared \
+structure in a few words. Propose up to {n}, best first. Don't evaluate the ideas.""",
+    "tension": """Below are ideas from my idea lattice, captured from my conversations, numbered. Find pairs that \
+pull against each other: a contradiction, a change of mind, a trade-off, or two pulls that would have to be \
+balanced. For each, say in a few words where they pull. Propose up to {n}, best first. Don't evaluate the ideas.""",
+}
+
+PICK_SCHEMA = {
+    "type": "object",
+    "properties": {"pairs": {"type": "array", "items": {
+        "type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"},
+                                         "why": {"type": "string"}},
+        "required": ["a", "b", "why"], "additionalProperties": False}}},
+    "required": ["pairs"], "additionalProperties": False,
+}
+
+
+def _summary(conn, idea_id: str) -> str:
+    title, statement = conn.execute("SELECT title, statement FROM im.idea_text WHERE idea_id = %s",
+                                    (idea_id,)).fetchone()
+    return f"{title}: {statement}"
+
+
+def _ask(conn, client, model: str, effort: str, system: str, schema: dict, text: str, ideas: list[str]) -> dict | None:
+    """One request, logged in the egress log with the segments of the clusters it shows."""
+    r = llm.complete(client, model, effort, system, schema, text)
+    segs = [s for (s,) in conn.execute(
+        """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
+           WHERE ev.idea_id = ANY(%s::uuid[])""", (ideas,))]
+    conn.execute(
+        """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version,
+             payload, payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
+           VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (segs, model, themes.version(system, schema, model, effort), egress.POLICY_VERSION, text,
+         edge_audit._sha(text), r.request_id, r.stop_reason, r.served_by, r.input_tokens, r.output_tokens,
+         r.cost_usd))
+    return None if r.refused else json.loads(r.text)
+
+
+def facets(conn, client, ids: list[str], folder: Path) -> dict[str, list[str]]:
+    """Each idea's structures, kept in facets.json as they come, so a rerun picks up where one stopped."""
+    path = folder / "facets.json"
+    out = json.loads(path.read_text()) if path.exists() else {}
+    todo = [i for i in ids if i not in out]
+    for start in range(0, len(todo), FACET_BATCH):
+        batch = todo[start:start + FACET_BATCH]
+        text = "Ideas:\n" + "\n".join(f"{n}. {_summary(conn, i)}" for n, i in enumerate(batch, 1))
+        answer = _ask(conn, client, FACET_MODEL, FACET_EFFORT, FACET_SYSTEM, FACET_SCHEMA, text, batch)
+        for row in (answer or {}).get("ideas", []):
+            if 1 <= row["idea"] <= len(batch) and row["structures"]:
+                out[batch[row["idea"] - 1]] = row["structures"][:FACETS]
+        path.write_text(json.dumps(out, indent=2))
+    return out
+
+
+def picks(conn, client, question: str, ids: list[str]) -> list[dict]:
+    """A model's proposed pairs, reading every idea at once: [{"ideas": [a, b], "why": ...}], a < b."""
+    text = "Ideas:\n" + "\n".join(f"{n}. {_summary(conn, i)}" for n, i in enumerate(ids, 1))
+    answer = _ask(conn, client, PICK_MODEL, PICK_EFFORT, PICK_SYSTEM[question].format(n=PICKS), PICK_SCHEMA, text,
+                  ids) or {"pairs": []}
+    out, seen = [], set()
+    for p in answer["pairs"]:
+        if 1 <= p["a"] <= len(ids) and 1 <= p["b"] <= len(ids) and p["a"] != p["b"]:
+            pair = tuple(sorted((ids[p["a"] - 1], ids[p["b"] - 1])))
+            if pair not in seen:
+                seen.add(pair)
+                out.append({"ideas": list(pair), "why": p["why"]})
+    return out
+
+
+def unrelated(rows: list[tuple]) -> list[dict]:
+    """Pairs of my clusters below the median similarity by topic, as {"ideas": [a, b], "similarity": s}, a < b."""
+    mine = [r for r in rows if r[2]]
+    if len(mine) < 2:
+        return []
+    M = np.vstack([np.array(json.loads(r[1])) for r in mine])
+    M = M / np.linalg.norm(M, axis=1, keepdims=True)
+    S = M @ M.T
+    upper = np.triu_indices(len(mine), 1)
+    median = float(np.median(S[upper]))
+    return [{"ideas": sorted([mine[i][0], mine[j][0]]), "similarity": round(float(S[i, j]), 3)}
+            for i, j in zip(*upper) if S[i, j] < median]
+
+
+def _facet_pairs(embedder, structures: dict[str, list[str]], far: set[tuple]) -> list[dict]:
+    """Unrelated pairs, closest first by their closest pair of structure lines."""
+    ids = sorted(structures)
+    lines = [(i, s) for i in ids for s in structures[i]]
+    V = embedder.embed([s for _, s in lines])
+    owner = np.array([ids.index(i) for i, _ in lines])
+    S = V @ V.T
+    best: dict[tuple, tuple] = {}
+    for x in range(len(lines)):
+        for y in np.argsort(-S[x])[:50]:   # each line's nearest lines are enough to find each pair's closest
+            a, b = ids[owner[x]], ids[owner[y]]
+            pair = tuple(sorted((a, b)))
+            if a != b and pair in far and S[x, y] > best.get(pair, (-2,))[0]:
+                best[pair] = (float(S[x, y]), lines[x][1], lines[y][1])
+    return [{"ideas": list(p), "score": round(s, 3), "why": f"{la} | {lb}"}
+            for p, (s, la, lb) in sorted(best.items(), key=lambda kv: -kv[1][0])]
+
+
+def _limited(pairs: list[dict], n: int, taken: set) -> list[dict]:
+    """The first n pairs not already taken, with no idea more than PER_IDEA times."""
+    out, uses = [], {}
+    for p in pairs:
+        if len(out) >= n:
+            break
+        if tuple(p["ideas"]) in taken or any(uses.get(i, 0) >= PER_IDEA for i in p["ideas"]):
+            continue
+        out.append(p)
+        taken.add(tuple(p["ideas"]))
+        for i in p["ideas"]:
+            uses[i] = uses.get(i, 0) + 1
+    return out
+
+
+def build(conn, client, embedder, question: str, folder: Path, seed: int = 9) -> tuple[str, dict]:
+    rng = random.Random(seed)
+    rows = edge_audit._clusters(conn)
+    mine = [r[0] for r in rows if r[2]]
+    pool = edge_audit.candidates(conn) if question == "tension" else {}
+    sizes = SIZES[question]
+    proposed: dict[str, list[dict]] = {}
+    if question == "analogy":
+        apart = unrelated(rows)
+        far = {tuple(p["ideas"]) for p in apart}
+        proposed["facets"] = _facet_pairs(embedder, facets(conn, client, mine, folder), far)
+        proposed["model"] = [p for p in picks(conn, client, "analogy", mine) if tuple(p["ideas"]) in far]
+        proposed["random"] = rng.sample(apart, min(len(apart), 20 * sizes["random"]))
+    else:
+        proposed["apart"] = rng.sample(pool["apart"], len(pool["apart"]))
+        proposed["levels"] = rng.sample(pool["levels"], len(pool["levels"]))
+        proposed["model"] = picks(conn, client, "tension", mine)
+        proposed["near"] = rng.sample(pool["near"], len(pool["near"]))
+    taken, picked = set(), []
+    for kind, n in sizes.items():
+        picked += [p | {"set": kind} for p in _limited(proposed[kind], n, taken)]
+    lists = {kind: {tuple(p["ideas"]) for p in ps} for kind, ps in proposed.items() if kind not in ("random", "near")}
+    for p in picked:   # which ways of looking proposed it, beyond the set it was drawn for
+        p["proposed_by"] = sorted(k for k, s in lists.items() if tuple(p["ideas"]) in s)
+    rng.shuffle(picked)
+    for p in picked:
+        p["sides"] = rng.sample(p["ideas"], 2)
+    title = {"analogy": "Analogies", "tension": "Tensions"}[question]
+    command = {"analogy": "analogies", "tension": "tension"}[question]
+    ask, note = QUESTION[question]
+    lines = [HEADER.format(title=title, question=ask, note=note, command=command)]
+    for n, p in enumerate(picked, 1):
+        lines += [f"## {n}", ""]
+        for side, idea in zip("AB", p["sides"]):
+            first, *rest = edge_audit._side(conn, idea) or ["(nothing said on record)"]
+            lines += [f"{side}. {first.strip()}", *[f"   {x}" if x.startswith(">") else x for x in rest], ""]
+        lines += ["mark: ", "note: ", ""]
+    key = {"benchmark": question, "seed": seed, "sizes": sizes,
+           "available": {k: len(v) for k, v in proposed.items()},
+           "pairs": {str(n): p for n, p in enumerate(picked, 1)}}
+    return "\n".join(lines), key
+
+
+def write(conn, client, embedder, question: str, out: Path, seed: int = 9) -> dict:
+    out.mkdir(parents=True, exist_ok=True)
+    sheet, key = out / "sheet.md", out / "key.json"
+    if sheet.exists() or key.exists():
+        raise SystemExit(f"{out} already has a sheet; score it, or pick another folder")
+    text, k = build(conn, client, embedder, question, out, seed)
+    sheet.write_text(text)
+    key.write_text(json.dumps(k, indent=2))
+    sets = [p["set"] for p in k["pairs"].values()]
+    return {"sheet": str(sheet), "pairs": len(sets), "by_set": {s: sets.count(s) for s in SIZES[question]},
+            "available": k["available"]}
+
+
+def marks(text: str) -> dict:
+    """Pair number -> {"mark", "note"}, or {"unreadable"} for a mark that isn't yes, no or unsure."""
+    out, n = {}, None
+    for line in text.splitlines():
+        line = line.strip()
+        if m := re.match(r"##\s+(\d+)\s*$", line):
+            n = m.group(1)
+        elif n and (m := re.match(r"mark:\s*`?([a-z?]+)`?", line, re.I)):
+            mark = MARKS.get(m.group(1).lower())
+            out.setdefault(n, {})["mark" if mark else "unreadable"] = mark or line.split(":", 1)[1].strip()
+        elif n and (m := re.match(r"note:\s*(.+)$", line, re.I)):
+            out.setdefault(n, {})["note"] = m.group(1).strip()
+    return out
+
+
+def score(folder: Path) -> dict:
+    """Per set, how often my answer was yes; which ways of looking proposed each yes; and my notes."""
+    key = json.loads((folder / "key.json").read_text())
+    got = marks((folder / "sheet.md").read_text())
+    by_set = {s: {"yes": 0, "no": 0, "unsure": 0} for s in key["sizes"]}
+    yes, missing, unreadable = [], [], []
+    for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
+        m = got.get(num, {})
+        if "mark" not in m:
+            (unreadable.append({"pair": int(num), "mark": m["unreadable"]}) if "unreadable" in m
+             else missing.append(int(num)))
+            continue
+        by_set[p["set"]][m["mark"]] += 1
+        if m["mark"] == "yes":
+            yes.append({"pair": int(num), "set": p["set"], "also_proposed_by": p.get("proposed_by", []),
+                        "note": m.get("note"), "why_proposed": p.get("why")})
+    for c in by_set.values():
+        c["hit_rate"] = round(c["yes"] / (c["yes"] + c["no"]), 3) if c["yes"] + c["no"] else None
+    return {"benchmark": key["benchmark"], "marked": sum(c["yes"] + c["no"] + c["unsure"] for c in by_set.values()),
+            "missing": missing, **({"unreadable": unreadable} if unreadable else {}), "by_set": by_set, "yes": yes}
