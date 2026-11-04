@@ -281,6 +281,11 @@ Do they pull against each other: a contradiction, a change of mind, a trade-off,
 balanced? Being about the same subject isn't a tension. Answer yes, no or unsure, and if yes, say in a few words \
 where they pull. Don't evaluate the ideas.""",
 }
+DRAFT_SYSTEM["summary"] = """One capture from my conversations: the transcript lines it cites, the quote it took, and a \
+summary written for it. "me" is me, "someone" anyone else. Does the summary claim anything those lines don't say: \
+an inference, a conclusion, a motive or an outcome that isn't there? Wording that compresses what was said is \
+fine; adding to it isn't. Answer yes (it adds), no (faithful) or unsure, and if yes, say in a few words what it \
+adds."""
 DRAFT_SCHEMA = {
     "type": "object",
     "properties": {"answer": {"type": "string", "enum": ["yes", "no", "unsure"]}, "why": {"type": "string"}},
@@ -323,7 +328,7 @@ def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=
         except RuntimeError as e:   # an answer that never kept to the schema: skipped, so a rerun asks again
             failed.append({"pair": int(num), "error": str(e)[:300]})
             continue
-        segs = [s for (s,) in conn.execute(
+        segs = p.get("segments") or [s for (s,) in conn.execute(   # a summary sheet's item cites its own lines
             """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
                WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
         conn.execute(
