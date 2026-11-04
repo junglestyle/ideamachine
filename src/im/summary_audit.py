@@ -1,4 +1,4 @@
-"""Do summaries say more than what was said? A blind sheet of captures from the extraction trials (roadmap §4.9).
+"""Do summaries say more than what was said? A blind sheet of captures from the extraction trials (roadmap §5.9).
 
 On the first tension sheet, summaries sharpened readings the quotes only allowed ("comfort beats the stigma" for
 "they're pretty comfy"). Every stage that reads summaries inherits what they add. This sheet samples captures

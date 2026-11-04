@@ -41,7 +41,30 @@ Spend is about $25 a month: extraction 58%, matching 25%, all on Opus 5.5. That'
 correctness or simplicity for a few dollars. It matters at 5–10× capture, where the lever is a cheaper extraction
 model (B3; Opus stayed in 2026-10).
 
-## 4. Open questions
+## 4. Views and filters (planned 2026-11-04)
+
+Two families of views, both inside Idea Machine ([0005](decisions/0005-presentation-inside-idea-machine.md)), and a
+filter over both.
+
+- **Emanation: cluster-based cloud views, for association and promotion.** The sky is the first: one stable map,
+  lenses that light it, proposals promoted from it. Others follow the encodings in the
+  [M6 notes](design/m6-emanation.md). Navigation is slow today: panning redraws every star with a fresh radial
+  gradient each frame (draw each kind of star once and stamp it instead), and a lens reloads the whole page (load
+  the map once and fetch only a lens's relevance). Measure the server's time for `/sky` before changing it.
+- **Lattice v2: pinned views, for organization.** Where I place ideas by hand, as opposed to where meaning puts
+  them. Not the V1 Lattice repo, which is still archived at M6. First two:
+  - a conceptual or thematic lattice (a grid) to pin ideas into;
+  - the Qabalistic Tree of Life, pinning ideas by correspondence (to the sephirot and the paths between them).
+- **Removing sensitive elements**, per view and for the MCP connector. Builds on demo mode
+  (`im/sensitivity.py`, migration 027), which already tags ideas and themes by category and lets my marks win:
+  - offensive: derogatory to a group or a person (demo mode's `racism`, broadened);
+  - vulgarity: curse words (`profanity`), which can be blacked out in place rather than the idea withheld;
+  - politics (`political_extremism`, broadened to politics generally);
+  - sex and gender (`sex`, `gender_politics`).
+  The tagging is a set of yes/no judgments, one per category, which suits Jev: cheap enough to run on every idea
+  each time its text changes.
+
+## 5. Open questions
 
 1. ~~Does re-transcription of growing conversations dominate repeat extraction?~~ No (2026-10-27): of $14.89 spent
    on extraction, re-transcription was 12% and none of it was speech first sent while its conversation was open,
