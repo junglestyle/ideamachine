@@ -76,3 +76,19 @@ def test_a_segment_is_read_once_and_kept(pipe, cfg, stream):
     assert len(finder.asked) == segments                            # every payload came from the cache
     assert any(names.token("Bob", KEY) in x.text and "Bob" not in x.text for x in p)
     assert names.warm(pipe, finder, eids)["newly_read"] == 0
+
+
+def test_the_backlog_goes_in_chunks_newest_first_until_none_are_left(pipe, cfg, stream):
+    from helpers import run, table
+
+    run(pipe, cfg, stream)
+    finder = CountingFinder()
+    total = table(pipe, """SELECT count(DISTINCT es.segment_id) FROM im.episode_segments es
+                           JOIN im.episodes e USING (episode_id) WHERE e.current""")[0][0]
+    first = names.pending(pipe, finder, 2)
+    assert first == {"items": 2, "more": True}
+    chunks, more = 1, True
+    while more:
+        r = names.pending(pipe, finder, 4)
+        chunks, more = chunks + 1, r["more"]
+    assert len(finder.asked) == total and names.pending(pipe, finder, 4) == {"items": 0, "more": False}

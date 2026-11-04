@@ -25,6 +25,7 @@ from wordfreq import zipf_frequency
 
 KEY_ENV = "IM_NAME_KEY"
 NER_MODEL = "urchade/gliner_medium-v2.1"
+NER_REVISION = "40ec419335d09393f298636f471328b722c6da9e"   # the Dockerfile bakes the same one
 NER_THRESHOLD = 0.5
 FINDER = f"{NER_MODEL}@{NER_THRESHOLD}"
 CHUNK_WORDS = 200        # GLiNER sees 384 tokens: a longer line is read in pieces of about this many words
@@ -139,6 +140,59 @@ def warm(conn, finder, episode_ids: list, batch: int = 512) -> dict:
             "seconds": round(time.monotonic() - start, 1)}
 
 
+def pending(conn, finder, limit: int) -> dict:
+    """Find names in up to `limit` segments of current episodes not looked at yet, newest first: one chunk of a
+    backlog. `more` says whether any are left."""
+    rows = conn.execute(
+        """SELECT s.segment_id, s.text FROM im.source_segments s
+           JOIN (SELECT DISTINCT ON (es.segment_id) es.segment_id, e.started_at FROM im.episode_segments es
+                 JOIN im.episodes e ON e.episode_id = es.episode_id AND e.current
+                 ORDER BY es.segment_id, e.started_at DESC) c USING (segment_id)
+           WHERE NOT EXISTS (SELECT 1 FROM im.segment_names n WHERE n.segment_id = s.segment_id AND n.finder = %s)
+           ORDER BY c.started_at DESC, s.segment_id LIMIT %s""", (finder.id, limit + 1)).fetchall()
+    cached(conn, finder, rows[:limit])
+    return {"items": min(len(rows), limit), "more": len(rows) > limit}
+
+
+TUNNEL_PORT = 55433   # Postgres on the NAS's loopback (install/compose.yaml), and the tunnel's end here
+
+
+def job(finder=None) -> dict:
+    """One chunk of the names backlog as a corral job (install/gpu.sh): through an ssh tunnel to the NAS when
+    IM_SSH_TUNNEL names the host, with the role that can only read segments and write names (IM_DATABASE_URL).
+    Takes CORRAL_SUGGESTED_ITEMS segments (2000 before corral knows the pace) and writes CORRAL_RESULT."""
+    import json
+    import socket
+    import subprocess
+    import time
+
+    from im import db
+
+    host, tunnel = os.environ.get("IM_SSH_TUNNEL"), None
+    try:
+        if host:
+            tunnel = subprocess.Popen(
+                ["ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes",
+                 "-L", f"127.0.0.1:{TUNNEL_PORT}:127.0.0.1:{TUNNEL_PORT}", host])
+            for _ in range(100):
+                if tunnel.poll() is not None:
+                    raise SystemExit(f"ssh tunnel to {host} failed (exit {tunnel.returncode})")
+                try:
+                    socket.create_connection(("127.0.0.1", TUNNEL_PORT), timeout=1).close()
+                    break
+                except OSError:
+                    time.sleep(0.1)
+        with db.connect(db.pipeline_dsn()) as conn:
+            result = pending(conn, finder or Gliner(), int(os.environ.get("CORRAL_SUGGESTED_ITEMS") or 2000))
+    finally:
+        if tunnel:
+            tunnel.terminate()
+    if os.environ.get("CORRAL_RESULT"):
+        with open(os.environ["CORRAL_RESULT"], "w") as f:
+            json.dump(result, f)
+    return result
+
+
 def chunks(text: str, size: int = CHUNK_WORDS) -> list[str]:
     """A text in pieces of at most about `size` words, split between sentences where it can."""
     out, cur = [], []
@@ -176,7 +230,7 @@ class Gliner:
             import torch
             from gliner import GLiNER
             torch.set_num_threads(int(os.environ.get(THREADS_ENV, "2")))
-            self._model = GLiNER.from_pretrained(self.model_name)
+            self._model = GLiNER.from_pretrained(self.model_name, revision=NER_REVISION)
             if torch.cuda.is_available():
                 self._model = self._model.to("cuda")
         return self._model

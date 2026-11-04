@@ -344,6 +344,9 @@ def cmd_names(args) -> None:
     """Policy C: find the names GLiNER sees in a set of episodes ahead of time, so trials and runs only look them up."""
     from im import names, trial
 
+    if args.action == "job":
+        _print(names.job())
+        return
     with db.connect(db.pipeline_dsn()) as conn:
         episodes = [eid for (eid,) in conn.execute("SELECT episode_id FROM im.episodes WHERE current")] \
             if args.all else trial.sample(conn, args.sample)
@@ -667,7 +670,8 @@ def main(argv=None) -> None:
     ad.add_argument("--seed", type=int, default=5, help="the sample and shuffle's seed")
     ad.set_defaults(func=cmd_audit_dedupe)
     nm = sub.add_parser("names", help="policy C: find names in episodes ahead of time (GLiNER, cached per segment)")
-    nm.add_argument("action", choices=["warm"])
+    nm.add_argument("action", choices=["warm", "job"],
+                    help="warm: these episodes now; job: one chunk of the backlog, as corral runs it (install/gpu.sh)")
     nm.add_argument("--sample", type=int, default=150, help="the trial sample's first N episodes (default 150)")
     nm.add_argument("--all", action="store_true", help="every current episode instead")
     nm.set_defaults(func=cmd_names)

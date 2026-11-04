@@ -290,6 +290,12 @@ models = [
     { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
 ]
+ner = [
+    { name = "gliner" },
+    { name = "protobuf" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -300,16 +306,19 @@ dev = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.70" },
     { name = "gliner", marker = "extra == 'models'", specifier = ">=0.2.30" },
+    { name = "gliner", marker = "extra == 'ner'", specifier = ">=0.2.30" },
     { name = "laya", marker = "extra == 'models'", specifier = "==0.3.23" },
     { name = "numpy", specifier = ">=2" },
     { name = "protobuf", marker = "extra == 'models'", specifier = ">=5" },
+    { name = "protobuf", marker = "extra == 'ner'", specifier = ">=5" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "scikit-learn", marker = "extra == 'models'", specifier = ">=1.6" },
     { name = "sentence-transformers", marker = "extra == 'models'", specifier = ">=5" },
     { name = "torch", marker = "extra == 'models'", specifier = ">=2.8", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "torch", marker = "extra == 'ner'", specifier = ">=2.8", index = "https://download.pytorch.org/whl/cpu" },
     { name = "wordfreq", specifier = ">=3.1.1" },
 ]
-provides-extras = ["models"]
+provides-extras = ["models", "ner"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]

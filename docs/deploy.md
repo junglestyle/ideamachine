@@ -102,6 +102,23 @@ listener (127.0.0.1:8791). Removing the line and re-running `install/nas.sh` sto
 tunnel's hostname, two WAF rules) and how to add the connector are in Lattice's `docs/public-mcp.md`. Read its
 "How it's protected" first: this is the one thing reachable from the internet.
 
+## Names said, on the dev box's GPU
+
+Policy C (decision 0008) finds names said with GLiNER and keeps them per segment (`im.segment_names`). The NAS
+reads any segment not looked at yet on its own CPU, which keeps up with live volume. For a backlog (the trial
+sample, the whole history before the live switch, a day of all-day recording), the dev box's GPU does it as a
+corral job:
+
+- On the NAS, `install/nas.sh` puts Postgres on the NAS's loopback (`127.0.0.1:55433`, nothing on the network),
+  creates role `im_names` (reads segments and episodes, writes names, nothing else) and writes its connection to
+  `/mnt/fast/ideamachine/gpu/names.env`, readable only by the clones' owner.
+- On the dev box, as your user: `install/gpu.sh`. Like Hearsay's, it checks the GPU and `ssh nas`, builds an
+  environment with CUDA torch and the pinned GLiNER, copies the connection, and adds `ideamachine.names` to the
+  corral worker. Each job opens an ssh tunnel to the NAS, reads one chunk (corral's suggested size), and requeues
+  itself until nothing is left.
+- Start a backlog: `corral enqueue ideamachine.names --needs gpu --key ideamachine.names`. `corral pause` holds it
+  between chunks; the NAS never waits for it.
+
 ## Where things are
 
 | What | Where |
