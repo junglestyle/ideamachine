@@ -65,7 +65,8 @@ def test_an_analogy_sheet_draws_unrelated_pairs_blind_and_scores_each_way(lattic
     fill(tmp_path, lambda p: "yes" if p["set"] != "random" else "no")
     r = probe_audit.score(tmp_path)
     assert r["missing"] == [] and r["marked"] == len(pairs)
-    assert all(c["hit_rate"] == (0.0 if s == "random" else 1.0) for s, c in r["by_set"].items() if c["yes"] + c["no"])
+    assert all(c["hit_rate"] == (0.0 if s == "random" else 1.0) for s, c in r["by_set"].items()
+               if c.get("yes", 0) + c["no"])
     assert all("also_proposed_by" in y for y in r["yes"])
 
 
@@ -124,3 +125,23 @@ def test_a_quotes_only_draft_never_shows_the_summaries(lattice_with_clusters, tm
     assert d["draft"].endswith("-low-quotes.json") and model.calls
     assert not any("Claude's summary" in c["messages"][0]["content"] for c in model.calls)
     assert "then a summary" not in model.calls[0]["system"] and "> \"" in model.calls[0]["messages"][0]["content"]
+
+
+def test_new_and_known_both_hold_and_only_new_counts_as_novel(lattice_with_clusters, tmp_path):  # noqa: F811
+    probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", tmp_path)
+    key = json.loads((tmp_path / "key.json").read_text())["pairs"]
+    order = {n: i for i, n in enumerate(sorted(key, key=int))}
+    marks = {n: ("new", "known", "no")[order[n] % 3] for n in key}
+    fill(tmp_path, lambda p: marks[next(n for n, q in key.items() if q["ideas"] == p["ideas"])])
+    r = probe_audit.score(tmp_path)
+    total = {k: sum(c.get(k, 0) for c in r["by_set"].values()) for k in ("new", "known", "no")}
+    assert total == {k: sum(m == k for m in marks.values()) for k in ("new", "known", "no")}
+    assert {y["mark"] for y in r["yes"]} <= {"new", "known"} and len(r["yes"]) == total["new"] + total["known"]
+    assert "Judge whether it's worth seeing" in (tmp_path / "sheet.md").read_text()
+
+
+def test_a_filter_that_drops_what_was_new_to_me_says_so():
+    mine = {"1": "new", "2": "known", "3": "no", "4": "new"}
+    theirs = {"1": {"answer": "yes"}, "2": {"answer": "yes"}, "3": {"answer": "no"}, "4": {"answer": "no"}}
+    r = probe_audit.agreement(mine, theirs)
+    assert (r["precision"], r["recall"], r["recall_new"], r["new_dropped"]) == (1.0, round(2 / 3, 3), 0.5, [4])

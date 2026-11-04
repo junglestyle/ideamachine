@@ -38,15 +38,21 @@ PICKS = 30
 PER_IDEA = 2          # an idea appears at most this many times in a proposed set, so one idea can't fill it
 SIZES = {"analogy": {"facets": 15, "model": 15, "random": 10},
          "tension": {"apart": 10, "levels": 10, "model": 10, "near": 10}}
-MARKS = {"yes": "yes", "y": "yes", "no": "no", "n": "no", "unsure": "unsure", "?": "unsure"}
+MARKS = {"new": "new", "known": "known", "k": "known", "yes": "yes", "y": "yes", "no": "no", "n": "no",
+         "unsure": "unsure", "?": "unsure"}
+# Discovery sheets (analogy, tension) are marked for whether a pair is worth seeing, not whether I'd have made it:
+# the point is a system that surfaces what my own reading of the lattice wouldn't. `yes` (from before) counts as a
+# relation that holds, novel or not.
+HOLDS = ("new", "known", "yes")
+FOUND = ("new", "known", "yes", "no")   # the marks that answer the question
 
 QUESTION = {
     "analogy": ("Is there an analogy between A and B: different subjects, the same underlying structure (the same "
                 "move, pattern or mechanism)?",
-                "If yes, name the shared structure in a few words in `note:`."),
+                "For new or known, name the shared structure in a few words in `note:`."),
     "tension": ("Do A and B pull against each other: a contradiction, a change of mind, a trade-off, or two pulls "
                 "that would have to be balanced?",
-                "If yes, say in a few words where they pull in `note:`."),
+                "For new or known, say in a few words where they pull in `note:`."),
 }
 
 HEADER = """# {title} (blind)
@@ -56,8 +62,15 @@ the summary can be wrong.
 
 {question}
 
-After `mark:`, write `yes`, `no` or `unsure` (`?`). {note} Mark it yourself, without a model's help.
-Then run `im audit-{command} score` on this folder. "me" is me, "someone" anyone else.
+After `mark:`, write one of:
+- `new`: it holds, and it shows me something I hadn't connected;
+- `known` (`k`): it holds, but I already had it;
+- `no`: it doesn't hold, or it's noise;
+- `unsure` (`?`).
+
+{note} Judge whether it's worth seeing, not whether I'd have made it: the point is what my own reading of the
+lattice wouldn't surface. Mark it yourself, without a model's help. Then run `im audit-{command} score` on this
+folder. "me" is me, "someone" anyone else.
 """
 
 FACET_SYSTEM = """For each idea from my idea lattice, captured from my conversations, write its structure four \
@@ -349,12 +362,18 @@ def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=
 
 
 def agreement(mine: dict, theirs: dict) -> dict:
-    """A model's yes against mine, on the pairs we both answered yes or no."""
-    pairs = [n for n, m in mine.items() if m in ("yes", "no") and theirs.get(n, {}).get("answer") in ("yes", "no")]
-    mine_yes = {n for n in pairs if mine[n] == "yes"}
+    """A model's yes against mine (new, known or yes: it holds), on the pairs we both answered. For a discovery
+    sheet, also what it keeps of what was new to me: a filter that drops those is filtering out the point."""
+    pairs = [n for n, m in mine.items() if m in FOUND and theirs.get(n, {}).get("answer") in ("yes", "no")]
+    mine_yes = {n for n in pairs if mine[n] in HOLDS}
+    mine_new = {n for n in pairs if mine[n] == "new"}
     their_yes = {n for n in pairs if theirs[n]["answer"] == "yes"}
     ratio = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
+    novelty = {"recall_new": ratio(len(mine_new & their_yes), len(mine_new)),
+               "precision_new": ratio(len(mine_new & their_yes), len(their_yes)),
+               "new_dropped": sorted(int(n) for n in mine_new - their_yes)} if mine_new else {}
     return {"pairs": len(pairs), "agree": ratio(sum((n in mine_yes) == (n in their_yes) for n in pairs), len(pairs)),
+            **novelty,
             "precision": ratio(len(mine_yes & their_yes), len(their_yes)),
             "recall": ratio(len(mine_yes & their_yes), len(mine_yes)),
             "found": sorted(int(n) for n in mine_yes & their_yes),
@@ -378,10 +397,11 @@ def marks(text: str) -> dict:
 
 
 def score(folder: Path) -> dict:
-    """Per set, how often my answer was yes; which ways of looking proposed each yes; and my notes."""
+    """Per set, how often a pair held (`hit_rate`) and how often it was new to me (`novel_rate`); which ways of
+    looking proposed each one that held; and my notes."""
     key = json.loads((folder / "key.json").read_text())
     got = marks((folder / "sheet.md").read_text())
-    by_set = {s: {"yes": 0, "no": 0, "unsure": 0} for s in key["sizes"]}
+    by_set = {s: {"new": 0, "known": 0, "yes": 0, "no": 0, "unsure": 0} for s in key["sizes"]}
     yes, missing, unreadable = [], [], []
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         m = got.get(num, {})
@@ -390,14 +410,22 @@ def score(folder: Path) -> dict:
              else missing.append(int(num)))
             continue
         by_set[p["set"]][m["mark"]] += 1
-        if m["mark"] == "yes":
-            yes.append({"pair": int(num), "set": p["set"], "also_proposed_by": p.get("proposed_by", []),
+        if m["mark"] in HOLDS:
+            yes.append({"pair": int(num), "mark": m["mark"], "set": p["set"],
+                        "also_proposed_by": p.get("proposed_by", []),
                         "note": m.get("note"), "why_proposed": p.get("why")})
     for c in by_set.values():
-        c["hit_rate"] = round(c["yes"] / (c["yes"] + c["no"]), 3) if c["yes"] + c["no"] else None
+        answered = sum(c[k] for k in FOUND)
+        c["hit_rate"] = round(sum(c[k] for k in HOLDS) / answered, 3) if answered else None
+        if key["benchmark"] != "summary":   # a summary sheet checks correctness, not discovery
+            c["novel_rate"] = round(c["new"] / answered, 3) if answered else None
+        for k in ("new", "known", "yes"):   # only the marks this sheet uses
+            if not c[k]:
+                del c[k]
     mine = {n: m["mark"] for n, m in got.items() if "mark" in m}
     drafts = {d.stem.removeprefix("draft-"): agreement(mine, json.loads(d.read_text()))
               for d in sorted(folder.glob("draft-*.json"))}
-    return {"benchmark": key["benchmark"], "marked": sum(c["yes"] + c["no"] + c["unsure"] for c in by_set.values()),
+    return {"benchmark": key["benchmark"], "marked": sum(sum(c.get(k, 0) for k in (*FOUND, "unsure"))
+                                                         for c in by_set.values()),
             "missing": missing, **({"unreadable": unreadable} if unreadable else {}), "by_set": by_set,
             **({"drafts": drafts} if drafts else {}), "yes": yes}
