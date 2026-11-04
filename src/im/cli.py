@@ -390,6 +390,12 @@ def cmd_audit_probe(args) -> None:
         return
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
+        if args.action == "draft":
+            from im import llm, names
+
+            scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
+            _print(probe_audit.draft(conn, llm.client_for(args.model), folder, args.model, args.effort, scrubber))
+            return
         import anthropic
 
         from im.backends import SentenceEmbedder
@@ -711,9 +717,12 @@ def main(argv=None) -> None:
                                  ("audit-tension", "tension", "ideas that pull against each other")):
         pa = sub.add_parser(name, help=f"a blind sheet of possible {what}, proposed several ways; score my marks "
                                        "(sheet sends to Claude)")
-        pa.add_argument("action", choices=["sheet", "score"])
+        pa.add_argument("action", choices=["sheet", "draft", "score"])
         pa.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
         pa.add_argument("--seed", type=int, default=9, help="the sample and shuffle's seed")
+        pa.add_argument("--model", default="claude-opus-5-5", help="draft: the model answering, e.g. z-ai/glm-5.3")
+        pa.add_argument("--effort", default="low", help="draft: its effort")
+        pa.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names")
         pa.set_defaults(func=cmd_audit_probe, question=question)
     sp = sub.add_parser("analogy-spike", help="can structure find my analogy pairs where topic can't? (sends to Claude)")
     sp.add_argument("folder", help="a marked B4 sheet's folder, e.g. /saved/b4-1")

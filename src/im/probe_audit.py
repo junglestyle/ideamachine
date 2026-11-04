@@ -252,6 +252,83 @@ def write(conn, client, embedder, question: str, out: Path, seed: int = 9) -> di
             "available": k["available"]}
 
 
+DRAFT_SYSTEM = {
+    "analogy": """Two clusters from my idea lattice, captured from my conversations. Each side shows what was said, \
+then a summary of it; judge by what was said, since the summary can be wrong. "me" is me, "someone" anyone else. \
+Is there an analogy between them: different subjects, the same underlying structure (the same move, pattern or \
+mechanism in two domains)? Similar topics aren't an analogy. Answer yes, no or unsure, and if yes, name the shared \
+structure in a few words. Don't evaluate the ideas.""",
+    "tension": """Two clusters from my idea lattice, captured from my conversations. Each side shows what was said, \
+then a summary of it; judge by what was said, since the summary can be wrong. "me" is me, "someone" anyone else. \
+Do they pull against each other: a contradiction, a change of mind, a trade-off, or two pulls that would have to be \
+balanced? Being about the same subject isn't a tension. Answer yes, no or unsure, and if yes, say in a few words \
+where they pull. Don't evaluate the ideas.""",
+}
+DRAFT_SCHEMA = {
+    "type": "object",
+    "properties": {"answer": {"type": "string", "enum": ["yes", "no", "unsure"]}, "why": {"type": "string"}},
+    "required": ["answer", "why"], "additionalProperties": False,
+}
+
+
+def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=None) -> dict:
+    """A model answers the sheet's question for every pair, blind to my marks, into draft-<model>-<effort>.json, as
+    it goes. Every request goes to the egress log; with a scrubber (policy C), names said are pseudonymized first."""
+    from im import names
+
+    key = json.loads((folder / "key.json").read_text())
+    question = key["benchmark"]
+    shown = edge_audit._pairs_as_shown((folder / "sheet.md").read_text())
+    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}.json"
+    got = json.loads(out_path.read_text()) if out_path.exists() else {}
+    system = DRAFT_SYSTEM[question]
+    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+    cost, failed = 0.0, []
+    for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
+        if num in got or num not in shown:
+            continue
+        text, back = shown[num], {}
+        if scrubber:
+            (text,), back, _ = scrubber.scrub([text])
+        try:
+            r = llm.complete(client, model, effort, system, DRAFT_SCHEMA, text, max_tokens=4000)
+        except RuntimeError as e:   # an answer that never kept to the schema: skipped, so a rerun asks again
+            failed.append({"pair": int(num), "error": str(e)[:300]})
+            continue
+        segs = [s for (s,) in conn.execute(
+            """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
+               WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
+        conn.execute(
+            """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version,
+                 payload, payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
+               VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (segs, model, themes.version(system, DRAFT_SCHEMA, model, effort), policy, text, edge_audit._sha(text),
+             r.request_id, r.stop_reason, r.served_by, r.input_tokens, r.output_tokens, r.cost_usd))
+        cost += r.cost_usd or 0.0
+        if r.refused:
+            got[num] = {"answer": "unsure", "why": "", "refused": True}
+        else:
+            got[num] = json.loads(r.text)
+            got[num]["why"] = names.unscrub(got[num].get("why", ""), back)
+        out_path.write_text(json.dumps(got, indent=2))
+    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "policy": policy,
+            **({"failed": failed} if failed else {})}
+
+
+def agreement(mine: dict, theirs: dict) -> dict:
+    """A model's yes against mine, on the pairs we both answered yes or no."""
+    pairs = [n for n, m in mine.items() if m in ("yes", "no") and theirs.get(n, {}).get("answer") in ("yes", "no")]
+    mine_yes = {n for n in pairs if mine[n] == "yes"}
+    their_yes = {n for n in pairs if theirs[n]["answer"] == "yes"}
+    ratio = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
+    return {"pairs": len(pairs), "agree": ratio(sum((n in mine_yes) == (n in their_yes) for n in pairs), len(pairs)),
+            "precision": ratio(len(mine_yes & their_yes), len(their_yes)),
+            "recall": ratio(len(mine_yes & their_yes), len(mine_yes)),
+            "found": sorted(int(n) for n in mine_yes & their_yes),
+            "invented": sorted(int(n) for n in their_yes - mine_yes),
+            "missed": sorted(int(n) for n in mine_yes - their_yes)}
+
+
 def marks(text: str) -> dict:
     """Pair number -> {"mark", "note"}, or {"unreadable"} for a mark that isn't yes, no or unsure."""
     out, n = {}, None
@@ -285,5 +362,9 @@ def score(folder: Path) -> dict:
                         "note": m.get("note"), "why_proposed": p.get("why")})
     for c in by_set.values():
         c["hit_rate"] = round(c["yes"] / (c["yes"] + c["no"]), 3) if c["yes"] + c["no"] else None
+    mine = {n: m["mark"] for n, m in got.items() if "mark" in m}
+    drafts = {d.stem.removeprefix("draft-"): agreement(mine, json.loads(d.read_text()))
+              for d in sorted(folder.glob("draft-*.json"))}
     return {"benchmark": key["benchmark"], "marked": sum(c["yes"] + c["no"] + c["unsure"] for c in by_set.values()),
-            "missing": missing, **({"unreadable": unreadable} if unreadable else {}), "by_set": by_set, "yes": yes}
+            "missing": missing, **({"unreadable": unreadable} if unreadable else {}), "by_set": by_set,
+            **({"drafts": drafts} if drafts else {}), "yes": yes}
