@@ -132,7 +132,10 @@ class OpenRouter:
             elif not _is_json(answer) and attempt == 1:
                 continue
             elif not _is_json(answer):
-                raise RuntimeError(f"{model} didn't answer in JSON twice: {str(answer)[:200]}")
+                why = f"stopped: {choice.get('finish_reason')}, " + \
+                    ("it reasoned but wrote no answer" if (choice.get("message") or {}).get("reasoning") else
+                     f"answer: {str(answer)[:200]}")
+                raise RuntimeError(f"{model} didn't answer in JSON twice ({why})")
             return Reply(answer, stop, r.get("model") or model, r.get("id"), tokens_in, tokens_out,
                          round(spent, 6))
         raise AssertionError("unreachable")
