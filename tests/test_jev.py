@@ -51,7 +51,7 @@ def test_jev_drafts_a_sheet_from_structured_state_with_names_pseudonymized(latti
     assert "Bob" not in json.dumps([b["state"] for b in sent]) and "Alice" not in json.dumps([b["state"] for b in sent])
     got = json.loads((tmp_path / "draft-jev-1.14.0-pulls4.json").read_text())
     assert all(a["answer"] == "yes" and a["p"] == 0.95 for a in got.values())
-    r = probe_audit.score(tmp_path)["drafts"]["jev-1.14.0"]
+    r = probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-pulls4"]
     assert r["precision"] == 0.0 and len(r["invented"]) == len(key["pairs"])
     logged = lattice_with_clusters.execute(
         "SELECT count(*), sum(cost_usd) FROM im.egress_log WHERE model = 'jev-1.14.0'").fetchone()
