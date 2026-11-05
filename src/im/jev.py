@@ -3,9 +3,9 @@ probabilities (docs.typesafe.ai). Not a chat model: the state is named fields, e
 judgment (a Noul answers the probability of yes), and the decision is made here, in code.
 
 Its first job here is drafting the probe sheets (tension, analogy, summary faithfulness), so it can be scored
-against my marks beside the chat models. Every question's wording is in this module. A judgment with several
-forms (a tension can be a contradiction, a change of mind, a trade-off or competing pulls) is asked as one Noul
-per form and combined in code, as TypeSafe recommends.
+against my marks beside the chat models. Every question's wording is in this module. A judgment is asked as
+atomic Nouls and combined in code, as TypeSafe recommends: a tension as four wordings averaged, an analogy as two
+conditions that must both hold.
 
 It's reached through OpenRouter by default, which serves TypeSafe's own API (not a chat format) with zero data
 retention, on the same OPENROUTER_API_KEY as the other models; with only TYPESAFE_API_KEY set, it goes to TypeSafe
@@ -28,16 +28,19 @@ MODEL = "jev-1.14.0"               # pinned: an alias (jev-latest) can change an
 PRICE_IN = 0.042 / 1e6             # $ per input token
 YES, NO = 0.7, 0.3                 # TypeSafe's starting thresholds: between them, the state doesn't settle it
 
+# What decides. A tension is asked in four wordings of one question and decided by their mean: on the two tension
+# sheets (70 pairs, 14 tensions, 2026-11-04), no single question held above 0.80 AUC on both, the four wordings
+# correlate 0.7 to 0.9, and their mean held 0.79 to 0.81 on both while ranking tensions new to me as well as known
+# ones (pulls_v2 alone favoured known ones, 0.84 against 0.77). The forms asked before (contradiction, change of
+# mind, trade-off, the strongest counting: 0.71 to 0.74) stay as probes. A changed set gets a new name here, which names its drafts.
+QUESTION_SETS = {"tension": "pulls4"}
 QUESTIONS = {
     "tension": {
-        "contradiction": ("Can `a` and `b` not both be true as said?",
-                          {"true": "Believing one as said means rejecting the other",
-                           "false": "Both can be held as said at the same time"}),
-        "change_of_mind": ("Does one of `a` and `b` reverse a view the other holds?", None),
-        "trade_off": ("Do `a` and `b` favour opposite sides of a trade-off?",
-                      {"true": "Each gives up what the other values",
-                       "false": "They value the same things, or unrelated things"}),
         "competing_pulls": ("Do `a` and `b` pull a person in directions that would have to be balanced?", None),
+        "pulls_v2": ("Would someone who agrees with both `a` and `b` have to give up some of one to honour the "
+                     "other?", None),
+        "pulls_v3": ("Is there a tension between `a` and `b`?", None),
+        "pulls_v4": ("`a` and `b` pull in opposite directions.", None),
     },
     "analogy": {
         "different_subjects": ("Are `a` and `b` about different subjects?",
@@ -57,65 +60,59 @@ QUESTIONS = {
 
 
 # Probes: questions asked beside the ones that decide, kept in the draft but never in `p`, so new axes and new
-# wordings of one question are scored against my marks without changing what's being compared. Each wording of a
-# question is its own probe (`_v2`...), over the same state, as TypeSafe suggests. PROBE_SET names the draft.
-PROBE_SET = "probes2"
+# wordings are scored against my marks without changing what's being compared. PROBE_SET names the draft.
+# probes2 (2026-11-04) also asked whether the sides differ in structure, only in emphasis, or are an exception, and
+# whether both are mine: all near chance on both sheets, so dropped.
+PROBE_SET = "probes3"
 BOTH = {"true": "Someone could hold both without strain", "false": "Holding one means giving up some of the other"}
 PROBES = {
     "tension": {
-        # What competing pulls alone may be missing (my first decomposition, 2026-11-04).
-        "same_subject": ("Are `a` and `b` about the same subject?",
-                         {"true": "They discuss the same situation, activity or kind of thing",
-                          "false": "They discuss different situations or things"}),
-        "different_structure": ("Do `a` and `b` rest on different underlying moves or mechanisms?",
-                                {"true": "The reasoning in one works differently from the reasoning in the other",
-                                 "false": "They make the same kind of move"}),
-        # Kinds of pull, each from my notes on the tensions I marked.
+        # The forms that decided before.
+        "contradiction": ("Can `a` and `b` not both be true as said?",
+                          {"true": "Believing one as said means rejecting the other",
+                           "false": "Both can be held as said at the same time"}),
+        "change_of_mind": ("Does one of `a` and `b` reverse a view the other holds?", None),
+        "trade_off": ("Do `a` and `b` favour opposite sides of a trade-off?",
+                      {"true": "Each gives up what the other values",
+                       "false": "They value the same things, or unrelated things"}),
+        # Kinds of pull: inner conflict and opposite stance led on one sheet and not the other.
         "opposite_stance": ("Do `a` and `b` take opposite stances toward the same rule, norm or value?", None),
-        "opposite_stance_v2": ("Does one of `a` and `b` endorse what the other rejects?", None),
         "cant_act_on_both": ("Would doing what one of `a` and `b` recommends make it harder to do what the other "
                              "recommends?", None),
         "undercuts": ("Does one of `a` and `b` undercut the reasoning or premise of the other?", None),
-        "exception": ("Is one of `a` and `b` a broad claim that the other is an exception to?", None),
         "inner_conflict": ("Do `a` and `b` describe conflicting wants or traits in the same person?", None),
+        # What may tell new from known (6 new, 8 known): my new tensions ran across subjects, over values, and
+        # between sides Jev thought could both be true.
+        "same_subject": ("Are `a` and `b` about the same subject?",
+                         {"true": "They discuss the same situation, activity or kind of thing",
+                          "false": "They discuss different situations or things"}),
         "competing_values": ("Do `a` and `b` put different values first, such as honesty and kindness, or effort "
                              "and ease?", None),
-        # Other wordings of competing pulls (the deciding one is the first wording).
-        "pulls_v2": ("Would someone who agrees with both `a` and `b` have to give up some of one to honour the "
-                     "other?", None),
-        "pulls_v3": ("Is there a tension between `a` and `b`?", None),
-        "pulls_v4": ("`a` and `b` pull in opposite directions.", None),
-        # Signs of no tension: these should rank my tensions lower.
+        # A sign of no tension: lower on my tensions on both sheets (0.22 to 0.35).
         "both_true": ("Could `a` and `b` both be completely true at once, with no qualification?", BOTH),
         "both_true_v2": ("Someone could fully agree with both `a` and `b`.", None),
-        "only_emphasis": ("Do `a` and `b` differ only in emphasis or angle on the same thing?",
-                          {"true": "They look at the same thing from different sides, and neither rules the other "
-                                   "out", "false": "Taking one seriously puts pressure on the other"}),
-        "only_emphasis_v2": ("Are `a` and `b` two takes on the same point that don't conflict?", None),
     },
 }
-KINDS = ("opposite_stance", "cant_act_on_both", "undercuts", "exception", "inner_conflict", "competing_values")
-# Combinations of decisive and probe answers, computed here and scored like any question.
+# Combinations of deciding and probe answers, computed here and scored like any question.
 COMBOS = {
     "tension": {
-        "pulls_and_same_subject": lambda q: min(q["competing_pulls"], q["same_subject"]),
-        "pulls_same_subject_different_structure": lambda q: min(q["competing_pulls"], q["same_subject"],
-                                                                q["different_structure"]),
-        "pulls_x_same_subject_x_different_structure": lambda q: q["competing_pulls"] * q["same_subject"]
-        * q["different_structure"],
-        "pulls_not_only_emphasis": lambda q: q["competing_pulls"] * (1 - q["only_emphasis"]),
-        "pulls_not_both_true": lambda q: q["competing_pulls"] * (1 - q["both_true"]),
-        "stance_or_action": lambda q: max(q["opposite_stance"], q["cant_act_on_both"]),
-        "any_kind": lambda q: max(q[k] for k in KINDS),
-        "any_kind_not_both_true": lambda q: max(q[k] for k in KINDS) * (1 - q["both_true"]),
-        "any_kind_and_same_subject": lambda q: min(max(q[k] for k in KINDS), q["same_subject"]),
+        "pulls_not_both_true": lambda q: _mean(q, QUESTIONS["tension"])
+        * (1 - (q["both_true"] + q["both_true_v2"]) / 2),
+        "pulls_across_subjects": lambda q: _mean(q, QUESTIONS["tension"]) * (1 - q["same_subject"]),
+        "old_p": lambda q: max(q["contradiction"], q["change_of_mind"], q["trade_off"], q["competing_pulls"]),
     },
 }
+
+
+def _mean(p: dict[str, float], names) -> float:
+    return sum(p[n] for n in names) / len(names)
 
 
 def combine(question: str, p: dict[str, float]) -> float:
-    """One probability from the atomic ones: any form of tension, or a summary that adds or misstates (the most
-    likely of them); an analogy needs different subjects and the same structure (the less likely)."""
+    """One probability from the atomic ones: a tension is the mean of its wordings; an analogy needs different
+    subjects and the same structure (the less likely); a summary fails if it adds or misstates (the more likely)."""
+    if question == "tension":
+        return _mean(p, p)
     return min(p.values()) if question == "analogy" else max(p.values())
 
 

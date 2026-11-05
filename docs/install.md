@@ -19,7 +19,7 @@ uv run im ideas --discards        # what I discarded and why: material for revis
 uv run im trial v3 --model openai/gpt-6.1-sol   # B3: a model on the trial sample, names pseudonymized, vs Opus
 uv run im trial v3 --model claude-opus-5-5 --replicate 2   # Opus against itself: the ceiling for recall
 uv run im names warm               # policy C: find names in the trial sample once, before trials in parallel
-uv run im audit-tension draft saved/tension-2 --model jev-1.14.0   # Jev drafts a probe sheet (via OpenRouter)
+uv run im audit-tension draft saved/tension-2 --model jev-1.14.0   # Jev drafts a probe sheet (via OpenRouter); --probes asks more
                                   # (OpenRouter models need OPENROUTER_API_KEY; policy C needs IM_NAME_KEY)
 uv run im seed ~/.local/share/ideamachine/seeds/chatgpt-archive.md   # seed the idea lattice (once)
 uv run im lattice                 # lattice counts: ideas, evidence, connections

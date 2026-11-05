@@ -58,3 +58,12 @@ models did best (GLM-5.3-flash precision 0.55, recall 0.67; DeepSeek V4.1 Flash 
 barely beat keeping everything (0.30), finding a pull almost everywhere. That was agreement; whether a filter is
 worth having is decided on novelty, once those marks are `new` or `known`. Discoveries arrive as proposals I keep
 or dismiss, like candidates ([0007](0007-neutral-proposals.md)); none becomes an edge without me.
+
+Jev on both tension sheets, with each `yes` re-marked `new` or `known` (70 pairs, 14 tensions, 6 new; 2026-11-04):
+no single question ranked my tensions above 0.80 AUC on both sheets, and the forms it decided by (contradiction,
+change of mind, trade-off, competing pulls, the strongest counting) managed 0.71 and 0.74. Four wordings of
+competing pulls correlate 0.7 to 0.9; their mean held 0.79 and 0.81, and ranked new tensions as well as known ones
+(0.80, 0.79), where the best single wording favoured known ones (0.77, 0.84). So Jev decides a tension by that mean
+(`jev.QUESTION_SETS`, `pulls4`), read as a ranking: its scores run lower, and a cut-off waits for more marks. Every
+chat-model checker dropped at least one new tension; Jev at 0.5 dropped none. What may tell new from known, on 14
+pairs: new ones ran across subjects, over values, and between sides that could both be true; kept as probes.
