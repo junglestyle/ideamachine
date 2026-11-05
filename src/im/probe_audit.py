@@ -6,9 +6,10 @@ and the spike that ranked them by structure couldn't say anything about analogie
 proposing pairs, and a random set beside them says how often the answer is yes by chance.
 
 Analogy (pairs from ideas below the median similarity by topic, so unrelated):
+- jev: Jev answers every analogy question (jev.QUESTIONS and jev.PROBES) about a random sample of unrelated pairs,
+  and each question proposes its best-scored pairs, so a sheet grades the questions as proposers;
 - facets: a model writes each idea's structure as four lines, subject matter removed, so the one an analogy rests
   on is likelier to be there; pairs whose closest lines are closest;
-- model: a model reads every idea at once and proposes pairs from different subjects with the same structure;
 - random: pairs drawn at random, the base rate.
 Tension (any similarity):
 - apart: neighbours first said far apart in time, where a change of mind would show;
@@ -36,8 +37,19 @@ FACET_MODEL, FACET_EFFORT = "claude-opus-5-5", "low"
 PICK_MODEL, PICK_EFFORT = "claude-sonnet-5-5", "medium"
 PICKS = 30
 PER_IDEA = 2          # an idea appears at most this many times in a proposed set, so one idea can't fill it
-SIZES = {"analogy": {"facets": 15, "model": 15, "random": 10},
+SIZES = {"analogy": {"jev": 25, "facets": 10, "random": 5},
          "tension": {"apart": 10, "levels": 10, "model": 10, "near": 10}}
+# The jev set. Sonnet read every idea and proposed analogies (more than Opus did), but of the up to 30 it proposed,
+# 1 was between unrelated ideas (2026-11-04). Jev can't read every idea at once; it answers about pairs, cheaply,
+# so it reads a sample and ranks it.
+JEV_POOL = 3000       # unrelated pairs Jev is asked about
+JEV_TOP = 10          # a question's best-scored pairs in the pool, which it's counted as proposing
+JEV_DEPTH = 100       # how far down each question's ranking the set draws, in turn
+JEV_WORKERS = 8
+JEV_SAVE = 100        # answers between saves of jev-pool.json
+# Asked to describe a pair, not to find an analogy, so they propose nothing: every pool pair has different
+# subjects, and a high only_genre is a no.
+AXES = ("different_subjects", "different_domains", "only_genre", "surprising")
 MARKS = {"new": "new", "known": "known", "k": "known", "yes": "yes", "y": "yes", "no": "no", "n": "no",
          "unsure": "unsure", "?": "unsure"}
 # Discovery sheets (analogy, tension) are marked for whether a pair is worth seeing, not whether I'd have made it:
@@ -90,10 +102,6 @@ FACET_SCHEMA = {
 }
 
 PICK_SYSTEM = {
-    "analogy": """Below are ideas from my idea lattice, captured from my conversations, numbered. Find pairs that are \
-analogous: about different subjects, with the same underlying structure (the same move, pattern or mechanism in \
-two domains). Only pairs whose subjects differ; similar topics aren't analogies. For each, name the shared \
-structure in a few words. Propose up to {n}, best first. Don't evaluate the ideas.""",
     "tension": """Below are ideas from my idea lattice, captured from my conversations, numbered. Find pairs that \
 pull against each other: a contradiction, a change of mind, a trade-off, or two pulls that would have to be \
 balanced. For each, say in a few words where they pull. Propose up to {n}, best first. Don't evaluate the ideas.""",
@@ -194,6 +202,60 @@ def _facet_pairs(embedder, structures: dict[str, list[str]], far: set[tuple]) ->
             for p, (s, la, lb) in sorted(best.items(), key=lambda kv: -kv[1][0])]
 
 
+def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path) -> dict[str, dict]:
+    """Jev's answer to every analogy question about each pair, "a b" -> {question: p}, JEV_WORKERS requests at a
+    time. Kept in jev-pool.json as they come, so a rerun picks up where one stopped; every answer is logged."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    path = folder / "jev-pool.json"
+    got = json.loads(path.read_text()) if path.exists() else {}
+    todo = [p for p in pairs if " ".join(p["ideas"]) not in got]
+    sides = {i: edge_audit.side_data(conn, i) for p in todo for i in p["ideas"]}
+    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+    states = []
+    for p in todo:
+        state = {"a": sides[p["ideas"][0]], "b": sides[p["ideas"][1]]}
+        states.append((p, _scrubbed(state, scrubber)[0] if scrubber else state))
+    error = None
+    with ThreadPoolExecutor(JEV_WORKERS) as workers:
+        futures = {workers.submit(client.ask, "analogy", state, True): p for p, state in states}
+        for n, f in enumerate(as_completed(futures), 1):
+            if f.cancelled():
+                continue
+            try:
+                probs, meta = f.result()
+            except Exception as e:   # stop asking, but keep and log what was already answered
+                if error is None:
+                    error = e
+                    for other in futures:
+                        other.cancel()
+                continue
+            _log_jev(conn, client, "analogy", futures[f], meta, policy)
+            got[" ".join(futures[f]["ideas"])] = {k: round(v, 3) for k, v in probs.items()}
+            if n % JEV_SAVE == 0:
+                path.write_text(json.dumps(got))
+    path.write_text(json.dumps(got))
+    if error:
+        raise error
+    return got
+
+
+def _jev_proposals(answers: dict[str, dict]) -> tuple[list[dict], dict[str, set]]:
+    """Each question ranks the pool, and the set draws from their rankings in turn, so every question proposes some;
+    and each question's top JEV_TOP, as `jev:<question>`, to say which questions proposed a pair."""
+    names = [k for k in next(iter(answers.values()), {}) if k not in AXES]
+    ranked = {k: sorted(answers, key=lambda pair: -answers[pair][k]) for k in names}
+    out, seen = [], set()
+    for r in range(min(JEV_DEPTH, len(answers))):
+        for k in names:
+            pair = ranked[k][r]
+            if pair not in seen:
+                seen.add(pair)
+                out.append({"ideas": pair.split(), "why": f"Jev {k} {answers[pair][k]}"})
+    return out, {f"jev:{k}": {tuple(pair.split()) for pair in ranked[k][:JEV_TOP]} for k in names}
+
+
+
 def _limited(pairs: list[dict], n: int, taken: set) -> list[dict]:
     """The first n pairs not already taken, with no idea more than PER_IDEA times."""
     out, uses = [], {}
@@ -215,9 +277,10 @@ def earlier(folders: list[Path]) -> set[tuple]:
 
 
 def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, only: str | None = None,
-          size: int | None = None, exclude: set | None = None) -> tuple[str, dict]:
+          size: int | None = None, exclude: set | None = None, jev=None, scrubber=None,
+          pool_size: int = JEV_POOL) -> tuple[str, dict]:
     """`only` draws every pair from one set (e.g. `model`, the one that found tensions), `size` of them; `exclude`
-    leaves out pairs already asked about."""
+    leaves out pairs already asked about. `jev` (a jev.Jev) and `scrubber` are for the analogy sheet's jev set."""
     rng = random.Random(seed)
     rows = edge_audit._clusters(conn)
     mine = [r[0] for r in rows if r[2]]
@@ -228,13 +291,18 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
     wanted = lambda kind: kind in sizes  # noqa: E731
     n_picks = max(PICKS, 2 * sizes.get("model", 0) + len(exclude or ()))   # enough left after the excluded
     proposed: dict[str, list[dict]] = {}
+    tops: dict[str, set] = {}
     if question == "analogy":
         apart = unrelated(rows)
         far = {tuple(p["ideas"]) for p in apart}
         if wanted("facets"):
             proposed["facets"] = _facet_pairs(embedder, facets(conn, client, mine, folder), far)
-        if wanted("model"):
-            proposed["model"] = [p for p in picks(conn, client, "analogy", mine, n_picks) if tuple(p["ideas"]) in far]
+        if wanted("jev"):
+            if jev is None:
+                raise SystemExit("the jev set needs Jev (OPENROUTER_API_KEY)")
+            sample = [p for p in apart if tuple(p["ideas"]) not in (exclude or set())]
+            answers = jev_pool(conn, jev, scrubber, rng.sample(sample, min(pool_size, len(sample))), folder)
+            proposed["jev"], tops = _jev_proposals(answers)
         if wanted("random"):
             proposed["random"] = rng.sample(apart, min(len(apart), 20 * sizes["random"]))
     else:
@@ -246,7 +314,8 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
     taken, picked = set(exclude or ()), []
     for kind, n in sizes.items():
         picked += [p | {"set": kind} for p in _limited(proposed[kind], n, taken)]
-    lists = {kind: {tuple(p["ideas"]) for p in ps} for kind, ps in proposed.items() if kind not in ("random", "near")}
+    lists = {kind: {tuple(p["ideas"]) for p in ps} for kind, ps in proposed.items()
+             if kind not in ("random", "near", "jev")} | tops   # jev: which question proposed it
     for p in picked:   # which ways of looking proposed it, beyond the set it was drawn for
         p["proposed_by"] = sorted(k for k, s in lists.items() if tuple(p["ideas"]) in s)
     rng.shuffle(picked)
@@ -264,17 +333,20 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
         lines += ["mark: ", "note: ", ""]
     key = {"benchmark": question, "seed": seed, "sizes": sizes, "excluded": len(exclude or ()),
            "available": {k: len(v) for k, v in proposed.items()},
+           **({"jev_pool": len(answers)} if "jev" in proposed else {}),
            "pairs": {str(n): p for n, p in enumerate(picked, 1)}}
     return "\n".join(lines), key
 
 
 def write(conn, client, embedder, question: str, out: Path, seed: int = 9, only: str | None = None,
-          size: int | None = None, exclude_folders: list[Path] = ()) -> dict:
+          size: int | None = None, exclude_folders: list[Path] = (), jev=None, scrubber=None,
+          pool_size: int = JEV_POOL) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     sheet, key = out / "sheet.md", out / "key.json"
     if sheet.exists() or key.exists():
         raise SystemExit(f"{out} already has a sheet; score it, or pick another folder")
-    text, k = build(conn, client, embedder, question, out, seed, only, size, earlier(list(exclude_folders)))
+    text, k = build(conn, client, embedder, question, out, seed, only, size, earlier(list(exclude_folders)), jev,
+                    scrubber, pool_size)
     sheet.write_text(text)
     key.write_text(json.dumps(k, indent=2))
     sets = [p["set"] for p in k["pairs"].values()]
@@ -345,12 +417,28 @@ def _scrubbed(state, scrubber):
     return walk(state, lambda t: next(it)), back
 
 
+def _log_jev(conn, client, question: str, p: dict, meta: dict, policy: str) -> None:
+    """One Jev request in the egress log, with the segments of what it showed."""
+    from im import jev
+
+    segs = p.get("segments") or [s for (s,) in conn.execute(
+        """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
+           WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
+    conn.execute(
+        """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version,
+             payload, payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
+           VALUES (NULL, %s, %s, %s, %s, %s, %s, NULL, 'end_turn', %s, %s, %s, %s)""",
+        (segs, client.model, themes.version(json.dumps(jev.QUESTIONS[question]), {}, client.model, ""), policy,
+         meta["payload"], edge_audit._sha(meta["payload"]), meta["served_by"], meta["input_tokens"],
+         meta["output_tokens"], meta["cost_usd"]))
+
+
 def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: bool, probes: bool = False) -> dict:
     """Jev drafts the sheet from structured state, one request of atomic Nouls per pair, combined in code."""
     from im import jev
 
     question = key["benchmark"]
-    out_path = folder / (f"draft-{client.model}{'-' + jev.QUESTION_SETS[question] if question in jev.QUESTION_SETS else ''}{'-' + jev.PROBE_SET if probes else ''}"
+    out_path = folder / (f"draft-{client.model}{'-' + jev.QUESTION_SETS[question] if question in jev.QUESTION_SETS else ''}{'-' + jev.PROBE_SET[question] if probes and question in jev.PROBE_SET else ''}"
                          f"{'-quotes' if quotes_only else ''}.json")
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     policy = scrubber.policy if scrubber else egress.POLICY_VERSION
@@ -362,18 +450,10 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
         if scrubber:
             state, _ = _scrubbed(state, scrubber)
         probs, meta = client.ask(question, state, probes)
-        segs = p.get("segments") or [s for (s,) in conn.execute(
-            """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
-               WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
-        conn.execute(
-            """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version,
-                 payload, payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
-               VALUES (NULL, %s, %s, %s, %s, %s, %s, NULL, 'end_turn', %s, %s, %s, %s)""",
-            (segs, client.model, themes.version(json.dumps(jev.QUESTIONS[question]), {}, client.model, ""), policy,
-             meta["payload"], edge_audit._sha(meta["payload"]), meta["served_by"], meta["input_tokens"],
-             meta["output_tokens"], meta["cost_usd"]))
+        _log_jev(conn, client, question, p, meta, policy)
         cost += meta["cost_usd"]
-        got[num] = {"answer": jev.answer(probs["p"]), "why": "", **{k: round(v, 3) for k, v in probs.items()}}
+        got[num] = {"answer": jev.answer(question, probs["p"]), "why": "",
+                    **{k: round(v, 3) for k, v in probs.items()}}
         out_path.write_text(json.dumps(got, indent=2))
     return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 6), "policy": policy}
 
@@ -450,7 +530,7 @@ def agreement(mine: dict, theirs: dict) -> dict:
             "missed": sorted(int(n) for n in mine_yes - their_yes)}
 
 
-CUTS = (0.4, 0.5, 0.6, 0.7)
+CUTS = (0.4, 0.45, 0.5, 0.6, 0.7)
 
 
 def auc(mine: dict, theirs: dict) -> dict:
@@ -504,12 +584,13 @@ def marks(text: str) -> dict:
 
 
 def score(folder: Path) -> dict:
-    """Per set, how often a pair held (`hit_rate`) and how often it was new to me (`novel_rate`); which ways of
-    looking proposed each one that held; and my notes."""
+    """Per set, how often a pair held (`hit_rate`) and how often it was new to me (`novel_rate`); per Jev question
+    that proposed pairs (`by_question`), the same of the ones on the sheet; which ways of looking proposed each one
+    that held; and my notes."""
     key = json.loads((folder / "key.json").read_text())
     got = marks((folder / "sheet.md").read_text())
     by_set = {s: {"new": 0, "known": 0, "yes": 0, "no": 0, "unsure": 0} for s in key["sizes"]}
-    yes, missing, unreadable = [], [], []
+    yes, missing, unreadable, by_question = [], [], [], {}
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         m = got.get(num, {})
         if "mark" not in m:
@@ -517,6 +598,13 @@ def score(folder: Path) -> dict:
              else missing.append(int(num)))
             continue
         by_set[p["set"]][m["mark"]] += 1
+        if m["mark"] in FOUND:
+            for way in p.get("proposed_by", []):
+                if way.startswith("jev:"):
+                    c = by_question.setdefault(way.removeprefix("jev:"), {"pairs": 0, "held": 0, "new": 0})
+                    c["pairs"] += 1
+                    c["held"] += m["mark"] in HOLDS
+                    c["new"] += m["mark"] == "new"
         if m["mark"] in HOLDS:
             yes.append({"pair": int(num), "mark": m["mark"], "set": p["set"],
                         "also_proposed_by": p.get("proposed_by", []),
@@ -529,6 +617,9 @@ def score(folder: Path) -> dict:
         for k in ("new", "known", "yes"):   # only the marks this sheet uses
             if not c[k]:
                 del c[k]
+    for c in by_question.values():
+        c["hit_rate"] = round(c["held"] / c["pairs"], 3)
+    by_question = dict(sorted(by_question.items(), key=lambda kv: (-kv[1]["hit_rate"], -kv[1]["pairs"])))
     mine = {n: m["mark"] for n, m in got.items() if "mark" in m}
     drafts = {}
     for d in sorted(folder.glob("draft-*.json")):
@@ -539,4 +630,5 @@ def score(folder: Path) -> dict:
     return {"benchmark": key["benchmark"], "marked": sum(sum(c.get(k, 0) for k in (*FOUND, "unsure"))
                                                          for c in by_set.values()),
             "missing": missing, **({"unreadable": unreadable} if unreadable else {}), "by_set": by_set,
-            **({"drafts": drafts} if drafts else {}), "yes": yes}
+            **({"by_question": by_question} if by_question else {}), **({"drafts": drafts} if drafts else {}),
+            "yes": yes}

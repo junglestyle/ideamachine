@@ -67,3 +67,13 @@ competing pulls correlate 0.7 to 0.9; their mean held 0.79 and 0.81, and ranked 
 (`jev.QUESTION_SETS`, `pulls4`), read as a ranking: its scores run lower, and a cut-off waits for more marks. Every
 chat-model checker dropped at least one new tension; Jev at 0.5 dropped none. What may tell new from known, on 14
 pairs: new ones ran across subjects, over values, and between sides that could both be true; kept as probes.
+
+Two more sheets of model-proposed pairs (2026-11-05) make four: 150 pairs, 28 tensions, 10 new. The mean ranked my
+tensions above my no's at 0.78 (0.70 to 0.82 by sheet), above the old answer on every sheet. "Jev at 0.5 dropped
+none" was two pairs on the line: new tensions score 0.34 to 0.64, most between 0.45 and 0.6, and over all four 0.5
+kept 6 of the 10. So a tension is yes at 0.45 (`jev.CUT`): 52 flagged, precision 0.40, recall 0.75, 9 of 10 new;
+0.4 kept no more and flagged 73. The cut was chosen on the first three sheets; the fourth's one new tension scored
+0.64, so it agreed without testing the line. The mean ranks known tensions above new ones, and on the fourth sheet
+scored two tensions between levels of a thing (a social risk against a technical one) under 0.4. Different
+subjects marked a new tension on all four sheets and stays a probe; competing values held on two, so `probes4`
+dropped it.

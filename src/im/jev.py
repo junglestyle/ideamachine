@@ -27,6 +27,10 @@ ROUTES = {   # (endpoint, key's environment variable, how the model is named the
 MODEL = "jev-1.14.0"               # pinned: an alias (jev-latest) can change answers without a change here
 PRICE_IN = 0.042 / 1e6             # $ per input token
 YES, NO = 0.7, 0.3                 # TypeSafe's starting thresholds: between them, the state doesn't settle it
+# A question read as a ranking gets one cut-off instead: at it or above is yes, below it no. Tension: on four sheets
+# (150 pairs, 28 tensions, 10 new; 2026-11-05), 0.45 kept 9 of the 10 new ones and three quarters of all, flagging
+# 52; 0.4 kept no more and flagged 73, 0.5 kept 6 new. A proposal I keep or dismiss, so recall comes first.
+CUT = {"tension": 0.45}
 
 # What decides. A tension is asked in four wordings of one question and decided by their mean: on the two tension
 # sheets (70 pairs, 14 tensions, 2026-11-04), no single question held above 0.80 AUC on both, the four wordings
@@ -61,9 +65,9 @@ QUESTIONS = {
 
 # Probes: questions asked beside the ones that decide, kept in the draft but never in `p`, so new axes and new
 # wordings are scored against my marks without changing what's being compared. PROBE_SET names the draft.
-# probes2 (2026-11-04) also asked whether the sides differ in structure, only in emphasis, or are an exception, and
-# whether both are mine: all near chance on both sheets, so dropped.
-PROBE_SET = "probes3"
+# Tension's probes2 (2026-11-04) also asked whether the sides differ in structure, only in emphasis, or are an
+# exception, and whether both are mine: all near chance on both sheets, so dropped.
+PROBE_SET = {"tension": "probes4", "analogy": "probes1"}
 BOTH = {"true": "Someone could hold both without strain", "false": "Holding one means giving up some of the other"}
 PROBES = {
     "tension": {
@@ -81,16 +85,55 @@ PROBES = {
                              "recommends?", None),
         "undercuts": ("Does one of `a` and `b` undercut the reasoning or premise of the other?", None),
         "inner_conflict": ("Do `a` and `b` describe conflicting wants or traits in the same person?", None),
-        # What may tell new from known (6 new, 8 known): my new tensions ran across subjects, over values, and
-        # between sides Jev thought could both be true.
+        # What may tell new from known: my new tensions ran across subjects, on all four sheets (10 new, 18
+        # known). Competing values held on two sheets and not on the other two, so probes4 dropped it.
         "same_subject": ("Are `a` and `b` about the same subject?",
                          {"true": "They discuss the same situation, activity or kind of thing",
                           "false": "They discuss different situations or things"}),
-        "competing_values": ("Do `a` and `b` put different values first, such as honesty and kindness, or effort "
-                             "and ease?", None),
-        # A sign of no tension: lower on my tensions on both sheets (0.22 to 0.35).
+        # A sign of no tension: lower on my tensions on all four sheets (0.20 to 0.34).
         "both_true": ("Could `a` and `b` both be completely true at once, with no qualification?", BOTH),
         "both_true_v2": ("Someone could fully agree with both `a` and `b`.", None),
+    },
+    # Analogy's first probes (2026-11-05), many wordings to pare down as tension's were. The one sheet so far found
+    # three analogies, each a specific shared move: a template (X : better X :: then : now), a cause (bad work
+    # blamed on its maker's state), a trade-off (easy against perfect); what sounded alike only by genre (two jokes,
+    # two category questions) wasn't one.
+    "analogy": {
+        # Ways of asking for the same structure.
+        "same_structure_v2": ("`a` and `b` rest on the same underlying pattern, in different settings.", None),
+        "same_move": ("Do `a` and `b` make the same move, each in its own setting?", None),
+        "same_mechanism": ("Does the same cause-and-effect mechanism drive what `a` and `b` describe?", None),
+        "same_relation": ("Does `a` relate two things the way `b` relates two others, as in X is to Y as Z is "
+                          "to W?", None),
+        "roles_map": ("Could the parts of `a` be matched one to one with parts of `b` that play the same roles?",
+                      None),
+        "general_rule": ("Are `a` and `b` both instances of one general rule or principle?", None),
+        "analogy_v2": ("Is there an analogy between `a` and `b`?", None),
+        "explains": ("Could `a` help explain `b` to someone who understands only `a`?", None),
+        "same_lesson": ("Would the lesson of `a` apply to the situation in `b`?", None),
+        # The payoff rather than the shape: what a `new` mark means, and how #18's structure showed.
+        "lens": ("Does looking at `a` through `b`, or `b` through `a`, show something about it that isn't plain "
+                 "from it alone?",
+                 {"true": "The other exposes a specific feature, cause or consequence of it",
+                  "false": "Any link is a loose association, or only a shared genre"}),
+        # Kinds of shared structure, from the three found.
+        "same_trade_off": ("Do `a` and `b` turn on the same trade-off, such as easy against thorough, or cheap "
+                           "against reliable?", None),
+        "same_form": ("Are `a` and `b` built on the same template or turn of phrase, with different content in "
+                      "it?", None),
+        "same_reasoning": ("Do `a` and `b` reach their point by the same line of reasoning?", None),
+        "same_problem": ("Do `a` and `b` describe the same underlying problem in different places?", None),
+        # Strictness: what they share must be specific, not their genre.
+        "specific": ("Could what `a` and `b` share be said in a phrase that wouldn't fit most pairs of ideas?",
+                     None),
+        "only_genre": ("Is what `a` and `b` have in common only their genre, such as both being jokes, "
+                       "complaints or opinions?",
+                       {"true": "They share a kind of statement and nothing more specific",
+                        "false": "They share a specific move, mechanism or pattern"}),
+        # Distance and novelty.
+        "different_domains": ("Are `a` and `b` from different areas of life, such as work and leisure, or "
+                              "technology and relationships?", None),
+        "surprising": ("Would someone who knows both `a` and `b` be surprised to see them linked?", None),
     },
 }
 # Combinations of deciding and probe answers, computed here and scored like any question.
@@ -100,6 +143,12 @@ COMBOS = {
         * (1 - (q["both_true"] + q["both_true_v2"]) / 2),
         "pulls_across_subjects": lambda q: _mean(q, QUESTIONS["tension"]) * (1 - q["same_subject"]),
         "old_p": lambda q: max(q["contradiction"], q["change_of_mind"], q["trade_off"], q["competing_pulls"]),
+    },
+    "analogy": {
+        "structure_mean": lambda q: _mean(q, ("same_structure", "same_structure_v2", "same_move", "same_mechanism",
+                                             "same_relation", "roles_map", "general_rule", "analogy_v2")),
+        "structure_not_genre": lambda q: q["same_structure"] * (1 - q["only_genre"]),
+        "structure_specific": lambda q: q["same_structure"] * q["specific"],
     },
 }
 
@@ -116,7 +165,9 @@ def combine(question: str, p: dict[str, float]) -> float:
     return min(p.values()) if question == "analogy" else max(p.values())
 
 
-def answer(p: float) -> str:
+def answer(question: str, p: float) -> str:
+    if question in CUT:
+        return "yes" if p >= CUT[question] else "no"
     return "yes" if p >= YES else "no" if p <= NO else "unsure"
 
 
