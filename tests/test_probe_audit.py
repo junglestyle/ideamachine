@@ -156,3 +156,10 @@ def test_a_draft_with_probabilities_is_read_at_each_cut_over_every_pair():
     assert r["pairs"] == 4
     assert r["cuts"]["0.5"] == {"flagged": 3, "precision": round(2 / 3, 3), "recall": 1.0, "recall_new": 1.0}
     assert r["cuts"]["0.7"] == {"flagged": 1, "precision": 1.0, "recall": 0.5, "recall_new": 1.0}
+
+
+def test_each_question_is_scored_by_how_well_it_ranks_mine_above_the_rest():
+    mine = {"1": "yes", "2": "no", "3": "known", "4": "no"}
+    theirs = {"1": {"p": 0.9, "a": 0.2}, "2": {"p": 0.4, "a": 0.8}, "3": {"p": 0.7, "a": 0.5}, "4": {"p": 0.7, "a": 0.1}}
+    r = probe_audit.auc(mine, theirs)
+    assert r["p"] == round((1 + 1 + 1 + 0.5) / 4, 3) and r["a"] == 0.5 and list(r) == ["p", "a"]

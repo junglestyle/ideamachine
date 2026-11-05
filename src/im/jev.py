@@ -56,6 +56,63 @@ QUESTIONS = {
 }
 
 
+# Probes: questions asked beside the ones that decide, kept in the draft but never in `p`, so new axes and new
+# wordings of one question are scored against my marks without changing what's being compared. Each wording of a
+# question is its own probe (`_v2`...), over the same state, as TypeSafe suggests. PROBE_SET names the draft.
+PROBE_SET = "probes2"
+BOTH = {"true": "Someone could hold both without strain", "false": "Holding one means giving up some of the other"}
+PROBES = {
+    "tension": {
+        # What competing pulls alone may be missing (my first decomposition, 2026-11-04).
+        "same_subject": ("Are `a` and `b` about the same subject?",
+                         {"true": "They discuss the same situation, activity or kind of thing",
+                          "false": "They discuss different situations or things"}),
+        "different_structure": ("Do `a` and `b` rest on different underlying moves or mechanisms?",
+                                {"true": "The reasoning in one works differently from the reasoning in the other",
+                                 "false": "They make the same kind of move"}),
+        # Kinds of pull, each from my notes on the tensions I marked.
+        "opposite_stance": ("Do `a` and `b` take opposite stances toward the same rule, norm or value?", None),
+        "opposite_stance_v2": ("Does one of `a` and `b` endorse what the other rejects?", None),
+        "cant_act_on_both": ("Would doing what one of `a` and `b` recommends make it harder to do what the other "
+                             "recommends?", None),
+        "undercuts": ("Does one of `a` and `b` undercut the reasoning or premise of the other?", None),
+        "exception": ("Is one of `a` and `b` a broad claim that the other is an exception to?", None),
+        "inner_conflict": ("Do `a` and `b` describe conflicting wants or traits in the same person?", None),
+        "competing_values": ("Do `a` and `b` put different values first, such as honesty and kindness, or effort "
+                             "and ease?", None),
+        # Other wordings of competing pulls (the deciding one is the first wording).
+        "pulls_v2": ("Would someone who agrees with both `a` and `b` have to give up some of one to honour the "
+                     "other?", None),
+        "pulls_v3": ("Is there a tension between `a` and `b`?", None),
+        "pulls_v4": ("`a` and `b` pull in opposite directions.", None),
+        # Signs of no tension: these should rank my tensions lower.
+        "both_true": ("Could `a` and `b` both be completely true at once, with no qualification?", BOTH),
+        "both_true_v2": ("Someone could fully agree with both `a` and `b`.", None),
+        "only_emphasis": ("Do `a` and `b` differ only in emphasis or angle on the same thing?",
+                          {"true": "They look at the same thing from different sides, and neither rules the other "
+                                   "out", "false": "Taking one seriously puts pressure on the other"}),
+        "only_emphasis_v2": ("Are `a` and `b` two takes on the same point that don't conflict?", None),
+    },
+}
+KINDS = ("opposite_stance", "cant_act_on_both", "undercuts", "exception", "inner_conflict", "competing_values")
+# Combinations of decisive and probe answers, computed here and scored like any question.
+COMBOS = {
+    "tension": {
+        "pulls_and_same_subject": lambda q: min(q["competing_pulls"], q["same_subject"]),
+        "pulls_same_subject_different_structure": lambda q: min(q["competing_pulls"], q["same_subject"],
+                                                                q["different_structure"]),
+        "pulls_x_same_subject_x_different_structure": lambda q: q["competing_pulls"] * q["same_subject"]
+        * q["different_structure"],
+        "pulls_not_only_emphasis": lambda q: q["competing_pulls"] * (1 - q["only_emphasis"]),
+        "pulls_not_both_true": lambda q: q["competing_pulls"] * (1 - q["both_true"]),
+        "stance_or_action": lambda q: max(q["opposite_stance"], q["cant_act_on_both"]),
+        "any_kind": lambda q: max(q[k] for k in KINDS),
+        "any_kind_not_both_true": lambda q: max(q[k] for k in KINDS) * (1 - q["both_true"]),
+        "any_kind_and_same_subject": lambda q: min(max(q[k] for k in KINDS), q["same_subject"]),
+    },
+}
+
+
 def combine(question: str, p: dict[str, float]) -> float:
     """One probability from the atomic ones: any form of tension, or a summary that adds or misstates (the most
     likely of them); an analogy needs different subjects and the same structure (the less likely)."""
@@ -93,20 +150,24 @@ class Jev:
         except (urllib.error.URLError, TimeoutError) as e:
             raise llm.Unavailable(f"Jev via {self.route}: {e}") from None
 
-    def body(self, question: str, state: dict) -> dict:
+    def body(self, question: str, state: dict, probes: bool = False) -> dict:
         qs = {}
-        for name, (instructions, criteria) in QUESTIONS[question].items():
+        asked = QUESTIONS[question] | (PROBES.get(question, {}) if probes else {})
+        for name, (instructions, criteria) in asked.items():
             qs[name] = {"type": "noul", "instructions": instructions, **({"criteria": criteria} if criteria else {})}
         return {"model": self.sent_as, "state": state, "questions": qs}
 
-    def ask(self, question: str, state: dict) -> tuple[dict, dict]:
-        """The atomic probabilities and the combined one, and what the request cost: ({name: p, "p": p}, usage)."""
-        body = self.body(question, state)
+    def ask(self, question: str, state: dict, probes: bool = False) -> tuple[dict, dict]:
+        """The atomic probabilities, the combined one, and with probes their answers and combinations; and what
+        the request cost: ({name: p, "p": p, ...}, usage)."""
+        body = self.body(question, state, probes)
         r = self.post(body)
-        p = {name: float(a["noul"]) for name, a in r["answers"].items()}
+        got = {name: float(a["noul"]) for name, a in r["answers"].items()}
+        deciding = {k: v for k, v in got.items() if k in QUESTIONS[question]}
+        combos = {k: f(got) for k, f in COMBOS.get(question, {}).items()} if probes else {}
         usage = r.get("usage") or {}
         tokens_in = usage.get("input_tokens") or 0
-        return p | {"p": combine(question, p)}, {
+        return got | combos | {"p": combine(question, deciding)}, {
             "served_by": r.get("model") or self.model, "input_tokens": tokens_in,
             "output_tokens": usage.get("output_tokens") or 0, "cost_usd": round(tokens_in * PRICE_IN, 8),
             "payload": json.dumps(body)}

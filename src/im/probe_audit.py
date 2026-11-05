@@ -345,12 +345,13 @@ def _scrubbed(state, scrubber):
     return walk(state, lambda t: next(it)), back
 
 
-def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: bool) -> dict:
+def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: bool, probes: bool = False) -> dict:
     """Jev drafts the sheet from structured state, one request of atomic Nouls per pair, combined in code."""
     from im import jev
 
     question = key["benchmark"]
-    out_path = folder / f"draft-{client.model}{'-quotes' if quotes_only else ''}.json"
+    out_path = folder / (f"draft-{client.model}{'-' + jev.PROBE_SET if probes else ''}"
+                         f"{'-quotes' if quotes_only else ''}.json")
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     cost = 0.0
@@ -360,7 +361,10 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
         state = _state(conn, question, p, quotes_only)
         if scrubber:
             state, _ = _scrubbed(state, scrubber)
-        probs, meta = client.ask(question, state)
+        probs, meta = client.ask(question, state, probes)
+        if probes and question != "summary":   # a feature code knows: is everything said on both sides mine?
+            said = [q["by"] for side in state.values() for q in side.get("said", [])]
+            probs["both_mine"] = float(bool(said) and all(b == "me" for b in said))
         segs = p.get("segments") or [s for (s,) in conn.execute(
             """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
                WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
@@ -377,7 +381,8 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
     return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 6), "policy": policy}
 
 
-def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=None, quotes_only: bool = False) -> dict:
+def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=None, quotes_only: bool = False,
+          probes: bool = False) -> dict:
     """A model answers the sheet's question for every pair, blind to my marks, into draft-<model>-<effort>.json, as
     it goes. Every request goes to the egress log; with a scrubber (policy C), names said are pseudonymized first.
     `quotes_only` leaves out Claude's summaries (into ...-quotes.json): a summary that says more than the quotes
@@ -386,7 +391,7 @@ def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=
 
     key = json.loads((folder / "key.json").read_text())
     if model.startswith("jev"):
-        return _draft_jev(conn, client, folder, key, scrubber, quotes_only)
+        return _draft_jev(conn, client, folder, key, scrubber, quotes_only, probes)
     question = key["benchmark"]
     shown = edge_audit._pairs_as_shown((folder / "sheet.md").read_text())
     out_path = folder / f"draft-{model.replace('/', '_')}-{effort}{'-quotes' if quotes_only else ''}.json"
@@ -451,6 +456,25 @@ def agreement(mine: dict, theirs: dict) -> dict:
 CUTS = (0.5, 0.6, 0.7)
 
 
+def auc(mine: dict, theirs: dict) -> dict:
+    """For a draft that kept each question's probability: how well each one (and each combination) ranks what I
+    marked as holding above what I marked no: the chance that a random one of mine scores higher than a random no,
+    ties half. 0.5 is chance. Over every pair I answered, so nothing is set aside."""
+    pairs = [n for n, m in mine.items() if m in FOUND and n in theirs]
+    yes, no = [n for n in pairs if mine[n] in HOLDS], [n for n in pairs if mine[n] == "no"]
+    if not yes or not no:
+        return {}
+    keys = sorted({k for n in pairs for k, v in theirs[n].items() if isinstance(v, (int, float))
+                   and not isinstance(v, bool)})
+    out = {}
+    for k in keys:
+        if not all(k in theirs[n] for n in pairs):
+            continue
+        wins = sum((theirs[a][k] > theirs[b][k]) + 0.5 * (theirs[a][k] == theirs[b][k]) for a in yes for b in no)
+        out[k] = round(wins / (len(yes) * len(no)), 3)
+    return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+
+
 def at_cuts(mine: dict, theirs: dict) -> dict:
     """For a draft that kept its probabilities (Jev): precision and recall over every pair I answered, reading yes
     at each cut-off, so nothing is set aside as unsure. A model that's often unsure is compared fairly this way."""
@@ -513,7 +537,8 @@ def score(folder: Path) -> dict:
     for d in sorted(folder.glob("draft-*.json")):
         theirs = json.loads(d.read_text())
         drafts[d.stem.removeprefix("draft-")] = agreement(mine, theirs) | (
-            {"over_every_pair": at_cuts(mine, theirs)} if any("p" in t for t in theirs.values()) else {})
+            {"over_every_pair": at_cuts(mine, theirs), "auc": auc(mine, theirs)}
+            if any("p" in t for t in theirs.values()) else {})
     return {"benchmark": key["benchmark"], "marked": sum(sum(c.get(k, 0) for k in (*FOUND, "unsure"))
                                                          for c in by_set.values()),
             "missing": missing, **({"unreadable": unreadable} if unreadable else {}), "by_set": by_set,

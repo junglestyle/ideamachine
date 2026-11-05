@@ -400,7 +400,8 @@ def cmd_audit_probe(args) -> None:
                 client = jev.Jev(model=args.model)
             else:
                 client = llm.client_for(args.model)
-            _print(probe_audit.draft(conn, client, folder, args.model, args.effort, scrubber, args.quotes_only))
+            _print(probe_audit.draft(conn, client, folder, args.model, args.effort, scrubber, args.quotes_only,
+                                     args.probes))
             return
         if args.question == "summary":
             from im import summary_audit
@@ -741,6 +742,8 @@ def main(argv=None) -> None:
         pa.add_argument("--effort", default="low", help="draft: its effort")
         pa.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names")
         pa.add_argument("--quotes-only", action="store_true", help="draft: show the model what was said, no summaries")
+        pa.add_argument("--probes", action="store_true",
+                        help="draft, Jev: also ask the probe questions (jev.PROBES), scored beside the deciding ones")
         pa.add_argument("--only", help="sheet: draw every pair from one set, e.g. model")
         pa.add_argument("--size", type=int, help="sheet, with --only: how many pairs (default 30)")
         pa.add_argument("--exclude", nargs="*", default=[], help="sheet: leave out pairs on these earlier sheets")
