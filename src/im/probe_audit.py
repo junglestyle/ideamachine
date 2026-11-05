@@ -362,6 +362,9 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
         if scrubber:
             state, _ = _scrubbed(state, scrubber)
         probs, meta = client.ask(question, state, probes)
+        if probes and question != "summary":   # a feature code knows: is everything said on both sides mine?
+            said = [q["by"] for side in state.values() for q in side.get("said", [])]
+            probs["both_mine"] = float(bool(said) and all(b == "me" for b in said))
         segs = p.get("segments") or [s for (s,) in conn.execute(
             """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
                WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]

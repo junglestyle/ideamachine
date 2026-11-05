@@ -57,6 +57,12 @@ def test_jev_drafts_a_sheet_from_structured_state_with_names_pseudonymized(latti
     logged = lattice_with_clusters.execute(
         "SELECT count(*), sum(cost_usd) FROM im.egress_log WHERE model = 'jev-1.14.0'").fetchone()
     assert logged[0] == len(sent) and float(logged[1]) == pytest.approx(len(sent) * 1000 * 0.042 / 1e6)
+    probed, _ = fake({})
+    d = probe_audit.draft(lattice_with_clusters, probed, tmp_path, "jev-1.14.0", probes=True)
+    assert d["draft"].endswith("draft-jev-1.14.0-probes2.json")
+    first = json.loads((tmp_path / "draft-jev-1.14.0-probes2.json").read_text())["1"]
+    assert first["both_mine"] in (0.0, 1.0) and "any_kind" in first and "pulls_v4" in first
+    assert "auc" in probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-probes2"]
     quotes, qsent = fake({})
     probe_audit.draft(lattice_with_clusters, quotes, tmp_path, "jev-1.14.0", quotes_only=True)
     assert all("summary" not in b["state"]["a"] for b in qsent)
@@ -76,12 +82,15 @@ def test_the_route_decides_the_endpoint_key_and_model_name(monkeypatch):
 
 
 def test_probes_are_asked_beside_the_deciding_questions_without_changing_p():
-    client, sent = fake({"competing_pulls": 0.9, "same_subject": 0.8, "different_structure": 0.5})
+    client, sent = fake({"competing_pulls": 0.9, "same_subject": 0.8, "different_structure": 0.5,
+                         "only_emphasis": 0.25, "both_true": 0.5, "opposite_stance": 0.6})
     p, _ = client.ask("tension", {"a": {}, "b": {}}, probes=True)
     assert set(sent[0]["questions"]) == set(jev.QUESTIONS["tension"]) | set(jev.PROBES["tension"])
     assert p["p"] == 0.9                                   # the probes don't decide
     assert p["pulls_and_same_subject"] == 0.8 and p["pulls_same_subject_different_structure"] == 0.5
     assert p["pulls_x_same_subject_x_different_structure"] == pytest.approx(0.36)
+    assert p["pulls_not_only_emphasis"] == pytest.approx(0.675) and p["any_kind"] == 0.6
+    assert p["any_kind_not_both_true"] == pytest.approx(0.3) and len(sent[0]["questions"]) == 4 + len(jev.PROBES["tension"])
     plain, sent2 = fake({})
     plain.ask("tension", {"a": {}, "b": {}})
     assert set(sent2[0]["questions"]) == set(jev.QUESTIONS["tension"])
