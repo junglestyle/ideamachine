@@ -94,7 +94,7 @@ confidence if something there is worth keeping, not as a reason to capture fille
 confidence is your estimate that I'd keep the item. I've kept a little over half of what was captured before; \
 the ones I discard most often are the kinds listed above."""
 
-# v3: widened to neutral observations (ROADMAP-v2 §4, question 6). Since M2 nothing captured is judged: an observation
+# v3: widened to neutral observations (ROADMAP-v2 §5, question 6). Since M2 nothing captured is judged: an observation
 # matters if it recurs and I keep its cluster, so the bar is "a thought that could come up again", not "worth
 # archiving". v2's discard-driven exclusions go, except the ones that aren't thoughts. Revised before it went live
 # (2026-11-02): its first trial captured fragments, in-the-moment instructions and verdicts on particular people.
