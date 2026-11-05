@@ -413,8 +413,15 @@ def cmd_audit_probe(args) -> None:
         from im.backends import SentenceEmbedder
 
         embedder = SentenceEmbedder(cfg.lattice.embedding_model) if args.question == "analogy" else None
+        jev_client = scrubber = None
+        if args.question == "analogy" and args.only in (None, "jev"):
+            from im import jev, names
+
+            jev_client = jev.Jev()
+            scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
         _print(probe_audit.write(conn, anthropic.Anthropic(), embedder, args.question, folder, args.seed, args.only,
-                                 args.size, [Path(f) for f in args.exclude]))
+                                 args.size, [Path(f) for f in args.exclude], jev_client, scrubber,
+                                 args.pool or probe_audit.JEV_POOL))
 
 
 def cmd_analogy_spike(args) -> None:
@@ -728,7 +735,7 @@ def main(argv=None) -> None:
     ae.set_defaults(func=cmd_audit_edges)
     for name, question, what in (
             ("audit-analogies", "analogy", "a blind sheet of possible analogies between unrelated ideas, proposed "
-                                           "several ways (sends to Claude); score my marks"),
+                                           "several ways (sends to Claude and Jev); score my marks"),
             ("audit-tension", "tension", "a blind sheet of possible tensions, proposed several ways (sends to "
                                          "Claude); score my marks"),
             ("audit-summaries", "summary", "a blind sheet of extraction trials' summaries: do they say more than "
@@ -740,11 +747,14 @@ def main(argv=None) -> None:
         pa.add_argument("--model", default="claude-opus-5-5",
                         help="draft: the model answering, e.g. z-ai/glm-5.3, or jev-1.14.0 (TypeSafe's Jev)")
         pa.add_argument("--effort", default="low", help="draft: its effort")
-        pa.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names")
+        pa.add_argument("--policy", choices=["B", "C"], default="C",
+                        help="draft, and the analogy sheet's Jev set: C (default) pseudonymizes names")
         pa.add_argument("--quotes-only", action="store_true", help="draft: show the model what was said, no summaries")
         pa.add_argument("--probes", action="store_true",
                         help="draft, Jev: also ask the probe questions (jev.PROBES), scored beside the deciding ones")
-        pa.add_argument("--only", help="sheet: draw every pair from one set, e.g. model")
+        pa.add_argument("--only", help="sheet: draw every pair from one set, e.g. model or jev")
+        pa.add_argument("--pool", type=int, help="analogy sheet: how many unrelated pairs Jev ranks to propose from "
+                                                 "(default 3000)")
         pa.add_argument("--size", type=int, help="sheet, with --only: how many pairs (default 30)")
         pa.add_argument("--exclude", nargs="*", default=[], help="sheet: leave out pairs on these earlier sheets")
         pa.set_defaults(func=cmd_audit_probe, question=question)

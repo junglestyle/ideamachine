@@ -1,10 +1,14 @@
 """Analogy and tension sheets: pairs proposed several ways, asked one question blind, and the hit rate per way."""
 
+import hashlib
+import itertools
 import json
 import re
 from types import SimpleNamespace
 
-from im import probe_audit
+import pytest
+
+from im import jev, llm, probe_audit
 
 from test_edge_audit import lattice_with_clusters  # noqa: F401 (fixture)
 from test_lattice import seeded  # noqa: F401 (fixture)
@@ -37,6 +41,22 @@ class FakeProposer:
                                                                                          output_tokens=90))
 
 
+def fake_jev(fail_after: int | None = None):
+    """Jev answering each question with a probability that differs by pair and question, the same every time; and
+    every body it was sent. With `fail_after`, the requests after that many are rate-limited."""
+    sent = []
+
+    def post(body):
+        sent.append(body)
+        if fail_after is not None and len(sent) > fail_after:
+            raise llm.Unavailable("Jev via openrouter, HTTP 429")
+        state = json.dumps(body["state"], sort_keys=True)
+        return {"model": "jev-1.14.0", "answers": {
+            q: {"type": "noul", "noul": int(hashlib.sha256((state + q).encode()).hexdigest()[:4], 16) / 65535}
+            for q in body["questions"]}, "usage": {"input_tokens": 1000}}
+    return jev.Jev(post=post), sent
+
+
 def fill(folder, mark_of):
     key = json.loads((folder / "key.json").read_text())
     sheet = (folder / "sheet.md").read_text()
@@ -46,21 +66,32 @@ def fill(folder, mark_of):
 
 
 def test_an_analogy_sheet_draws_unrelated_pairs_blind_and_scores_each_way(lattice_with_clusters, tmp_path):  # noqa: F811
-    client = FakeProposer()
-    out = probe_audit.write(lattice_with_clusters, client, HashEmbedder(), "analogy", tmp_path)
+    client, (jev_client, sent) = FakeProposer(), fake_jev()
+    out = probe_audit.write(lattice_with_clusters, client, HashEmbedder(), "analogy", tmp_path, jev=jev_client)
     key = json.loads((tmp_path / "key.json").read_text())
     pairs = list(key["pairs"].values())
     assert out["pairs"] == len(pairs) > 0 and len({tuple(p["ideas"]) for p in pairs}) == len(pairs)
     far = {tuple(p["ideas"]) for p in probe_audit.unrelated(probe_audit.edge_audit._clusters(lattice_with_clusters))}
     assert all(tuple(p["ideas"]) in far for p in pairs)   # every set draws unrelated pairs only
     body = (tmp_path / "sheet.md").read_text()
-    assert "secret reason" not in body and "facets" not in body and "Is there an analogy" in body
+    assert "secret reason" not in body and "facets" not in body and "Jev" not in body and "Is there an analogy" in body
     assert (tmp_path / "facets.json").exists()
-    assert {c["model"] for c in client.calls} == {probe_audit.FACET_MODEL, probe_audit.PICK_MODEL}
+    assert {c["model"] for c in client.calls} == {probe_audit.FACET_MODEL}
     logged = lattice_with_clusters.execute(
-        "SELECT count(*) FROM im.egress_log WHERE episode_id IS NULL AND model = ANY(%s)",
-        ([probe_audit.FACET_MODEL, probe_audit.PICK_MODEL],)).fetchone()[0]
+        "SELECT count(*) FROM im.egress_log WHERE episode_id IS NULL AND model = %s", (probe_audit.FACET_MODEL,)
+    ).fetchone()[0]
     assert logged == len(client.calls)
+
+    # Jev was asked every analogy question about each pool pair once, every request logged, and each question
+    # but the ones that only describe a pair proposes its best.
+    asked = set(jev.QUESTIONS["analogy"]) | set(jev.PROBES["analogy"])
+    assert key["jev_pool"] == len(sent) > 0 and all(set(b["questions"]) == asked for b in sent)
+    assert lattice_with_clusters.execute("SELECT count(*) FROM im.egress_log WHERE model = 'jev-1.14.0'"
+                                         ).fetchone()[0] == len(sent)
+    jev_pairs = [p for p in pairs if p["set"] == "jev"]
+    assert jev_pairs and all(p["why"].startswith("Jev ") for p in jev_pairs)
+    ways = {w for p in pairs for w in p["proposed_by"]}
+    assert any(w.startswith("jev:") for w in ways) and not ways & {f"jev:{a}" for a in probe_audit.AXES}
 
     fill(tmp_path, lambda p: "yes" if p["set"] != "random" else "no")
     r = probe_audit.score(tmp_path)
@@ -68,6 +99,26 @@ def test_an_analogy_sheet_draws_unrelated_pairs_blind_and_scores_each_way(lattic
     assert all(c["hit_rate"] == (0.0 if s == "random" else 1.0) for s, c in r["by_set"].items()
                if c.get("yes", 0) + c["no"])
     assert all("also_proposed_by" in y for y in r["yes"])
+    proposing = {w.removeprefix("jev:") for p in pairs for w in p["proposed_by"] if w.startswith("jev:")}
+    assert set(r["by_question"]) == proposing
+    for q, c in r["by_question"].items():
+        theirs = [p for p in pairs if f"jev:{q}" in p["proposed_by"]]
+        assert (c["pairs"], c["held"]) == (len(theirs), sum(p["set"] != "random" for p in theirs))
+
+
+def test_jevs_pool_picks_up_where_a_stopped_run_left_off(lattice_with_clusters, tmp_path):  # noqa: F811
+    ids = sorted(r[0] for r in probe_audit.edge_audit._clusters(lattice_with_clusters) if r[2])
+    pairs = [{"ideas": [a, b]} for a, b in itertools.combinations(ids, 2)]
+    assert len(pairs) > 5
+    stopped, sent = fake_jev(fail_after=5)
+    with pytest.raises(llm.Unavailable):
+        probe_audit.jev_pool(lattice_with_clusters, stopped, None, pairs, tmp_path)
+    kept = json.loads((tmp_path / "jev-pool.json").read_text())
+    logged = lattice_with_clusters.execute("SELECT count(*) FROM im.egress_log WHERE model = 'jev-1.14.0'").fetchone()[0]
+    assert 0 < len(kept) <= 5 and logged == len(kept)   # what was answered is kept and logged
+    again, resent = fake_jev()
+    got = probe_audit.jev_pool(lattice_with_clusters, again, None, pairs, tmp_path)
+    assert len(got) == len(pairs) and len(resent) == len(pairs) - len(kept)
 
 
 def test_a_tension_sheet_scores_yes_no_and_says_when_a_mark_isnt_one(lattice_with_clusters, tmp_path):  # noqa: F811
