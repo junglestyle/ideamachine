@@ -111,6 +111,11 @@ PROBES = {
         "analogy_v2": ("Is there an analogy between `a` and `b`?", None),
         "explains": ("Could `a` help explain `b` to someone who understands only `a`?", None),
         "same_lesson": ("Would the lesson of `a` apply to the situation in `b`?", None),
+        # The payoff rather than the shape: what a `new` mark means, and how #18's structure showed.
+        "lens": ("Does looking at `a` through `b`, or `b` through `a`, show something about it that isn't plain "
+                 "from it alone?",
+                 {"true": "The other exposes a specific feature, cause or consequence of it",
+                  "false": "Any link is a loose association, or only a shared genre"}),
         # Kinds of shared structure, from the three found.
         "same_trade_off": ("Do `a` and `b` turn on the same trade-off, such as easy against thorough, or cheap "
                            "against reliable?", None),

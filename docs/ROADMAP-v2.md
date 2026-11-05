@@ -88,7 +88,7 @@ filter over both.
    tension, which B4's first sheet found twice. The first analogy sheet (2026-11-05, 26 pairs, marked strictly: a
    specific shared move, not a genre) found 3, all new: 2 of 15 by structure lines, 1 by the model, none of 10 at
    random. The model (Sonnet) proposed only 1 pair between unrelated ideas, so the next sheet has Jev rank 3,000
-   unrelated pairs on 19 wordings of the question, each wording proposing its best, to be graded and pared down.
+   unrelated pairs on 20 wordings of the question, each wording proposing its best, to be graded and pared down.
 9. Do summaries say more than the quotes? The first tension sheet (2026-11-04): the two tensions three models agreed
    on and I didn't were made by the summaries ("comfort beats the stigma" for "they're pretty comfy"), and only
    Sonnet beat chance at all (2 of my 5, precision 0.5), so a tension pass proposes for me to keep, not links on
