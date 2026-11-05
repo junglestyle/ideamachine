@@ -448,6 +448,25 @@ def agreement(mine: dict, theirs: dict) -> dict:
             "missed": sorted(int(n) for n in mine_yes - their_yes)}
 
 
+CUTS = (0.5, 0.6, 0.7)
+
+
+def at_cuts(mine: dict, theirs: dict) -> dict:
+    """For a draft that kept its probabilities (Jev): precision and recall over every pair I answered, reading yes
+    at each cut-off, so nothing is set aside as unsure. A model that's often unsure is compared fairly this way."""
+    pairs = [n for n, m in mine.items() if m in FOUND and "p" in theirs.get(n, {})]
+    mine_yes = {n for n in pairs if mine[n] in HOLDS}
+    mine_new = {n for n in pairs if mine[n] == "new"}
+    ratio = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
+    out = {}
+    for cut in CUTS:
+        yes = {n for n in pairs if theirs[n]["p"] >= cut}
+        out[str(cut)] = {"flagged": len(yes), "precision": ratio(len(yes & mine_yes), len(yes)),
+                         "recall": ratio(len(yes & mine_yes), len(mine_yes)),
+                         **({"recall_new": ratio(len(yes & mine_new), len(mine_new))} if mine_new else {})}
+    return {"pairs": len(pairs), "cuts": out}
+
+
 def marks(text: str) -> dict:
     """Pair number -> {"mark", "note"}, or {"unreadable"} for a mark that isn't yes, no or unsure."""
     out, n = {}, None
@@ -490,8 +509,11 @@ def score(folder: Path) -> dict:
             if not c[k]:
                 del c[k]
     mine = {n: m["mark"] for n, m in got.items() if "mark" in m}
-    drafts = {d.stem.removeprefix("draft-"): agreement(mine, json.loads(d.read_text()))
-              for d in sorted(folder.glob("draft-*.json"))}
+    drafts = {}
+    for d in sorted(folder.glob("draft-*.json")):
+        theirs = json.loads(d.read_text())
+        drafts[d.stem.removeprefix("draft-")] = agreement(mine, theirs) | (
+            {"over_every_pair": at_cuts(mine, theirs)} if any("p" in t for t in theirs.values()) else {})
     return {"benchmark": key["benchmark"], "marked": sum(sum(c.get(k, 0) for k in (*FOUND, "unsure"))
                                                          for c in by_set.values()),
             "missing": missing, **({"unreadable": unreadable} if unreadable else {}), "by_set": by_set,
