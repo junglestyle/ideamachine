@@ -56,6 +56,31 @@ QUESTIONS = {
 }
 
 
+# Probes: questions asked beside the ones that decide, kept in the draft but never in `p`, so a new wording or a
+# new decomposition is scored against my marks without changing what's being compared. PROBE_SET names the draft.
+PROBE_SET = "probes1"
+PROBES = {
+    "tension": {   # competing pulls alone fires on anything with two angles; what it may be missing (2026-11-04)
+        "same_subject": ("Are `a` and `b` about the same subject?",
+                         {"true": "They discuss the same situation, activity or kind of thing",
+                          "false": "They discuss different situations or things"}),
+        "different_structure": ("Do `a` and `b` rest on different underlying moves or mechanisms?",
+                                {"true": "The reasoning in one works differently from the reasoning in the other",
+                                 "false": "They make the same kind of move"}),
+    },
+}
+# Combinations of decisive and probe answers, computed here and scored like any question.
+COMBOS = {
+    "tension": {
+        "pulls_and_same_subject": lambda q: min(q["competing_pulls"], q["same_subject"]),
+        "pulls_same_subject_different_structure": lambda q: min(q["competing_pulls"], q["same_subject"],
+                                                                q["different_structure"]),
+        "pulls_x_same_subject_x_different_structure": lambda q: q["competing_pulls"] * q["same_subject"]
+        * q["different_structure"],
+    },
+}
+
+
 def combine(question: str, p: dict[str, float]) -> float:
     """One probability from the atomic ones: any form of tension, or a summary that adds or misstates (the most
     likely of them); an analogy needs different subjects and the same structure (the less likely)."""
@@ -93,20 +118,24 @@ class Jev:
         except (urllib.error.URLError, TimeoutError) as e:
             raise llm.Unavailable(f"Jev via {self.route}: {e}") from None
 
-    def body(self, question: str, state: dict) -> dict:
+    def body(self, question: str, state: dict, probes: bool = False) -> dict:
         qs = {}
-        for name, (instructions, criteria) in QUESTIONS[question].items():
+        asked = QUESTIONS[question] | (PROBES.get(question, {}) if probes else {})
+        for name, (instructions, criteria) in asked.items():
             qs[name] = {"type": "noul", "instructions": instructions, **({"criteria": criteria} if criteria else {})}
         return {"model": self.sent_as, "state": state, "questions": qs}
 
-    def ask(self, question: str, state: dict) -> tuple[dict, dict]:
-        """The atomic probabilities and the combined one, and what the request cost: ({name: p, "p": p}, usage)."""
-        body = self.body(question, state)
+    def ask(self, question: str, state: dict, probes: bool = False) -> tuple[dict, dict]:
+        """The atomic probabilities, the combined one, and with probes their answers and combinations; and what
+        the request cost: ({name: p, "p": p, ...}, usage)."""
+        body = self.body(question, state, probes)
         r = self.post(body)
-        p = {name: float(a["noul"]) for name, a in r["answers"].items()}
+        got = {name: float(a["noul"]) for name, a in r["answers"].items()}
+        deciding = {k: v for k, v in got.items() if k in QUESTIONS[question]}
+        combos = {k: f(got) for k, f in COMBOS.get(question, {}).items()} if probes else {}
         usage = r.get("usage") or {}
         tokens_in = usage.get("input_tokens") or 0
-        return p | {"p": combine(question, p)}, {
+        return got | combos | {"p": combine(question, deciding)}, {
             "served_by": r.get("model") or self.model, "input_tokens": tokens_in,
             "output_tokens": usage.get("output_tokens") or 0, "cost_usd": round(tokens_in * PRICE_IN, 8),
             "payload": json.dumps(body)}

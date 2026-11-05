@@ -73,3 +73,15 @@ def test_the_route_decides_the_endpoint_key_and_model_name(monkeypatch):
                                                         "jev-1.14.0")
     monkeypatch.delenv("OPENROUTER_API_KEY")
     assert jev.Jev().route == "typesafe"
+
+
+def test_probes_are_asked_beside_the_deciding_questions_without_changing_p():
+    client, sent = fake({"competing_pulls": 0.9, "same_subject": 0.8, "different_structure": 0.5})
+    p, _ = client.ask("tension", {"a": {}, "b": {}}, probes=True)
+    assert set(sent[0]["questions"]) == set(jev.QUESTIONS["tension"]) | set(jev.PROBES["tension"])
+    assert p["p"] == 0.9                                   # the probes don't decide
+    assert p["pulls_and_same_subject"] == 0.8 and p["pulls_same_subject_different_structure"] == 0.5
+    assert p["pulls_x_same_subject_x_different_structure"] == pytest.approx(0.36)
+    plain, sent2 = fake({})
+    plain.ask("tension", {"a": {}, "b": {}})
+    assert set(sent2[0]["questions"]) == set(jev.QUESTIONS["tension"])
