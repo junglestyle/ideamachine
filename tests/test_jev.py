@@ -22,14 +22,13 @@ def fake(nouls):
     return jev.Jev(post=post), sent
 
 
-def test_a_tension_is_four_atomic_questions_and_the_strongest_counts():
-    client, sent = fake({"trade_off": 0.82})
+def test_a_tension_is_four_wordings_of_one_question_averaged():
+    client, sent = fake({"competing_pulls": 0.9, "pulls_v2": 0.7, "pulls_v3": 0.8, "pulls_v4": 0.6})
     p, meta = client.ask("tension", {"a": {"said": []}, "b": {"said": []}})
     body = sent[0]
     assert body["model"] == "typesafe/jev-1.14" and set(body["questions"]) == set(jev.QUESTIONS["tension"])
     assert all(q["type"] == "noul" for q in body["questions"].values())
-    assert body["questions"]["trade_off"]["criteria"]["true"].startswith("Each gives up")
-    assert p["p"] == 0.82 and jev.answer(p["p"]) == "yes"
+    assert p["p"] == pytest.approx(0.75) and jev.answer(p["p"]) == "yes"
     assert meta["cost_usd"] == pytest.approx(1000 * 0.042 / 1e6) and json.loads(meta["payload"]) == body
 
 
@@ -43,26 +42,26 @@ def test_jev_drafts_a_sheet_from_structured_state_with_names_pseudonymized(latti
     probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", tmp_path)
     key = json.loads((tmp_path / "key.json").read_text())
     fill(tmp_path, lambda p: "no")
-    client, sent = fake({"contradiction": 0.95})
+    client, sent = fake({q: 0.95 for q in jev.QUESTIONS["tension"]})
     scrubber = names.Scrubber(b"k", known=["Bob", "Alice"])
     d = probe_audit.draft(lattice_with_clusters, client, tmp_path, "jev-1.14.0", scrubber=scrubber)
-    assert d["draft"].endswith("draft-jev-1.14.0.json") and d["pairs"] == len(key["pairs"]) == len(sent)
+    assert d["draft"].endswith("draft-jev-1.14.0-pulls4.json") and d["pairs"] == len(key["pairs"]) == len(sent)
     state = sent[0]["state"]
     assert set(state) == {"a", "b"} and "summary" in state["a"] and isinstance(state["a"]["said"], list)
     assert "Bob" not in json.dumps([b["state"] for b in sent]) and "Alice" not in json.dumps([b["state"] for b in sent])
-    got = json.loads((tmp_path / "draft-jev-1.14.0.json").read_text())
+    got = json.loads((tmp_path / "draft-jev-1.14.0-pulls4.json").read_text())
     assert all(a["answer"] == "yes" and a["p"] == 0.95 for a in got.values())
-    r = probe_audit.score(tmp_path)["drafts"]["jev-1.14.0"]
+    r = probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-pulls4"]
     assert r["precision"] == 0.0 and len(r["invented"]) == len(key["pairs"])
     logged = lattice_with_clusters.execute(
         "SELECT count(*), sum(cost_usd) FROM im.egress_log WHERE model = 'jev-1.14.0'").fetchone()
     assert logged[0] == len(sent) and float(logged[1]) == pytest.approx(len(sent) * 1000 * 0.042 / 1e6)
     probed, _ = fake({})
     d = probe_audit.draft(lattice_with_clusters, probed, tmp_path, "jev-1.14.0", probes=True)
-    assert d["draft"].endswith("draft-jev-1.14.0-probes2.json")
-    first = json.loads((tmp_path / "draft-jev-1.14.0-probes2.json").read_text())["1"]
-    assert first["both_mine"] in (0.0, 1.0) and "any_kind" in first and "pulls_v4" in first
-    assert "auc" in probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-probes2"]
+    assert d["draft"].endswith("draft-jev-1.14.0-pulls4-probes3.json")
+    first = json.loads((tmp_path / "draft-jev-1.14.0-pulls4-probes3.json").read_text())["1"]
+    assert "old_p" in first and "both_true" in first
+    assert "auc" in probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-pulls4-probes3"]
     quotes, qsent = fake({})
     probe_audit.draft(lattice_with_clusters, quotes, tmp_path, "jev-1.14.0", quotes_only=True)
     assert all("summary" not in b["state"]["a"] for b in qsent)
@@ -82,15 +81,13 @@ def test_the_route_decides_the_endpoint_key_and_model_name(monkeypatch):
 
 
 def test_probes_are_asked_beside_the_deciding_questions_without_changing_p():
-    client, sent = fake({"competing_pulls": 0.9, "same_subject": 0.8, "different_structure": 0.5,
-                         "only_emphasis": 0.25, "both_true": 0.5, "opposite_stance": 0.6})
+    pulls = dict.fromkeys(jev.QUESTIONS["tension"], 0.6)
+    client, sent = fake(pulls | {"contradiction": 0.95, "same_subject": 0.25, "both_true": 0.5, "both_true_v2": 0.3})
     p, _ = client.ask("tension", {"a": {}, "b": {}}, probes=True)
     assert set(sent[0]["questions"]) == set(jev.QUESTIONS["tension"]) | set(jev.PROBES["tension"])
-    assert p["p"] == 0.9                                   # the probes don't decide
-    assert p["pulls_and_same_subject"] == 0.8 and p["pulls_same_subject_different_structure"] == 0.5
-    assert p["pulls_x_same_subject_x_different_structure"] == pytest.approx(0.36)
-    assert p["pulls_not_only_emphasis"] == pytest.approx(0.675) and p["any_kind"] == 0.6
-    assert p["any_kind_not_both_true"] == pytest.approx(0.3) and len(sent[0]["questions"]) == 4 + len(jev.PROBES["tension"])
+    assert p["p"] == pytest.approx(0.6)                    # the probes don't decide
+    assert p["old_p"] == 0.95 and p["pulls_across_subjects"] == pytest.approx(0.45)
+    assert p["pulls_not_both_true"] == pytest.approx(0.36)
     plain, sent2 = fake({})
     plain.ask("tension", {"a": {}, "b": {}})
     assert set(sent2[0]["questions"]) == set(jev.QUESTIONS["tension"])
