@@ -373,7 +373,8 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
              meta["payload"], edge_audit._sha(meta["payload"]), meta["served_by"], meta["input_tokens"],
              meta["output_tokens"], meta["cost_usd"]))
         cost += meta["cost_usd"]
-        got[num] = {"answer": jev.answer(probs["p"]), "why": "", **{k: round(v, 3) for k, v in probs.items()}}
+        got[num] = {"answer": jev.answer(question, probs["p"]), "why": "",
+                    **{k: round(v, 3) for k, v in probs.items()}}
         out_path.write_text(json.dumps(got, indent=2))
     return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 6), "policy": policy}
 
@@ -450,7 +451,7 @@ def agreement(mine: dict, theirs: dict) -> dict:
             "missed": sorted(int(n) for n in mine_yes - their_yes)}
 
 
-CUTS = (0.4, 0.5, 0.6, 0.7)
+CUTS = (0.4, 0.45, 0.5, 0.6, 0.7)
 
 
 def auc(mine: dict, theirs: dict) -> dict:

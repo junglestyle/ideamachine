@@ -27,6 +27,10 @@ ROUTES = {   # (endpoint, key's environment variable, how the model is named the
 MODEL = "jev-1.14.0"               # pinned: an alias (jev-latest) can change answers without a change here
 PRICE_IN = 0.042 / 1e6             # $ per input token
 YES, NO = 0.7, 0.3                 # TypeSafe's starting thresholds: between them, the state doesn't settle it
+# A question read as a ranking gets one cut-off instead: at it or above is yes, below it no. Tension: on four sheets
+# (150 pairs, 28 tensions, 10 new; 2026-11-05), 0.45 kept 9 of the 10 new ones and three quarters of all, flagging
+# 52; 0.4 kept no more and flagged 73, 0.5 kept 6 new. A proposal I keep or dismiss, so recall comes first.
+CUT = {"tension": 0.45}
 
 # What decides. A tension is asked in four wordings of one question and decided by their mean: on the two tension
 # sheets (70 pairs, 14 tensions, 2026-11-04), no single question held above 0.80 AUC on both, the four wordings
@@ -63,7 +67,7 @@ QUESTIONS = {
 # wordings are scored against my marks without changing what's being compared. PROBE_SET names the draft.
 # probes2 (2026-11-04) also asked whether the sides differ in structure, only in emphasis, or are an exception, and
 # whether both are mine: all near chance on both sheets, so dropped.
-PROBE_SET = "probes3"
+PROBE_SET = "probes4"
 BOTH = {"true": "Someone could hold both without strain", "false": "Holding one means giving up some of the other"}
 PROBES = {
     "tension": {
@@ -81,14 +85,12 @@ PROBES = {
                              "recommends?", None),
         "undercuts": ("Does one of `a` and `b` undercut the reasoning or premise of the other?", None),
         "inner_conflict": ("Do `a` and `b` describe conflicting wants or traits in the same person?", None),
-        # What may tell new from known (6 new, 8 known): my new tensions ran across subjects, over values, and
-        # between sides Jev thought could both be true.
+        # What may tell new from known: my new tensions ran across subjects, on all four sheets (10 new, 18
+        # known). Competing values held on two sheets and not on the other two, so probes4 dropped it.
         "same_subject": ("Are `a` and `b` about the same subject?",
                          {"true": "They discuss the same situation, activity or kind of thing",
                           "false": "They discuss different situations or things"}),
-        "competing_values": ("Do `a` and `b` put different values first, such as honesty and kindness, or effort "
-                             "and ease?", None),
-        # A sign of no tension: lower on my tensions on both sheets (0.22 to 0.35).
+        # A sign of no tension: lower on my tensions on all four sheets (0.20 to 0.34).
         "both_true": ("Could `a` and `b` both be completely true at once, with no qualification?", BOTH),
         "both_true_v2": ("Someone could fully agree with both `a` and `b`.", None),
     },
@@ -116,7 +118,9 @@ def combine(question: str, p: dict[str, float]) -> float:
     return min(p.values()) if question == "analogy" else max(p.values())
 
 
-def answer(p: float) -> str:
+def answer(question: str, p: float) -> str:
+    if question in CUT:
+        return "yes" if p >= CUT[question] else "no"
     return "yes" if p >= YES else "no" if p <= NO else "unsure"
 
 

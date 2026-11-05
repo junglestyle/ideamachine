@@ -28,14 +28,18 @@ def test_a_tension_is_four_wordings_of_one_question_averaged():
     body = sent[0]
     assert body["model"] == "typesafe/jev-1.14" and set(body["questions"]) == set(jev.QUESTIONS["tension"])
     assert all(q["type"] == "noul" for q in body["questions"].values())
-    assert p["p"] == pytest.approx(0.75) and jev.answer(p["p"]) == "yes"
+    assert p["p"] == pytest.approx(0.75) and jev.answer("tension", p["p"]) == "yes"
     assert meta["cost_usd"] == pytest.approx(1000 * 0.042 / 1e6) and json.loads(meta["payload"]) == body
+
+
+def test_a_tension_has_one_cut_off_and_no_middle():
+    assert jev.answer("tension", 0.45) == "yes" and jev.answer("tension", 0.449) == "no"
 
 
 def test_an_analogy_needs_both_and_the_middle_is_unsure():
     client, _ = fake({"different_subjects": 0.9, "same_structure": 0.5})
     p, _ = client.ask("analogy", {"a": {}, "b": {}})
-    assert p["p"] == 0.5 and jev.answer(0.5) == "unsure" and jev.answer(0.2) == "no"
+    assert p["p"] == 0.5 and jev.answer("analogy", 0.5) == "unsure" and jev.answer("analogy", 0.2) == "no"
 
 
 def test_jev_drafts_a_sheet_from_structured_state_with_names_pseudonymized(lattice_with_clusters, tmp_path):  # noqa: F811
@@ -58,10 +62,10 @@ def test_jev_drafts_a_sheet_from_structured_state_with_names_pseudonymized(latti
     assert logged[0] == len(sent) and float(logged[1]) == pytest.approx(len(sent) * 1000 * 0.042 / 1e6)
     probed, _ = fake({})
     d = probe_audit.draft(lattice_with_clusters, probed, tmp_path, "jev-1.14.0", probes=True)
-    assert d["draft"].endswith("draft-jev-1.14.0-pulls4-probes3.json")
-    first = json.loads((tmp_path / "draft-jev-1.14.0-pulls4-probes3.json").read_text())["1"]
+    assert d["draft"].endswith("draft-jev-1.14.0-pulls4-probes4.json")
+    first = json.loads((tmp_path / "draft-jev-1.14.0-pulls4-probes4.json").read_text())["1"]
     assert "old_p" in first and "both_true" in first
-    assert "auc" in probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-pulls4-probes3"]
+    assert "auc" in probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-pulls4-probes4"]
     quotes, qsent = fake({})
     probe_audit.draft(lattice_with_clusters, quotes, tmp_path, "jev-1.14.0", quotes_only=True)
     assert all("summary" not in b["state"]["a"] for b in qsent)
