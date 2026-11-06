@@ -647,7 +647,8 @@ def main(argv=None) -> None:
     f.add_argument("--scenario", choices=fixtures.SCENARIOS, default="base",
                    help="base, or base plus every correction and a forget")
     f.set_defaults(func=cmd_load_fixtures)
-    sub.add_parser("run", help="import, segment and triage; idempotent").set_defaults(func=cmd_run)
+    sub.add_parser("run", help="import and segment, then send new speech to Claude to extract, match, file, score, "
+                   "tag and digest it (and triage, if a backend is set); idempotent").set_defaults(func=cmd_run)
     t = sub.add_parser("train", help="train the logreg baseline on my exact labels")
     t.add_argument("-C", type=float, default=1.0, help="inverse regularization strength")
     t.set_defaults(func=cmd_train)
@@ -680,7 +681,8 @@ def main(argv=None) -> None:
     dg.add_argument("--write", action="store_true", help="write the week's digest if it isn't written (sends to Claude)")
     dg.add_argument("--again", action="store_true", help="rewrite the week's digest (sends to Claude)")
     dg.set_defaults(func=cmd_digest)
-    tr = sub.add_parser("trial", help="try an extraction model or prompt on a sample of episodes, against a reference")
+    tr = sub.add_parser("trial", help="try an extraction model or prompt on a sample of episodes, against a reference "
+                        "(sends the episodes to the models)")
     tr.add_argument("prompt", help="a name in extract.PROMPTS, e.g. v3")
     tr.add_argument("--limit", type=int, help="read at most this many episodes this time")
     tr.add_argument("--report", action="store_true", help="only report on what's been read; send nothing")
@@ -714,7 +716,8 @@ def main(argv=None) -> None:
     nm.set_defaults(func=cmd_names)
     ae = sub.add_parser("audit-edges", help="B4: a blind sheet of pairs of clusters to type; tally my marks")
     ae.add_argument("action", choices=["sheet", "score", "draft"],
-                    help="draft: a model marks the same sheet blind (sends to Claude); score then compares it with me")
+                    help="draft: a model marks the same sheet blind (sends to it: Claude, or OpenRouter for a "
+                         "provider/model name); score then compares it with me")
     ae.add_argument("folder", nargs="+", help="where sheet.md and key.json go (it quotes people: keep it in saved/); "
                     "score takes several, to score them as one")
     ae.add_argument("--seed", type=int, default=4, help="the sample and shuffle's seed")
@@ -729,7 +732,8 @@ def main(argv=None) -> None:
             ("audit-tension", "tension", "a blind sheet of possible tensions, proposed several ways (sends to "
                                          "Claude); score my marks"),
             ("audit-summaries", "summary", "a blind sheet of extraction trials' summaries: do they say more than "
-                                           "what was said? (sends nothing); score my marks")):
+                                           "what was said? (the sheet sends nothing; draft sends to the model); "
+                                           "score my marks")):
         pa = sub.add_parser(name, help=what)
         pa.add_argument("action", choices=["sheet", "draft", "score"])
         pa.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")

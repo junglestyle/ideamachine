@@ -1,5 +1,6 @@
 """Phase 1 done-when criteria, against a real Postgres and a fixture stream."""
 
+import dataclasses
 import json
 import os
 from dataclasses import replace
@@ -186,6 +187,35 @@ def test_forgetting_leaves_no_text_or_derived_rows(pipe, cfg, stream):
     assert_invariants(pipe)
 
 
+@pytest.mark.parametrize("start, end, listed", [(14399, 14419, False), (14403, 14416, True)],
+                         ids=["wholly inside: it leaves the index", "partly: it stays, untranscribed"])
+def test_forgetting_all_of_a_conversations_speech(pipe, cfg, stream, start, end, listed):
+    # Hearsay's contract: a conversation inside the stretch leaves the index; one partly inside with no speech
+    # left stays, as if not yet transcribed (no file).
+    run(pipe, cfg, stream)
+    stream.forget(start, end)
+    stream.write(stream.dir)
+    entries = json.loads((stream.dir / "index.json").read_text())["conversations"]
+    assert [e["file"] for e in entries if e["conversation_id"] == "c-forget"] == ([None] if listed else [])
+    run(pipe, cfg, stream)
+    assert table(pipe, "SELECT count(*) FROM im.source_segments WHERE conversation_id = 'c-forget'") == [(0,)]
+    assert "c-forget" not in kinds(pipe) and len(table(pipe, "SELECT 1 FROM im.source_tombstones")) == 3
+    assert_invariants(pipe)
+
+
+def test_im_check_fails_when_a_segment_is_in_no_episode(pipe, cfg, stream, monkeypatch, capsys):
+    from im import cli
+
+    run(pipe, cfg, stream)
+    monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
+    cli.main(["check"])   # every invariant holds: exits normally
+    pipe.execute("DELETE FROM im.episode_segments WHERE segment_id = %s", (segment_of(pipe, COFFEE),))
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as failed:
+        cli.main(["check"])
+    assert failed.value.code == 1 and json.loads(capsys.readouterr().out) == {"orphans": 1}
+
+
 def test_forgotten_speech_that_reappears_is_purged_again(pipe, cfg, stream):
     stream.forgotten.append({"forgotten_at": fixtures.iso(20000), "start": fixtures.iso(14406),
                              "end": fixtures.iso(14412), "conversation_id": "c-forget",
@@ -227,14 +257,15 @@ def test_forgetting_reaches_every_conversation_the_speech_was_in(pipe, cfg, stre
 
 
 
-def test_config_change_is_a_version_change(pipe, cfg, stream):
+@pytest.mark.parametrize("setting", [f.name for f in dataclasses.fields(SegmentConfig)])
+def test_config_change_is_a_version_change(pipe, cfg, stream, setting):
     run(pipe, cfg, stream)
     n = len(current_episodes(pipe))
-    wider = Config(segment=SegmentConfig(gap_s=600))
-    stats = run(pipe, wider, stream)
-    assert stats["episodes_retired"] == n
+    changed = Config(segment=dataclasses.replace(cfg.segment, **{setting: getattr(cfg.segment, setting) * 2}))
+    stats = run(pipe, changed, stream)
+    assert stats["episodes_retired"] == n   # every setting that can move a boundary re-derives every episode
     versions = {r[0] for r in table(pipe, "SELECT DISTINCT stage_version FROM im.episodes WHERE current")}
-    assert versions == {wider.segment.stage_version}
+    assert versions == {changed.segment.stage_version}
     assert_invariants(pipe)
 
 
@@ -361,7 +392,7 @@ def test_a_field_hearsay_adds_keeps_every_segment_and_episode(pipe, cfg, stream,
                         lambda self, cid: [u | {"language": "en"} for u in plain(self, cid)])
     stream.write(stream.dir)
     stats = run(pipe, cfg, stream)
-    assert stats["segments_new"] == stats["segments_left"] == 0
+    assert stats["segments_new"] == stats["segments_left"] == stats["conversations_changed"] == 0   # nobody relabeled
     assert stats["episodes_retired"] == stats["episodes_created"] == 0
     assert _unchanged(pipe) == before
     assert_invariants(pipe)
@@ -374,7 +405,7 @@ def test_places_follow_the_index_and_bad_ones_fail(pipe, cfg, stream):
     assert table(pipe, "SELECT places FROM im.source_conversations WHERE conversation_id = 'c-tv'") == [([],)]
     office = table(pipe, "SELECT episode_id::text FROM im.episodes WHERE session_id = 'c-conv' LIMIT 1")[0][0]
     tv = table(pipe, "SELECT episode_id::text FROM im.episodes WHERE session_id = 'c-tv'")[0][0]
-    assert "place         Office" in show.show(pipe, office) and "place " not in show.show(pipe, tv)
+    assert "Office" in show.show(pipe, office) and "Office" not in show.show(pipe, tv)
     before = _unchanged(pipe)
     stream.name_place("c-mono", "Home", 3600, 3700)  # named retroactively
     stream.name_place("c-mono", "Garden", 3700, 3837)

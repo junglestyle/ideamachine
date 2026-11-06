@@ -1,7 +1,8 @@
 """Weekly synthesis (ROADMAP Phase 2, slice 6): once a week Claude reads what the lattice gained and writes a digest.
 
 A week runs Monday 00:00 to Monday 00:00 in local time (the machine's TZ). The run writes the last completed week's
-digest once; `im digest --again` rewrites it. Claude sees ideas, not raw speech: each idea's title and statement
+digest once, when all of the week's speech has been read and matched; `im digest --again` rewrites it. Claude sees
+ideas, not raw speech: each idea's title and statement
 (my corrections win), its themes, how often it was said, its rank, and what I did with it that week (stars, links,
 comparisons). Speakers aren't named, though an idea's text, and so the digest, may name people: it's written for
 me. The digest keeps the segment IDs behind every idea it was shown, so forgetting any of that speech deletes it.
@@ -82,6 +83,19 @@ def _added(conn, start: datetime, end: datetime) -> list[tuple]:
            ORDER BY d.created_at, d.idea_id""", (start, end)).fetchall()
 
 
+def _unread(conn, start: datetime, end: datetime) -> bool:
+    """Whether speech in the week hasn't reached the lattice yet: an episode extraction hasn't read, or a capture
+    matching hasn't placed. Until it has, the week's ideas aren't all there to digest."""
+    return conn.execute(
+        """SELECT EXISTS (
+             SELECT 1 FROM im.episodes e
+             WHERE e.current AND e.started_at < %s AND e.ended_at >= %s
+               AND (NOT EXISTS (SELECT 1 FROM im.extractions x WHERE x.episode_id = e.episode_id)
+                    OR EXISTS (SELECT 1 FROM im.items i WHERE i.episode_id = e.episode_id
+                               AND NOT EXISTS (SELECT 1 FROM im.item_matches m WHERE m.item_id = i.item_id))))""",
+        (end, start)).fetchone()[0]
+
+
 def _top(conn, exclude: list) -> list[tuple]:
     return conn.execute(
         """SELECT d.idea_id, d.title, d.statement, d.themes, 0, d.n_evidence, d.first_said, s.score, d.starred
@@ -147,13 +161,18 @@ def payload(conn, week: date) -> tuple[str, list]:
 
 
 def digest_stage(conn, client, monthly_cap_usd: float = 20.0, week: date | None = None, again: bool = False) -> dict:
-    """Write the week's digest (by default the last completed week) unless it exists. A week with nothing said
-    gets a short digest without asking Claude."""
+    """Write the week's digest (by default the last completed week) unless it exists. It waits while the week has
+    speech extraction or matching hasn't got to (the cap, an outage, a backlog), and is written on a later run: a
+    digest written then would miss those ideas for good. A week with nothing said gets a short digest without asking
+    Claude."""
     week = week or last_week()
     stats = {"week": week.isoformat(), "written": False, "points": 0, "failed": 0, "stopped": None}
     if conn.execute("SELECT 1 FROM im.digests WHERE week_start = %s", (week,)).fetchone() and not again:
         return stats
     start, end = _period(week)
+    if _unread(conn, start, end):
+        stats["waiting"] = True
+        return stats
     text, ids = payload(conn, week)
     pv = prompt_version()
     if not _said(conn, start, end) and not _added(conn, start, end):

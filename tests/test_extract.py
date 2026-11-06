@@ -57,11 +57,14 @@ def test_payload_pseudonymizes_speakers_and_numbers_lines(pipe, cfg, stream):
 
 def test_extraction_maps_items_back_and_logs_what_went_out(pipe, cfg, stream):
     run(pipe, cfg, stream)
-    claude = FakeClaude(coffee_item)
+    def respond(text):   # the coffee capture, citing lines 0 and 999 too; and one citing only line 0
+        return [dict(c, lines=[0, *c["lines"]]) for c in coffee_item(text)] + \
+            [dict(c, quote="nothing on line 0", lines=[0]) for c in coffee_item(text)]
+    claude = FakeClaude(respond)
     stats = extract.run_stage(pipe, claude)
-    assert stats["read"] == 9 and stats["items"] == 1 and len(claude.calls) == 9
+    assert stats["read"] == 9 and stats["items"] == 1 and len(claude.calls) == 9   # citing no real line: dropped
     (kind, said_by, segs), = table(pipe, "SELECT kind, said_by, source_segment_ids FROM im.items")
-    assert (kind, said_by) == ("joke", "anon A") and len(segs) == 1  # line 999 didn't exist: dropped
+    assert (kind, said_by) == ("joke", "anon A") and len(segs) == 1  # lines 0 and 999 don't exist: dropped
     assert table(pipe, "SELECT text FROM im.source_segments WHERE segment_id = %s", segs[0]) == [(COFFEE,)]
     logged = table(pipe, "SELECT count(*), sum(cost_usd)::float, bool_and(payload IS NOT NULL) FROM im.egress_log")
     assert logged == [(9, pytest.approx(9 * (1000 * 4 + 200 * 20) / 1e6), True)]
@@ -137,6 +140,9 @@ def test_reuse_after_a_rekey_sends_nothing(pipe, cfg, stream, monkeypatch):
     assert len(claude.calls) == sent and stats["read"] == 0 and stats["reused"] == 9 and stats["items"] == 1
     assert table(pipe, """SELECT w.said_by FROM im.items i JOIN im.item_said_by w USING (item_id)
                           JOIN im.episodes e USING (episode_id) WHERE e.current""") == [("anon A",)]
+    assert table(pipe, """SELECT i.source_segment_ids <@ ARRAY(SELECT es.segment_id FROM im.episode_segments es
+                                                              WHERE es.episode_id = i.episode_id)
+                          FROM im.items i JOIN im.episodes e USING (episode_id) WHERE e.current""") == [(True,)]
     assert_invariants(pipe)
 
 
@@ -226,6 +232,16 @@ def test_reviewing_items(pipe, cfg, stream):
     assert extract.review_items(pipe) == []
     (d,) = extract.discards(pipe)
     assert d[2] == "coffee order" and d[6] == "a song lyric, not an idea"
+
+
+def test_a_capture_on_a_replaced_episode_isnt_offered_for_review(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    extract.run_stage(pipe, FakeClaude(coffee_item))
+    assert len(extract.review_items(pipe)) == 1
+    stream.name_speaker("c-conv", "anon A", "Alice")   # S2 is S1: the coffee episode is replaced, and not read yet
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    assert extract.review_items(pipe) == []
 
 
 @pytest.mark.parametrize("state, items, expect", [

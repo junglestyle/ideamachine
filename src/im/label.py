@@ -23,9 +23,8 @@ QUESTION_FIELDS = ("boundaries", "is_self_thinking", "kind", "project", "keep_sc
 
 
 def validate(answers: dict, project_slugs: set[str]) -> None:
-    expected = {"boundaries", "is_self_thinking", "kind", "project", "keep_score"}
-    if set(answers) != expected:
-        raise ValueError(f"answers must be exactly {sorted(expected)}")
+    if set(answers) != set(QUESTION_FIELDS):
+        raise ValueError(f"answers must be exactly {sorted(QUESTION_FIELDS)}")
     if answers["boundaries"] not in BOUNDARIES.values():
         raise ValueError(f"boundaries: {answers['boundaries']!r}")
     if not isinstance(answers["is_self_thinking"], bool):
@@ -34,7 +33,7 @@ def validate(answers: dict, project_slugs: set[str]) -> None:
         raise ValueError(f"kind: {answers['kind']!r}")
     if answers["project"] is not None and answers["project"] not in project_slugs:
         raise ValueError(f"project: {answers['project']!r} isn't in the registry")
-    if answers["keep_score"] not in range(1, 6):
+    if type(answers["keep_score"]) is not int or not 1 <= answers["keep_score"] <= 5:   # True and 3.0 aren't scores
         raise ValueError(f"keep_score: {answers['keep_score']!r}")
 
 

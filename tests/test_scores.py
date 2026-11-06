@@ -12,17 +12,18 @@ from helpers import table
 
 
 class FakeScorer:
-    """Scores idea n with 3 on every criterion, except ideas whose line mentions `best`: 5s."""
+    """Scores idea n with 3 on every criterion, except ideas whose line mentions `best`: `top`s (5)."""
 
-    def __init__(self, best="coffee"):
-        self.calls, self.best = [], best
+    def __init__(self, best="coffee", top=5):
+        self.calls, self.best, self.top = [], best, top
         self.beta = SimpleNamespace(messages=SimpleNamespace(create=self.create))
 
     def create(self, **kw):
         self.calls.append(kw)
         lines = [ln for ln in kw["messages"][0]["content"].splitlines()[1:] if ln]
-        out = [{"idea": int(ln.split(".")[0]), **{c: 5 if self.best in ln.lower() else 3 for c in scores.CRITERIA},
-                "why": "test"} for ln in lines]
+        out = [{"idea": int(ln.split(".")[0]),
+                **{c: self.top if self.best in ln.lower() else 3 for c in scores.CRITERIA}, "why": "test"}
+               for ln in lines]
         content = [SimpleNamespace(type="text", text=json.dumps({"scores": out}))]
         return SimpleNamespace(content=content, stop_reason="end_turn", model="claude-opus-5-5", _request_id="r",
                                usage=SimpleNamespace(input_tokens=500, output_tokens=100))
@@ -31,6 +32,15 @@ class FakeScorer:
 def ranked(conn):
     return table(conn, """SELECT d.title, s.score::float, s.rubric::float, s.recurrence::float FROM pub.idea_scores s
                           JOIN pub.ideas d USING (idea_id) ORDER BY s.score DESC NULLS LAST, d.title""")
+
+
+def test_a_score_off_the_scale_counts_as_its_end_and_isnt_asked_again(seeded_lattice):
+    pipe = seeded_lattice
+    claude = FakeScorer(top=6)   # past the top of the scale, for the coffee idea
+    stats = scores.score_stage(pipe, claude)
+    assert stats["scored"] == stats["pending"]
+    assert scores.score_stage(pipe, claude)["pending"] == 0 and len(claude.calls) == 1
+    assert "coffee" in ranked(pipe)[0][0].lower() and ranked(pipe)[0][2] == 1.0   # as if it had said 5
 
 
 def test_every_shown_idea_is_scored_once_and_ranked(seeded_lattice, admin):

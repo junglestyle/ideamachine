@@ -108,6 +108,9 @@ Then, outside that transaction:
 - **Lattice.** Each new capture is matched against the nearest existing ideas (local embeddings), and Claude
   decides new / same as / evolves. Related-idea edges are rebuilt. Lattice, the separate presentation app, reads
   the result through schema `pub` ([ROADMAP §3.5](ROADMAP.md)).
+- **Digest.** Claude writes the last completed week's digest (Monday to Monday) once every episode of that week
+  has been read and its captures matched; until then the run leaves it, with `"waiting": true` in its stats, and a
+  later run writes it.
 - **Observations and weight** ([M2 design](design/m2-observations-candidates-ideas.md)). Each new capture joins
   the observation it re-captures, or starts one. Each cluster is weighed (`[weight]` in `im.toml`), and up to 10
   candidates a week, the most recently said first, are proposed to me to keep as canonical or pinned. `im tune knob=value ...` previews a change to

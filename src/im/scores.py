@@ -59,7 +59,8 @@ def _todo(conn, rv: str) -> list[tuple]:
 
 def score_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
     """Score what's new or changed, a batch at a time. A batch refused or failed is scored on a later run; the
-    batches after it go on."""
+    batches after it go on. A score off the 1-5 scale is read as the end it's past: left unscored, the idea would be
+    asked about, and paid for, again every run."""
     rv = rubric_version()
     todo = _todo(conn, rv)
     stats = {"rubric_version": rv, "pending": len(todo), "scored": 0, "refused": 0, "failed": 0, "stopped": None}
@@ -78,7 +79,7 @@ def score_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
         answer = a.data
         with conn.transaction():
             for s in answer["scores"]:
-                if not 1 <= s["idea"] <= len(batch) or not all(1 <= s[c] <= 5 for c in CRITERIA):
+                if not 1 <= s["idea"] <= len(batch):
                     continue
                 idea_id, title, statement = batch[s["idea"] - 1]
                 conn.execute(
@@ -89,7 +90,7 @@ def score_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
                          novelty = excluded.novelty, compression = excluded.compression,
                          outside_value = excluded.outside_value, why = excluded.why,
                          rubric_version = excluded.rubric_version, input_hash = excluded.input_hash, scored_at = now()""",
-                    (idea_id, *(s[c] for c in CRITERIA), s["why"][:500], rv, _hash(title, statement)))
+                    (idea_id, *(min(max(s[c], 1), 5) for c in CRITERIA), s["why"][:500], rv, _hash(title, statement)))
                 stats["scored"] += 1
     return stats
 

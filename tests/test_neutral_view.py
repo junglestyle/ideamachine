@@ -53,6 +53,33 @@ def test_keeping_from_a_card_is_my_feedback(matched, admin):  # noqa: F811
     assert table(matched, "SELECT kept_as FROM im.idea_kept WHERE idea_id = %s", new) == [(None,)]
 
 
+def test_my_latest_event_is_the_last_to_arrive_whatever_time_it_carries(matched, admin):  # noqa: F811
+    import json
+
+    new = str(idea(matched, "Something new"))
+
+    def events(*rows):   # as Lattice, in one transaction: (at or None for now(), kind, payload)
+        as_app(admin, lambda c: [c.execute("""INSERT INTO pub.feedback_events (at, kind, idea_id, payload)
+                                               VALUES (coalesce(%s, now()), %s, %s, %s)""",
+                                           (at, kind, new, json.dumps(p))) for at, kind, p in rows])
+
+    def shown():
+        return (table(matched, "SELECT starred, title FROM pub.ideas WHERE idea_id = %s", new)[0]
+                + table(matched, "SELECT kept_as FROM im.idea_kept WHERE idea_id = %s", new)[0]
+                + (dict(table(matched, "SELECT id::text, sensitive FROM pub.sensitivity")).get(new),))
+
+    events((None, "star", {}), (None, "unstar", {}))   # one transaction: both carry the same now()
+    assert shown() == (False, "Something new", None, None)
+    # One device's events, made at 11:00, arrive before another's made at 10:00: what arrived last is my latest.
+    later, earlier = "2026-09-01T11:00:00Z", "2026-09-01T10:00:00Z"
+    events((later, "star", {}), (later, "idea_keep", {"as": "pinned"}), (later, "idea_sensitive", {"sensitive": False}),
+           (later, "idea_correct", {"title": "Later title"}))
+    events((earlier, "unstar", {}), (earlier, "idea_unkeep", {}), (earlier, "idea_sensitive", {"sensitive": True}),
+           (earlier, "idea_correct", {"title": "Earlier title"}))
+    assert shown() == (False, "Earlier title", None, True)
+
+
+
 def test_only_a_cookie_signed_with_the_token_logs_in(monkeypatch):
     monkeypatch.setenv("LATTICE_TOKEN", "a-long-enough-test-token")
     assert web.logged_in(f"other=1; {web.COOKIE}={web._session()}")
@@ -147,6 +174,24 @@ def test_a_lens_lights_its_seed_and_what_it_reaches(matched, admin):  # noqa: F8
     assert data["seed"] == build and data["rel"][build] == 1.0
     assert data["rel"][signal] > 0   # it evolves from the signal idea
     assert all(0 < v <= 1 for v in data["rel"].values())
+    assert max(v for k, v in data["rel"].items() if k != build) == 1.0   # the most relevant other is lit fully
     assert {s[0]: (s[1], s[2]) for s in data["stars"]} == \
         {s[0]: (s[1], s[2]) for s in sky_data(as_app(admin, web.sky))["stars"]}   # a lens moves nothing
     assert as_app(admin, web.sky, "00000000-0000-0000-0000-000000000000") is None
+
+
+class Nearby:
+    """What the lens reads: my links, and the seed's nearest cards by meaning with their similarity."""
+
+    def __init__(self, links, near):
+        self.links, self.near = links, near
+
+    def execute(self, sql, args=None):
+        return iter(self.near if "card_neighbours" in sql else self.links)
+
+
+def test_a_seed_nothing_is_like_lights_only_itself():
+    from im import lens
+
+    assert lens.relevance(Nearby([], [("b", -0.2), ("c", 0.0)]), "a") == {"a": 1.0}
+    assert lens.relevance(Nearby([("b", "c")], [("b", 0.0)]), "a") == {"a": 1.0}   # linked, but not to the seed

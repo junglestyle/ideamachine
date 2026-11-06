@@ -25,10 +25,10 @@ def test_a_summary_sheet_samples_every_models_captures_blind(pipe, cfg, stream, 
     fill(tmp_path, lambda p: "yes" if p["set"] == "claude-sonnet-5-5" else "no")
     model = FakeProposer()   # a checker that says every summary adds something
     d = probe_audit.draft(pipe, model, tmp_path, "claude-haiku-5-5")
-    assert d["pairs"] == 2 and "Does the summary claim anything" in model.calls[0]["system"]
+    assert d["pairs"] == 2 and model.calls[0]["system"] == probe_audit.DRAFT_SYSTEM["summary"]
     r = probe_audit.score(tmp_path)
     assert r["by_set"]["claude-sonnet-5-5"]["hit_rate"] == 1.0 and r["by_set"]["claude-opus-5-5"]["hit_rate"] == 0.0
-    assert r["drafts"]["claude-haiku-5-5-low"]["precision"] == 0.5
+    assert r["drafts"]["claude-haiku-5-5-low-B1"]["precision"] == 0.5
     segs = json.loads((tmp_path / "key.json").read_text())["pairs"]["1"]["segments"]
     logged = pipe.execute("SELECT segment_ids FROM im.egress_log WHERE model = 'claude-haiku-5-5'").fetchall()
     assert any(set(map(str, s)) == set(segs) for (s,) in logged)   # each check is logged with the lines it showed

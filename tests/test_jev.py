@@ -56,12 +56,12 @@ def test_jev_drafts_a_sheet_from_structured_state(lattice_with_clusters, tmp_pat
     fill(tmp_path, lambda p: "no")
     client, sent = fake({q: 0.95 for q in jev.QUESTIONS["tension"]})
     d = probe_audit.draft(lattice_with_clusters, client, tmp_path, "jev-1.14.0")
-    assert d["draft"].endswith("draft-jev-1.14.0-pulls4.json") and d["pairs"] == len(key["pairs"]) == len(sent)
+    assert d["draft"].endswith("draft-jev-1.14.0-pulls4-B1.json") and d["pairs"] == len(key["pairs"]) == len(sent)
     state = sent[0]["state"]
     assert set(state) == {"a", "b"} and "summary" in state["a"] and isinstance(state["a"]["said"], list)
-    got = json.loads((tmp_path / "draft-jev-1.14.0-pulls4.json").read_text())
+    got = json.loads((tmp_path / "draft-jev-1.14.0-pulls4-B1.json").read_text())
     assert all(a["answer"] == "yes" and a["p"] == 0.95 for a in got.values())
-    r = probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-pulls4"]
+    r = probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-pulls4-B1"]
     assert r["precision"] == 0.0 and len(r["invented"]) == len(key["pairs"])
     logged = lattice_with_clusters.execute(
         "SELECT count(*), sum(cost_usd) FROM im.egress_log WHERE model = 'jev-1.14.0'").fetchone()
@@ -71,10 +71,10 @@ def test_jev_drafts_a_sheet_from_structured_state(lattice_with_clusters, tmp_pat
     assert payloads == sent   # what was logged is what was sent
     probed, _ = fake({})
     d = probe_audit.draft(lattice_with_clusters, probed, tmp_path, "jev-1.14.0", probes=True)
-    assert d["draft"].endswith("draft-jev-1.14.0-pulls4-probes4.json")
-    first = json.loads((tmp_path / "draft-jev-1.14.0-pulls4-probes4.json").read_text())["1"]
+    assert d["draft"].endswith("draft-jev-1.14.0-pulls4-probes4-B1.json")
+    first = json.loads((tmp_path / "draft-jev-1.14.0-pulls4-probes4-B1.json").read_text())["1"]
     assert "old_p" in first and "both_true" in first
-    assert "auc" in probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-pulls4-probes4"]
+    assert "auc" in probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-pulls4-probes4-B1"]
     quotes, qsent = fake({})
     probe_audit.draft(lattice_with_clusters, quotes, tmp_path, "jev-1.14.0", quotes_only=True)
     assert all("summary" not in b["state"]["a"] for b in qsent)

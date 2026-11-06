@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 
-from im import edge_audit, egress, observations
+from im import edge_audit, egress, names, observations
 
 from helpers import table
 from test_lattice import lat_setup
@@ -104,10 +104,11 @@ class FakeTyper:
     def create(self, **kw):
         self.calls.append(kw)
         ns = self._ns
-        if "structures" in kw["output_config"]["format"]["schema"]["properties"]:
+        if "structures" in kw["output_config"]["format"]["schema"]["properties"]:   # ideas 1 and 2 make one move
             n = kw["messages"][0]["content"].count("\n")
-            text = self._json.dumps({"structures": [{"idea": i, "structure": "an agent picks the safe option"}
-                                                    for i in range(1, n + 1)]})
+            text = self._json.dumps({"structures": [
+                {"idea": i, "structure": "an agent picks the safe option" if i <= 2 else f"pattern {i} on its own"}
+                for i in range(1, n + 1)]})
         else:
             text = self._json.dumps({"label": self.label, "direction": "none",
                                      "analogy": "same move" if len(self.calls) == 1 else ""})
@@ -143,28 +144,41 @@ def test_a_mark_that_isnt_a_label_is_reported_not_skipped():
 
 def test_a_draft_sees_the_sheet_without_my_marks_and_score_compares(lattice_with_clusters, tmp_path):
     edge_audit.write(lattice_with_clusters, tmp_path, size=4)
-    fill(tmp_path, lambda p: ("rel", "analogy: secret note"))
+    fill(tmp_path, lambda p: ("rel", "analogy: secret note,\nthis one's a TENSION I already knew"))
+    assert {m["note"] for m in edge_audit.marks((tmp_path / "sheet.md").read_text()).values()} == \
+        {"analogy: secret note,\nthis one's a TENSION I already knew"}   # a note runs to the next pair
     claude = FakeTyper()
     out = edge_audit.draft(lattice_with_clusters, claude, tmp_path)
     assert out["pairs"] == 4 and len(claude.calls) == 4
     sent = "\n".join(c["messages"][0]["content"] for c in claude.calls)
-    assert "secret note" not in sent and "mark:" not in sent and "Claude's summary" in sent
+    assert "secret note" not in sent and "TENSION" not in sent and "mark:" not in sent and "Claude's summary" in sent
     assert table(lattice_with_clusters, "SELECT count(*) FROM im.egress_log WHERE prompt_version = %s",
                  out["prompt_version"]) == [(4,)]
     assert edge_audit.draft(lattice_with_clusters, claude, tmp_path)["pairs"] == 4 and len(claude.calls) == 4
-    d = edge_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low-labels2"]
+    d = edge_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low-labels2-B1"]
     assert d["agree"] == 1.0 and d["analogies"]["both"] == [1]
+    # The same model under another policy is another draft: none of policy B's answers stand in for it.
+    other = edge_audit.draft(lattice_with_clusters, claude, tmp_path, scrubber=names.Scrubber(b"k"))
+    assert other["pairs"] == 4 and len(claude.calls) == 8 and other["draft"] != out["draft"]
+    assert set(edge_audit.score(tmp_path)["drafts"]) == {"claude-opus-5-5-low-labels2-B1",
+                                                         "claude-opus-5-5-low-labels2"}
 
 
-def test_the_analogy_spike_ranks_partners_by_structure_and_topic(lattice_with_clusters, tmp_path):
+def test_the_analogy_spike_ranks_a_partner_that_makes_the_same_move_first(lattice_with_clusters, tmp_path):
     from im import analogy_spike
     from test_triage import HashEmbedder
 
     edge_audit.write(lattice_with_clusters, tmp_path, size=2)
-    fill(tmp_path, lambda p: ("none", "analogy: same move"))
-    r = analogy_spike.run(lattice_with_clusters, FakeTyper(), HashEmbedder(), tmp_path, others=10)
-    assert r["pairs"] == 2 and (tmp_path / "structures.json").exists()
-    assert all(1 <= p["rank_by_structure"] and 1 <= p["rank_by_topic"] for p in r["pairs_detail"])
+    marked = iter([("none", "analogy: same move"), ("none", "")])
+    fill(tmp_path, lambda p: next(marked))
+    claude = FakeTyper()   # the pair's two clusters come first and get the same structure; the rest, their own
+    r = analogy_spike.run(lattice_with_clusters, claude, HashEmbedder(), tmp_path, others=10)
+    assert r["pairs"] == 1 and r["pairs_detail"][0]["rank_by_structure"] == 1
+    assert table(lattice_with_clusters, "SELECT count(*) FROM im.egress_log WHERE prompt_version = %s",
+                 r["prompt_version"]) == [(len(claude.calls),)]
+    asked = len(claude.calls)
+    again = analogy_spike.run(lattice_with_clusters, claude, HashEmbedder(), tmp_path, others=10)
+    assert again["pairs_detail"] == r["pairs_detail"] and len(claude.calls) == asked   # what it read isn't re-asked
 
 
 def test_sheets_pool_into_one_benchmark_counting_a_shared_pair_once(lattice_with_clusters, tmp_path):

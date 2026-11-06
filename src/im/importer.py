@@ -26,6 +26,9 @@ IDENTITY = ("conversation_id", "start", "end", "text")
 # Updated in place on a kept segment when the stream says otherwise (naming a voice, relabeling the owner).
 SPEAKER_FIELDS = ("speaker_kind", "speaker_name", "speaker_label", "speaker_basis", "is_self", "speaker_conf",
                   "asr_confidence")
+# Columns stored as real. A parameter is a double, and a real compared with a double differs whenever float4 can't
+# hold the value exactly (0.93 is 0.9300000071525574), so these are cast to real before they're compared.
+REAL = ("speaker_conf", "asr_confidence", "arousal")
 
 
 class StreamError(Exception):
@@ -228,17 +231,18 @@ def _replace_conversation(conn, cid: str, entry: dict | None, utts: list[Utteran
         # Affect and delivery can be (re)measured without the speech changing, so they follow the latest import.
         cur.executemany(
             """UPDATE im.source_segments SET arousal = %s, delivery = %s::jsonb WHERE segment_id = %s
-               AND (arousal, delivery) IS DISTINCT FROM (%s, %s::jsonb)""",
+               AND (arousal, delivery) IS DISTINCT FROM (%s::real, %s::jsonb)""",
             [(u.arousal, _json(u.delivery), sid, u.arousal, _json(u.delivery)) for sid, u in by_id.items()])
     # So does who spoke. A change here can move episode boundaries or what would be sent, so it counts as a change.
     relabeled = 0
     cols = ", ".join(SPEAKER_FIELDS)
+    params = ", ".join("%s::real" if f in REAL else "%s" for f in SPEAKER_FIELDS)
     for sid, u in by_id.items():
         if sid in old:
             vals = tuple(getattr(u, f) for f in SPEAKER_FIELDS)
             relabeled += conn.execute(
-                f"""UPDATE im.source_segments SET ({cols}) = ROW({", ".join(["%s"] * len(vals))})
-                    WHERE segment_id = %s AND ({cols}) IS DISTINCT FROM ({", ".join(["%s"] * len(vals))})""",
+                f"""UPDATE im.source_segments SET ({cols}) = ROW({params})
+                    WHERE segment_id = %s AND ({cols}) IS DISTINCT FROM ({params})""",
                 (*vals, sid, *vals)).rowcount
 
     if entry is None:

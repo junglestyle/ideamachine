@@ -43,7 +43,7 @@ SIZES = {"analogy": {"jev": 25, "facets": 10, "random": 5},
 # 1 was between unrelated ideas (2026-11-04). Jev can't read every idea at once; it answers about pairs, cheaply,
 # so it reads a sample and ranks it.
 JEV_POOL = 3000       # unrelated pairs Jev is asked about
-JEV_TOP = 10          # a question's best-scored pairs in the pool, which it's counted as proposing
+TOP = 10              # a ranking's best pairs (a Jev question's, the facets'), which it's counted as proposing
 JEV_DEPTH = 100       # how far down each question's ranking the set draws, in turn
 JEV_WORKERS = 8
 JEV_SAVE = 100        # answers between saves of jev-pool.json
@@ -264,7 +264,7 @@ def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path,
 
 def _jev_proposals(answers: dict[str, dict]) -> tuple[list[dict], dict[str, set]]:
     """Each question ranks the pool, and the set draws from their rankings in turn, so every question proposes some;
-    and each question's top JEV_TOP, as `jev:<question>`, to say which questions proposed a pair. Ties go by pair, so
+    and each question's top TOP, as `jev:<question>`, to say which questions proposed a pair. Ties go by pair, so
     the order the answers came back in can't change the sheet."""
     names = sorted(k for k in next(iter(answers.values()), {}) if k not in AXES)
     ranked = {k: sorted(answers, key=lambda pair: (-answers[pair][k], pair)) for k in names}
@@ -275,7 +275,7 @@ def _jev_proposals(answers: dict[str, dict]) -> tuple[list[dict], dict[str, set]
             if pair not in seen:
                 seen.add(pair)
                 out.append({"ideas": pair.split(), "why": f"Jev {k} {answers[pair][k]}"})
-    return out, {f"jev:{k}": {tuple(pair.split()) for pair in ranked[k][:JEV_TOP]} for k in names}
+    return out, {f"jev:{k}": {tuple(pair.split()) for pair in ranked[k][:TOP]} for k in names}
 
 
 def _limited(pairs: list[dict], n: int, taken: set) -> list[dict]:
@@ -321,13 +321,15 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
         if wanted("facets"):
             proposed["facets"] = _facet_pairs(embedder, facets(conn, client, mine, folder, monthly_cap_usd, scrubber),
                                               far)
+            tops["facets"] = {tuple(p["ideas"]) for p in proposed["facets"][:TOP]}
         if wanted("jev"):
             if jev is None:
                 raise SystemExit("the jev set needs Jev (OPENROUTER_API_KEY)")
             sample = [p for p in apart if tuple(p["ideas"]) not in (exclude or set())]
             answers = jev_pool(conn, jev, scrubber, rng.sample(sample, min(pool_size, len(sample))), folder,
                                monthly_cap_usd)
-            proposed["jev"], tops = _jev_proposals(answers)
+            proposed["jev"], by_question = _jev_proposals(answers)
+            tops |= by_question
         if wanted("random"):
             proposed["random"] = rng.sample(apart, min(len(apart), 20 * sizes["random"]))
     else:
@@ -340,7 +342,7 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
     for kind, n in sizes.items():
         picked += [p | {"set": kind} for p in _limited(proposed[kind], n, taken)]
     lists = {kind: {tuple(p["ideas"]) for p in ps} for kind, ps in proposed.items()
-             if kind not in ("random", "near", "jev")} | tops   # jev: which question proposed it
+             if kind not in ("random", "near", "jev", "facets")} | tops   # ranked ways: only their top TOP
     for p in picked:   # which ways of looking proposed it, beyond the set it was drawn for
         p["proposed_by"] = sorted(k for k, s in lists.items() if tuple(p["ideas"]) in s)
     rng.shuffle(picked)
@@ -462,10 +464,12 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
     from im import jev
 
     question = key["benchmark"]
-    out_path = folder / (f"draft-{client.model}{'-' + jev.QUESTION_SETS[question] if question in jev.QUESTION_SETS else ''}{'-' + jev.PROBE_SET[question] if probes and question in jev.PROBE_SET else ''}"
+    asked = "".join(["-" + jev.QUESTION_SETS[question] if question in jev.QUESTION_SETS else "",
+                     "-" + jev.PROBE_SET[question] if probes and question in jev.PROBE_SET else ""])
+    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+    out_path = folder / (f"draft-{client.model}{asked}{edge_audit.policy_tag(policy)}"
                          f"{'-quotes' if quotes_only else ''}.json")
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
-    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     cost, failed, stopped = 0.0, [], None
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         if num in got:
@@ -491,8 +495,9 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
 
 def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=None, quotes_only: bool = False,
           probes: bool = False, monthly_cap_usd: float = 20.0) -> dict:
-    """A model answers the sheet's question for every pair, blind to my marks, into draft-<model>-<effort>.json, as
-    it goes. Every request goes to the egress log; with a scrubber (policy C), names said are pseudonymized first.
+    """A model answers the sheet's question for every pair, blind to my marks, into
+    draft-<model>-<effort>[-<policy>].json (edge_audit.policy_tag), as it goes. Every request goes to the egress log;
+    with a scrubber (policy C), names said are pseudonymized first.
     A pair whose answer fails is logged and skipped, so a rerun asks again; the cap stops the draft.
     `quotes_only` leaves out Claude's summaries (into ...-quotes.json): a summary that says more than the quotes
     can manufacture the very relation asked about."""
@@ -503,13 +508,14 @@ def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=
         return _draft_jev(conn, client, folder, key, scrubber, quotes_only, probes, monthly_cap_usd)
     question = key["benchmark"]
     shown = edge_audit._pairs_as_shown((folder / "sheet.md").read_text())
-    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}{'-quotes' if quotes_only else ''}.json"
+    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+    out_path = folder / (f"draft-{model.replace('/', '_')}-{effort}{edge_audit.policy_tag(policy)}"
+                         f"{'-quotes' if quotes_only else ''}.json")
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     system = DRAFT_SYSTEM[question].replace(*QUOTES_ONLY) if quotes_only else DRAFT_SYSTEM[question]
     if quotes_only:
         shown = {n: SUMMARY_LINE.sub(lambda m: m.group(1) + ("(nothing said on record)" if m.group(1).strip() else ""),
                                      t) for n, t in shown.items()}
-    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     cost, failed, stopped = 0.0, [], None
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         if num in got or num not in shown:
@@ -599,17 +605,18 @@ def at_cuts(mine: dict, theirs: dict) -> dict:
 
 
 def marks(text: str) -> dict:
-    """Pair number -> {"mark", "note"}, or {"unreadable"} for a mark that isn't yes, no or unsure."""
-    out, n = {}, None
-    for line in text.splitlines():
-        line = line.strip()
-        if m := re.match(r"##\s+(\d+)\s*$", line):
-            n = m.group(1)
-        elif n and (m := re.match(r"mark:\s*`?([a-z?]+)`?", line, re.I)):
-            mark = MARKS.get(m.group(1).lower())
-            out.setdefault(n, {})["mark" if mark else "unreadable"] = mark or line.split(":", 1)[1].strip()
-        elif n and (m := re.match(r"note:\s*(.+)$", line, re.I)):
-            out.setdefault(n, {})["note"] = m.group(1).strip()
+    """Pair number -> {"mark", "note"}, or {"unreadable"} for a mark that isn't yes, no or unsure. A note runs to the
+    next pair (edge_audit.read_sheet)."""
+    out = {}
+    for n, (_, mark, note) in edge_audit.read_sheet(text).items():
+        got = {}
+        if mark and (m := re.match(r"`?([a-z?]+)`?", mark, re.I)):
+            word = MARKS.get(m.group(1).lower())
+            got["mark" if word else "unreadable"] = word or mark
+        if note:
+            got["note"] = note
+        if got:
+            out[n] = got
     return out
 
 

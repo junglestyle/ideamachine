@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from im import egress, jev, llm, probe_audit
+from im import egress, jev, llm, names, probe_audit
 
 from test_edge_audit import lattice_with_clusters  # noqa: F401 (fixture)
 from test_lattice import seeded  # noqa: F401 (fixture)
@@ -109,6 +109,16 @@ def test_an_analogy_sheet_draws_unrelated_pairs_blind_and_scores_each_way(lattic
         assert (c["pairs"], c["held"]) == (len(theirs), sum(p["set"] != "random" for p in theirs))
 
 
+def test_the_facets_are_credited_only_with_the_pairs_they_rank_highest(lattice_with_clusters, tmp_path,  # noqa: F811
+                                                                       monkeypatch):
+    # Nearly every unrelated pair is somewhere in the facets' ranking, so crediting all of it said nothing.
+    monkeypatch.setattr(probe_audit, "TOP", 2)
+    client, (jev_client, _) = FakeProposer(), fake_jev()
+    probe_audit.write(lattice_with_clusters, client, HashEmbedder(), "analogy", tmp_path, jev=jev_client)
+    pairs = json.loads((tmp_path / "key.json").read_text())["pairs"].values()
+    assert 0 < sum("facets" in p["proposed_by"] for p in pairs) <= 2
+
+
 def every_pair(conn):
     ids = sorted(r[0] for r in probe_audit.edge_audit._clusters(conn) if r[2])
     return [{"ideas": [a, b]} for a, b in itertools.combinations(ids, 2)]
@@ -199,15 +209,15 @@ def test_tied_scores_propose_the_same_pairs_whatever_order_the_answers_came_back
 
 def test_a_tension_sheet_scores_yes_no_and_says_when_a_mark_isnt_one(lattice_with_clusters, tmp_path):  # noqa: F811
     out = probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", tmp_path)
-    assert out["pairs"] > 0 and "Do A and B pull against each other" in (tmp_path / "sheet.md").read_text()
+    assert out["pairs"] > 0
     fill(tmp_path, lambda p: "maybe")
     r = probe_audit.score(tmp_path)
     assert r["marked"] == 0 and [u["mark"] for u in r["unreadable"]] == ["maybe"] * out["pairs"]
 
 
-def test_marks_are_one_word():
-    got = probe_audit.marks("## 1\nmark: y\nnote: same move\n## 2\nmark: ?\n## 3\nmark: \n")
-    assert got == {"1": {"mark": "yes", "note": "same move"}, "2": {"mark": "unsure"}}
+def test_marks_are_one_word_and_a_note_runs_to_the_next_pair():
+    got = probe_audit.marks("## 1\nmark: y\nnote: same move,\n  in two trades\n\n## 2\nmark: ?\n## 3\nmark: \n")
+    assert got == {"1": {"mark": "yes", "note": "same move,\nin two trades"}, "2": {"mark": "unsure"}}
 
 
 def test_a_model_answers_the_sheet_blind_and_is_scored_against_me(lattice_with_clusters, tmp_path):  # noqa: F811
@@ -217,13 +227,17 @@ def test_a_model_answers_the_sheet_blind_and_is_scored_against_me(lattice_with_c
     d = probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-opus-5-5")
     assert d["pairs"] == out["pairs"] == len(model.calls)
     sent = "\n".join(c["messages"][0]["content"] for c in model.calls)
-    assert "mark:" not in sent and "Do they pull against each other" in model.calls[0]["system"]
+    assert "mark:" not in sent and model.calls[0]["system"] == probe_audit.DRAFT_SYSTEM["tension"]
     assert probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-opus-5-5")["pairs"] == out["pairs"]
     assert len(model.calls) == out["pairs"]   # a rerun asks nothing it has already answered
-    r = probe_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low"]
+    r = probe_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low-B1"]
     mine_yes = sum(1 for p in json.loads((tmp_path / "key.json").read_text())["pairs"].values() if p["set"] == "model")
     assert r["recall"] == (1.0 if mine_yes else None) and r["pairs"] == out["pairs"]
     assert r["precision"] == (round(mine_yes / out["pairs"], 3) if out["pairs"] else None)
+    # Under policy C it's another draft: policy B's answers don't stand in for it, nor are they scored as C's.
+    c = probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-opus-5-5", scrubber=names.Scrubber(b"k"))
+    assert c["pairs"] == out["pairs"] and len(model.calls) == 2 * out["pairs"] and c["policy"].startswith("C")
+    assert set(probe_audit.score(tmp_path)["drafts"]) == {"claude-opus-5-5-low-B1", "claude-opus-5-5-low"}
 
 
 def test_agreement_counts_only_pairs_both_answered():
@@ -239,7 +253,7 @@ def test_a_sheet_from_one_set_leaves_out_pairs_already_asked(lattice_with_cluste
     probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", first)
     out = probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", second, only="model", size=5,
                             exclude_folders=[first])
-    asked = probe_audit.earlier([first])
+    asked = {tuple(p["ideas"]) for p in json.loads((first / "key.json").read_text())["pairs"].values()}
     pairs = json.loads((second / "key.json").read_text())["pairs"].values()
     assert out["by_set"] == {"model": len(pairs)} and all(p["set"] == "model" for p in pairs)
     assert not {tuple(p["ideas"]) for p in pairs} & asked
@@ -249,7 +263,7 @@ def test_a_quotes_only_draft_never_shows_the_summaries(lattice_with_clusters, tm
     probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", tmp_path)
     model = FakeProposer()
     d = probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-sonnet-5-5", quotes_only=True)
-    assert d["draft"].endswith("-low-quotes.json") and model.calls
+    assert d["draft"].endswith("-low-B1-quotes.json") and model.calls
     assert not any("Claude's summary" in c["messages"][0]["content"] for c in model.calls)
     assert "then a summary" not in model.calls[0]["system"]
     assert any("> \"" in c["messages"][0]["content"] for c in model.calls)   # quotes still go, where there are any
@@ -265,7 +279,9 @@ def test_new_and_known_both_hold_and_only_new_counts_as_novel(lattice_with_clust
     total = {k: sum(c.get(k, 0) for c in r["by_set"].values()) for k in ("new", "known", "no")}
     assert total == {k: sum(m == k for m in marks.values()) for k in ("new", "known", "no")}
     assert {y["mark"] for y in r["yes"]} <= {"new", "known"} and len(r["yes"]) == total["new"] + total["known"]
-    assert "Judge whether it's worth seeing" in (tmp_path / "sheet.md").read_text()
+    for s, c in r["by_set"].items():   # known holds, but only new was new to me
+        mine = [marks[n] for n, q in key.items() if q["set"] == s]
+        assert c["novel_rate"] == (round(mine.count("new") / len(mine), 3) if mine else None)
 
 
 def test_a_filter_that_drops_what_was_new_to_me_says_so():
