@@ -411,6 +411,32 @@ def cmd_audit_probe(args) -> None:
                                  args.pool or probe_audit.JEV_POOL, cfg.extract.monthly_cap_usd))
 
 
+def cmd_audit_misses(args) -> None:
+    """A blind sheet of the reference's solid captures, missed or found by a cheaper model in a trial; my marks scored."""
+    from pathlib import Path
+
+    from im import egress, extract, miss_audit, names, probe_audit, trial
+
+    folder = Path(args.folder)
+    if args.action == "score":
+        _print(probe_audit.score(folder))
+        return
+    if not args.prompt or not args.model:
+        raise SystemExit("sheet needs the trial's prompt and candidate, e.g. v3 --model openai/gpt-6.1-terra")
+    cfg = config.load()
+    x = cfg.extract
+    system = extract.system_prompt(args.prompt, x.interests)
+    effort = args.effort or x.effort
+    ref_model, _, ref_effort = (args.against or f"{x.model}:{x.effort}").partition(":")
+    ref_effort = ref_effort or x.effort
+    policy = names.policy_c() if args.policy == "C" else egress.POLICY_VERSION
+    with db.connect(db.pipeline_dsn()) as conn:
+        _print(miss_audit.write(conn, folder, (trial.version(args.model, effort, system), args.model),
+                                (trial.version(ref_model, ref_effort, system), ref_model),
+                                (trial.version(ref_model, ref_effort, system, 2), ref_model), policy,
+                                args.seed, args.size))
+
+
 def cmd_analogy_spike(args) -> None:
     """Rank each `analogy:` pair's partner by structure and by topic (sends to Claude; writes into the folder)."""
     from pathlib import Path
@@ -752,6 +778,19 @@ def main(argv=None) -> None:
         pa.add_argument("--size", type=int, help="sheet, with --only: how many pairs (default 30)")
         pa.add_argument("--exclude", nargs="*", default=[], help="sheet: leave out pairs on these earlier sheets")
         pa.set_defaults(func=cmd_audit_probe, question=question)
+    am = sub.add_parser("audit-misses", help="a blind sheet of the reference's solid captures in a trial, missed or "
+                        "found by a cheaper model: are the misses worth having? (sends nothing); score my marks")
+    am.add_argument("action", choices=["sheet", "score"])
+    am.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
+    am.add_argument("prompt", nargs="?", help="sheet: the trial's prompt, a name in extract.PROMPTS, e.g. v3")
+    am.add_argument("--model", help="sheet: the candidate, as its trial named it, e.g. openai/gpt-6.1-terra")
+    am.add_argument("--effort", help="sheet: the candidate's effort in its trial (default: the configured one)")
+    am.add_argument("--against", help="sheet: the reference, model[:effort], read twice (--replicate 2) "
+                    "(default: the configured model and effort)")
+    am.add_argument("--policy", choices=["B", "C"], default="C", help="sheet: the trials' policy (default C)")
+    am.add_argument("--seed", type=int, default=13, help="sheet: the sample and shuffle's seed")
+    am.add_argument("--size", type=int, help="sheet: how many misses (default: all), beside as many found")
+    am.set_defaults(func=cmd_audit_misses)
     sp = sub.add_parser("analogy-spike", help="can structure find my analogy pairs where topic can't? (sends to Claude)")
     sp.add_argument("folder", help="a marked B4 sheet's folder, e.g. /saved/b4-1")
     sp.add_argument("--others", type=int, default=300, help="other clusters to rank the partners among")
