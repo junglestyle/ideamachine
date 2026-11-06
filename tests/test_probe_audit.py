@@ -152,6 +152,42 @@ def test_a_pool_stopped_by_anything_sends_nothing_more_and_keeps_only_what_it_lo
     assert len(kept) == logged == 2
 
 
+class CutsOff(FakeProposer):
+    """FakeProposer, its every answer cut off mid-JSON."""
+
+    def create(self, **kw):
+        r = super().create(**kw)
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"pairs": [{"a"')], stop_reason="max_tokens",
+                               model=kw["model"], _request_id="r", usage=r.usage)
+
+
+@pytest.mark.parametrize("question, only", [("tension", "model"), ("analogy", "facets")])
+def test_a_proposer_that_fails_writes_no_sheet_and_a_rerun_asks_again(lattice_with_clusters, tmp_path, question,  # noqa: F811
+                                                                      only):
+    embedder = HashEmbedder() if question == "analogy" else None
+    with pytest.raises(SystemExit):
+        probe_audit.write(lattice_with_clusters, CutsOff(), embedder, question, tmp_path, only=only)
+    assert not (tmp_path / "sheet.md").exists()
+    assert probe_audit.write(lattice_with_clusters, FakeProposer(), embedder, question, tmp_path, only=only)["pairs"]
+
+
+def test_a_pool_answer_that_cant_be_read_stops_the_sheet_and_is_asked_again(lattice_with_clusters, tmp_path):  # noqa: F811
+    pairs = every_pair(lattice_with_clusters)
+    good, _ = fake_jev()
+    count = itertools.count(1)
+
+    def post(body):   # the second answer comes back without any
+        n = next(count)   # atomic: the pool asks from several threads
+        return {"model": "jev-1.14.0", "usage": {"input_tokens": 1000}} if n == 2 else good.post(body)
+    with pytest.raises(SystemExit):
+        probe_audit.jev_pool(lattice_with_clusters, jev.Jev(post=post), None, pairs, tmp_path)
+    assert len(json.loads((tmp_path / "jev-pool.json").read_text())) == len(pairs) - 1
+    again, resent = fake_jev()
+    assert len(probe_audit.jev_pool(lattice_with_clusters, again, None, pairs, tmp_path)) == len(pairs)
+    assert len(resent) == 1
+
+
+
 def test_tied_scores_propose_the_same_pairs_whatever_order_the_answers_came_back_in():
     answers = {f"{a} {b}": {"same_move": 0.5, "same_form": 0.5 if a < "m" else 0.4}
                for a, b in [("a", "z"), ("q", "r"), ("c", "d"), ("x", "y")]}

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from im import jev, llm
+from im import egress, jev, llm
 
 SCHEMA = {"type": "object", "properties": {"items": {"type": "array"}}, "required": ["items"]}
 
@@ -89,7 +89,8 @@ def test_a_dated_model_id_is_priced_as_its_model_and_an_unknown_one_never_as_fre
     assert llm.cost("claude-mystery-9", usage) == max(p[0] for p in llm.PRICES.values())
 
 
-@pytest.mark.parametrize("code, raised", [(429, llm.Unavailable), (503, llm.Unavailable), (400, RuntimeError)])
+@pytest.mark.parametrize("code, raised", [(429, llm.Unavailable), (503, llm.Unavailable), (402, llm.Stop),
+                                          (400, RuntimeError)])
 def test_a_rate_limit_or_server_error_is_worth_retrying_and_other_http_errors_arent(monkeypatch, code, raised):
     def fail(req, timeout):
         raise urllib.error.HTTPError(req.full_url, code, "no", {}, io.BytesIO(b"detail"))
@@ -98,3 +99,17 @@ def test_a_rate_limit_or_server_error_is_worth_retrying_and_other_http_errors_ar
         llm.complete(llm.OpenRouter(key="k"), "z-ai/glm-5.3", "low", "s", SCHEMA, "t")
     with pytest.raises(raised):
         jev.Jev(key="k", route="typesafe").complete({"questions": {}})
+
+
+@pytest.mark.parametrize("second, stops", [({"error": {"code": 503, "message": "down"}}, True),
+                                           ({"error": {"code": 400, "message": "bad"}}, False),
+                                           ({"id": "no choices"}, False)])
+def test_a_retry_that_fails_still_logs_and_counts_what_the_first_attempt_cost(pipe, second, stops):
+    client, sent = router(answer("Sure! Here you go", cost=0.003), second)
+    try:
+        a = egress.ask(pipe, client, "z-ai/glm-5.3", "low", "s", SCHEMA, "t", segment_ids=[], prompt_version="v",
+                       monthly_cap_usd=1)
+        assert not stops and a.failed and a.cost_usd == 0.003
+    except llm.Unavailable:
+        assert stops
+    assert len(sent) == 2 and egress.spent_this_month(pipe) == pytest.approx(0.003)

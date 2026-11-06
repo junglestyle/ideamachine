@@ -126,10 +126,13 @@ def _summary(conn, idea_id: str) -> str:
 def _ask(conn, client, model: str, effort: str, system: str, schema: dict, text: str, ideas: list[str],
          monthly_cap_usd: float) -> dict | None:
     """One request, logged in the egress log with the segments of the clusters it shows: its answer, or None when
-    it was refused or failed (logged, and asked again by a rerun)."""
-    return egress.ask(conn, client, model, effort, system, schema, text, segment_ids=egress.segments_of(conn, ideas),
-                      prompt_version=themes.version(system, schema, model, effort),
-                      monthly_cap_usd=monthly_cap_usd).data
+    it was refused. A request that failed stops the sheet before it's written, so a rerun can ask again rather than
+    find a smaller sheet in the folder."""
+    a = egress.ask(conn, client, model, effort, system, schema, text, segment_ids=egress.segments_of(conn, ideas),
+                   prompt_version=themes.version(system, schema, model, effort), monthly_cap_usd=monthly_cap_usd)
+    if a.failed:
+        raise SystemExit(f"{model} failed ({a.error}); no sheet written, run it again")
+    return a.data
 
 
 def facets(conn, client, ids: list[str], folder: Path, monthly_cap_usd: float = 20.0) -> dict[str, list[str]]:
@@ -200,9 +203,10 @@ def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path,
              monthly_cap_usd: float = 20.0) -> dict[str, dict]:
     """Jev's answer to every analogy question about each pair, "a b" -> {question: p}, JEV_WORKERS requests at a
     time, each logged by its worker as it's answered. Kept in jev-pool.json as they come, so a rerun picks up where
-    one stopped; a pair whose answer can't be read is asked again then. Anything that stops it (the cap, a request
-    Jev can't answer now, Ctrl-C, the database) sends nothing more: the queue is dropped, and the answers to requests
-    already in flight are kept like the rest. Only a logged answer is kept."""
+    one stopped. Anything that stops it (the cap, a request Jev can't answer now, Ctrl-C, the database) sends nothing
+    more: the queue is dropped, and the answers to requests already in flight are kept like the rest. Only a logged
+    answer is kept. An answer that can't be read stops the sheet once the pool is done, so a rerun asks those pairs
+    again rather than drawing from a smaller pool."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     path = folder / "jev-pool.json"
@@ -214,11 +218,13 @@ def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path,
     for p in todo:
         state = {"a": sides[p["ideas"][0]], "b": sides[p["ideas"][1]]}
         states.append((p, _scrubbed(state, scrubber)[0] if scrubber else state))
-    kept = set()
+    kept, failed = set(), []
 
     def keep(f):
         a = f.result()
-        if a.data is not None:
+        if a.failed:
+            failed.append(a.error)
+        else:
             got[" ".join(futures[f]["ideas"])] = {k: round(v, 3) for k, v in a.data.items()}
         kept.add(f)
 
@@ -239,6 +245,9 @@ def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path,
         finally:
             workers.shutdown(wait=True)
             path.write_text(json.dumps(got))
+    if failed:
+        raise SystemExit(f"{len(failed)} of Jev's answers couldn't be read (first: {failed[0]}); no sheet written, "
+                         "run it again to ask those pairs")
     return got
 
 

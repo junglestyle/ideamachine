@@ -37,6 +37,11 @@ def _later(status: int | None) -> bool:
     return status is not None and (status == 429 or status >= 500)
 
 
+def _account(status: int | None) -> bool:
+    """An HTTP status every request would get alike: the key rejected, not allowed, or out of credit."""
+    return status in (401, 402, 403)
+
+
 @dataclass(frozen=True)
 class Reply:
     text: str | None              # the JSON answer; None when refused, or when no answer was written
@@ -81,7 +86,9 @@ def client_for(model: str):
 
 def complete(client, model: str, effort: str, system: str, schema: dict, text: str, max_tokens: int = 16000) -> Reply:
     """Ask once. Opus falls back to FALLBACK_MODEL on a refusal; other models don't, so their refusal counts as one.
-    Raises Unavailable when it's worth retrying later, and Stop when the credentials are rejected."""
+    Raises Unavailable when it's worth retrying later, and Stop when no request would get through (the credentials,
+    the account's credit, a model id that doesn't exist). An exception raised after an earlier attempt was paid for
+    carries that cost as `cost_usd`, for the egress log."""
     if via_openrouter(model):
         return client.complete(model, effort, system, schema, text, max_tokens)
     import anthropic
@@ -91,13 +98,16 @@ def complete(client, model: str, effort: str, system: str, schema: dict, text: s
         r = client.beta.messages.create(
             model=model, max_tokens=max_tokens, system=system, messages=[{"role": "user", "content": text}],
             output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}}, **fallback)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        raise Stop(f"Claude credentials rejected: {e}") from e
     except anthropic.APIConnectionError as e:
         raise Unavailable(f"{type(e).__name__}: {e}") from e
+    except anthropic.NotFoundError as e:
+        raise Stop(f"Claude has no model {model}: {e}") from e
     except anthropic.APIStatusError as e:
         if _later(e.status_code):
             raise Unavailable(f"{type(e).__name__}: {e}") from e
+        kind = ((e.body if isinstance(e.body, dict) else {}).get("error") or {}).get("type")
+        if _account(e.status_code) or kind == "billing_error":
+            raise Stop(f"Claude credentials or billing rejected: {e}") from e
         raise
     served = getattr(r, "model", model) or model
     answer = None if r.stop_reason == "refusal" else next((b.text for b in r.content if b.type == "text"), None)
@@ -106,8 +116,8 @@ def complete(client, model: str, effort: str, system: str, schema: dict, text: s
 
 
 def post_json(url: str, key: str, body: dict, what: str, timeout: int, headers: dict | None = None) -> dict:
-    """POST a JSON body and read the JSON answer. A rate limit, a server error or no connection is Unavailable;
-    any other HTTP error is a RuntimeError."""
+    """POST a JSON body and read the JSON answer. A rate limit, a server error or no connection is Unavailable; a
+    rejected key or no credit is Stop; any other HTTP error is a RuntimeError."""
     req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={
         "Authorization": f"Bearer {key}", "Content-Type": "application/json", **(headers or {})})
     try:
@@ -117,6 +127,8 @@ def post_json(url: str, key: str, body: dict, what: str, timeout: int, headers: 
         detail = e.read().decode(errors="replace")[:300]
         if _later(e.code):
             raise Unavailable(f"{what}, HTTP {e.code}: {detail}") from None
+        if _account(e.code):
+            raise Stop(f"{what}, HTTP {e.code}: {detail}") from None
         raise RuntimeError(f"{what}, HTTP {e.code}: {detail}") from None
     except (urllib.error.URLError, TimeoutError) as e:
         raise Unavailable(f"{what}: {e}") from None
@@ -168,18 +180,22 @@ class OpenRouter:
                                        "json_schema": {"name": "answer", "strict": True, "schema": schema}}
         spent, tokens_in, tokens_out = 0.0, 0, 0
         for attempt in (1, 2):
-            r = self.post(body)
-            if "error" in r and "choices" not in r:
-                code = r["error"].get("code")
-                msg = f"OpenRouter error {code}: {str(r['error'].get('message'))[:300]}"
-                if isinstance(code, int) and _later(code):
-                    raise Unavailable(msg)
-                raise RuntimeError(msg)
-            usage = r.get("usage") or {}
-            spent += usage.get("cost") or 0.0
-            tokens_in += usage.get("prompt_tokens") or 0
-            tokens_out += usage.get("completion_tokens") or 0
-            choice = r["choices"][0]
+            try:
+                r = self.post(body)
+                if "error" in r and "choices" not in r:
+                    code = r["error"].get("code")
+                    msg = f"OpenRouter error {code}: {str(r['error'].get('message'))[:300]}"
+                    if isinstance(code, int) and _later(code):
+                        raise Unavailable(msg)
+                    raise (Stop if isinstance(code, int) and _account(code) else RuntimeError)(msg)
+                usage = r.get("usage") or {}
+                spent += usage.get("cost") or 0.0
+                tokens_in += usage.get("prompt_tokens") or 0
+                tokens_out += usage.get("completion_tokens") or 0
+                choice = r["choices"][0]
+            except Exception as e:   # the attempts before this one were paid for all the same
+                e.cost_usd = round(spent, 6)
+                raise
             stop = FINISH.get(choice.get("finish_reason"), choice.get("finish_reason") or "end_turn")
             answer = _unfenced((choice.get("message") or {}).get("content"))
             if stop == "refusal" or (choice.get("message") or {}).get("refusal"):

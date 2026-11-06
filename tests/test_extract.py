@@ -336,3 +336,19 @@ def test_a_model_with_no_known_price_is_never_sent_to(pipe, cfg, stream):
     stats = extract.run_stage(pipe, claude, model="claude-opus-9")
     assert stats["stopped"] and stats["read"] == 0 and claude.calls == []
     assert table(pipe, "SELECT count(*) FROM im.egress_log") == [(0,)]
+
+
+def status_error(cls, code, body=None):
+    return cls("rejected", body=body, response=httpx2.Response(code, request=httpx2.Request("POST", "https://x")))
+
+
+@pytest.mark.parametrize("error", [
+    status_error(anthropic.NotFoundError, 404),   # a retired model id
+    status_error(anthropic.APIStatusError, 402, {"type": "error", "error": {"type": "billing_error"}}),
+    status_error(anthropic.AuthenticationError, 401)])
+def test_an_error_every_request_would_get_stops_extraction_after_the_first(pipe, cfg, stream, error):
+    run(pipe, cfg, stream)
+    claude = FakeClaude(error=error)
+    stats = extract.run_stage(pipe, claude)
+    assert len(claude.calls) == 1 and stats["stopped"] and stats["failed"] == 0
+    assert table(pipe, "SELECT count(*), count(error) FROM im.egress_log") == [(1, 1)]   # it went, so it's logged

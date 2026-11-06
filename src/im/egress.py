@@ -114,6 +114,7 @@ class Answer:
     reply: llm.Reply | None     # None when the request itself failed
     data: object
     error: str | None
+    cost_usd: float             # as logged: the reply's, or what a failed request's earlier attempts cost
 
     @property
     def refused(self) -> bool:
@@ -123,13 +124,9 @@ class Answer:
     def failed(self) -> bool:
         return self.error is not None
 
-    @property
-    def cost_usd(self) -> float:
-        return (self.reply.cost_usd if self.reply else None) or 0.0
-
 
 def _log(conn, model: str, payload: str, segment_ids, prompt_version: str, policy: str, episode_id,
-         reply: llm.Reply | None = None, error: str | None = None) -> int:
+         reply: llm.Reply | None = None, error: str | None = None, cost_usd: float = 0.0) -> int:
     r = reply
     return conn.execute(
         """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version, payload,
@@ -137,39 +134,41 @@ def _log(conn, model: str, payload: str, segment_ids, prompt_version: str, polic
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING egress_id""",
         (episode_id, list(segment_ids), model, prompt_version, policy, payload,
          hashlib.sha256(payload.encode()).hexdigest(), r and r.request_id, r and r.stop_reason, r and r.served_by,
-         r and r.input_tokens, r and r.output_tokens, r.cost_usd if r else 0, error)).fetchone()[0]
+         r and r.input_tokens, r and r.output_tokens, r.cost_usd if r else cost_usd, error)).fetchone()[0]
 
 
 def send(conn, request: Callable[[], llm.Reply], *, model: str, payload: str, segment_ids, prompt_version: str,
          monthly_cap_usd: float, policy: str = POLICY_VERSION, episode_id=None,
          read: Callable[[dict], object] = lambda answer: answer) -> Answer:
     """The one way a paid request goes out: under the monthly cap, then `request()`, then the log row (its cost from
-    the reply's usage; 0 for an error with none, which is logged all the same, since the payload went), and only
-    then the answer read, by `read` from its JSON.
+    the reply's usage; for an error, what attempts before it were charged, if any, and otherwise 0: it's logged all
+    the same, since the payload went), and only then the answer read, by `read` from its JSON.
 
     Raises llm.Stop, sending nothing, when the cap is reached; and, after logging it, when the provider can't answer
-    now or rejects the credentials. Anything else that goes wrong once it's sent (an error response, no answer, one
-    cut off or not in the schema's shape) comes back as a failed Answer, so the caller skips that item and goes on."""
+    now or no request would get through (credentials, credit, no such model). Anything else that goes wrong once
+    it's sent (an error response, no answer, one cut off or not in the schema's shape) comes back as a failed
+    Answer, so the caller skips that item and goes on."""
     if spent_this_month(conn) >= monthly_cap_usd:
         raise llm.Stop(f"monthly cap of ${monthly_cap_usd:.2f} reached")
     where = (model, payload, segment_ids, prompt_version, policy, episode_id)
     try:
         reply = request()
     except llm.Stop as e:
-        _log(conn, *where, error=str(e)[:500])
+        _log(conn, *where, error=str(e)[:500], cost_usd=getattr(e, "cost_usd", 0.0))
         raise
     except Exception as e:   # an error response: the payload went, but no answer came back
-        error = f"{type(e).__name__}: {e}"[:500]
-        return Answer(_log(conn, *where, error=error), None, None, error)
+        error, paid = f"{type(e).__name__}: {e}"[:500], getattr(e, "cost_usd", 0.0)
+        return Answer(_log(conn, *where, error=error, cost_usd=paid), None, None, error, paid)
     egress_id = _log(conn, *where, reply=reply)
+    paid = reply.cost_usd or 0.0
     if reply.refused:
-        return Answer(egress_id, reply, None, None)
+        return Answer(egress_id, reply, None, None, paid)
     try:
-        return Answer(egress_id, reply, read(json.loads(reply.text)), None)
+        return Answer(egress_id, reply, read(json.loads(reply.text)), None, paid)
     except (TypeError, ValueError, KeyError) as e:   # no answer written, one cut off, or not in the schema's shape
         error = f"stopped: {reply.stop_reason}, " + ("no answer" if reply.text is None else f"{type(e).__name__}: {e}")
         conn.execute("UPDATE im.egress_log SET error = %s WHERE egress_id = %s", (error[:500], egress_id))
-        return Answer(egress_id, reply, None, error[:500])
+        return Answer(egress_id, reply, None, error[:500], paid)
 
 
 def ask(conn, client, model: str, effort: str, system: str, schema: dict, text: str, *, segment_ids,

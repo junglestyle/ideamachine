@@ -113,8 +113,9 @@ Then, outside that transaction:
 
 Every stage that asks a model (extraction, matching, themes, scores, sensitivity, vocab, the digest) stops, saying
 why in its stats, when the month's spend reaches `extract.monthly_cap_usd`, when the API can't answer now, or when
-the credentials are rejected; the stages after it still run. A request whose reply fails (an error response, no
-answer, one cut off or not in the schema) is logged in `im.egress_log` with what it cost, counted in the stage's
+no request would get through (the credentials or the account's credit rejected, a model id that doesn't exist); the
+stages after it still run. A request whose reply fails (an error response, no answer, one cut off or not in the
+schema) is logged in `im.egress_log` with what it cost, counted in the stage's
 `failed`, and asked again on the next run; the stage goes on to its next item. A refused filing, scoring, tagging or
 vocab-repair batch is skipped the same way and asked again, rather than recorded or stopping the batches after it; a
 refused extraction is recorded as read, with nothing captured, and a refused match makes a new idea.
