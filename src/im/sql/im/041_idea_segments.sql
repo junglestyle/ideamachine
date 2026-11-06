@@ -40,3 +40,8 @@ ALTER TABLE pub.feedback_events ADD CONSTRAINT feedback_events_item_kinds CHECK 
 ALTER TABLE pub.feedback_events DROP CONSTRAINT feedback_events_item_id_fkey;
 ALTER TABLE pub.feedback_events ADD CONSTRAINT feedback_events_item_id_fkey
   FOREIGN KEY (item_id) REFERENCES im.items(item_id) ON DELETE SET NULL;
+
+-- A classifier trained on a forgotten label goes when the label does (pipeline._purge_tombstoned). One trained on a
+-- label forgotten before now was missed: only forgetting deletes labels, so it's one trained on a label that's gone.
+DELETE FROM im.classifiers c
+WHERE NOT c.label_ids <@ coalesce((SELECT array_agg(l.label_id) FROM im.labels l), '{}');

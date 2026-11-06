@@ -304,7 +304,12 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
             if i in kept:
                 ids.append(kept[i])
                 continue
-            ids.append(_item_id(p, model, pv, i))
+            item_id = _item_id(p, model, pv, i)
+            # What would be sent can come back to an earlier read's (a tap added, then dropped), and a capture kept
+            # from that read holds the id of whatever new capture now sits at its old position: step past it.
+            while item_id in kept.values():
+                item_id = uuid.uuid5(ITEM_NS, f"{item_id}|taken")
+            ids.append(item_id)
             # said_by_segment_id: the first cited segment the speaker said, so a later rename reaches the item.
             conn.execute(
                 """INSERT INTO im.items (item_id, episode_id, kind, said_by, quote, gist, themes, confidence,

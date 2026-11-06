@@ -276,6 +276,35 @@ def test_a_re_read_in_place_keeps_the_captures_it_makes_again(seeded, cfg, strea
     assert table(seeded, "SELECT item_id FROM pub.feedback_events WHERE kind = 'item_star'") == [(starred,)]
 
 
+def _captures_of(*words):
+    """Claude's reply: a capture of each line saying one of `words`, in the order of `words`."""
+    def respond(text):
+        lines = [line[1:].split("] ", 1) for line in text.splitlines() if line.startswith("[")]
+        return [{"kind": "idea", "said_by": said.split(": ", 1)[0], "quote": said.split(": ", 1)[1],
+                 "lines": [int(n)], "gist": said, "themes": [], "confidence": 0.6}
+                for word in words for n, said in lines if word in said]
+    return respond
+
+
+def test_a_re_read_back_to_an_earlier_payload_saves_its_captures_in_any_order(seeded, cfg, stream):
+    # The tap comes and goes, so the third read sends what the first did, and Claude lists a new capture first:
+    # the position the kept LoRa capture had in the first read.
+    run(seeded, cfg, stream)
+    extract.run_stage(seeded, FakeClaude(_captures_of("LoRa")))
+    (lora,) = table(seeded, "SELECT item_id FROM im.items")[0]
+    _tap_the_lora_line(seeded, cfg, stream)
+    extract.run_stage(seeded, FakeClaude(_captures_of("LoRa")))
+    stream.conversations["c-mono"].taps.clear()
+    stream.write(stream.dir)
+    run(seeded, cfg, stream)
+    claude = FakeClaude(_captures_of("Battery", "LoRa"))
+    assert extract.run_stage(seeded, claude)["read"] == 1
+    assert table(seeded, "SELECT quote LIKE '%%LoRa%%', item_id = %s FROM im.items ORDER BY 1", lora) == \
+        [(False, False), (True, True)]
+    assert extract.run_stage(seeded, claude)["read"] == 0 and len(claude.calls) == 1   # read once, and done
+
+
+
 @pytest.mark.parametrize("lose_the_capture", ["re-read without it", "reset --stage extract"])
 def test_forgetting_reaches_an_idea_and_events_whose_capture_is_gone(seeded, cfg, stream, lose_the_capture):
     lat_setup(seeded, cfg, stream)
