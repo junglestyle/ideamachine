@@ -44,6 +44,11 @@ def key_from_env() -> bytes:
     return key.encode()
 
 
+def policy_c(gliner: bool = True) -> str:
+    """Policy C's version, as logged by a scrubber that finds names with GLiNER (or finds none)."""
+    return POLICY.format(model=NER_MODEL if gliner else "none", threshold=NER_THRESHOLD if gliner else 0)
+
+
 def token(word: str, key: bytes) -> str:
     digest = hmac.new(key, word.casefold().encode(), hashlib.sha256).digest()
     return "P-" + base64.b32encode(digest).decode()[:5]
@@ -61,8 +66,7 @@ class Scrubber:
         self.known = {w for n in known for w in words(n)}
         self.mine = [w for n in mine for w in words(n)]
         self.known |= set(self.mine)
-        self.policy = policy or POLICY.format(model=NER_MODEL if finder else "none",
-                                              threshold=NER_THRESHOLD if finder else 0)
+        self.policy = policy or policy_c(bool(finder))
 
     def find(self, conn, segments: list[tuple]) -> set[str]:
         """The names the finder sees in these (segment_id, text) pairs, through the cache when it's GLiNER's."""

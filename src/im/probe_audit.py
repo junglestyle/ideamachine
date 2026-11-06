@@ -649,7 +649,7 @@ def score(folder: Path) -> dict:
     for c in by_set.values():
         answered = sum(c[k] for k in FOUND)
         c["hit_rate"] = round(sum(c[k] for k in HOLDS) / answered, 3) if answered else None
-        if key["benchmark"] != "summary":   # a summary sheet checks correctness, not discovery
+        if key["benchmark"] in QUESTION:   # discovery sheets; a summary or misses sheet asks something else
             c["novel_rate"] = round(c["new"] / answered, 3) if answered else None
         for k in ("new", "known", "yes"):   # only the marks this sheet uses
             if not c[k]:
