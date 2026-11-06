@@ -26,7 +26,9 @@ What the pipeline keeps true, whatever the stage:
 - **Eval before trust.** An automated tier drives nothing until it beats its exit threshold on the hand-labeled set.
 - **Egress is a logged, versioned policy.** What goes to Claude is decided by `im.egress.POLICY_VERSION` (policy B:
   everyone's words, speakers pseudonymized; [decision 0004](decisions/0004-claude-extraction.md)), and every request
-  is logged with the segment IDs it carried.
+  is logged with the segment IDs it carried and what it cost. Every paid request goes one way, `im.egress.send`: it
+  checks the monthly cap, sends, and logs before reading the answer, so a reply that can't be read is still logged
+  and counted, and fails as one item. A model with no known price isn't sent to.
 
 ## Dependencies
 

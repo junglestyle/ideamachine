@@ -117,3 +117,10 @@ def test_events_from_before_the_trigger_apply_on_the_run(lat, admin):
     assert results(lat) == []
     assert themes.apply_feedback(lat) == {"unpinned": 1}
     assert table(lat, "SELECT pinned FROM im.themes WHERE theme_id = %s", theme) == [(False,)]
+
+
+def test_a_refused_filing_isnt_fits_no_theme_and_is_asked_again(lat):
+    stats = themes.file_stage(lat, FakeClaude(stop_reason="refusal"))
+    assert table(lat, "SELECT count(*) FROM im.theme_checks") == [(0,)]   # no answer isn't "fits no theme"
+    assert (stats["pending"], stats["refused"], stats["none"]) == (2, 1, 0)
+    assert themes.file_stage(lat, FakeThemer())["assigned"] == 1

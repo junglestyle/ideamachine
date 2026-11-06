@@ -9,7 +9,7 @@ someone who doesn't know me, not whether I'd keep it.
 import hashlib
 import json
 
-from im import themes
+from im import llm, themes
 
 BATCH = 25
 CRITERIA = ("generality", "novelty", "compression", "outside_value")
@@ -58,22 +58,24 @@ def _todo(conn, rv: str) -> list[tuple]:
 
 
 def score_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
-    from im.extract import spent_this_month
-
+    """Score what's new or changed, a batch at a time. A batch refused or failed is scored on a later run; the
+    batches after it go on."""
     rv = rubric_version()
     todo = _todo(conn, rv)
-    stats = {"rubric_version": rv, "pending": len(todo), "scored": 0, "stopped": None}
+    stats = {"rubric_version": rv, "pending": len(todo), "scored": 0, "refused": 0, "failed": 0, "stopped": None}
     for start in range(0, len(todo), BATCH):
-        if spent_this_month(conn) >= monthly_cap_usd:
-            stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
-            break
         batch = todo[start:start + BATCH]
         text = "Ideas:\n" + "\n".join(f"{n}. {t}: {st}" for n, (_, t, st) in enumerate(batch, 1))
-        answer, r = themes._call(client, RUBRIC_SYSTEM, RUBRIC_SCHEMA, text)
-        themes._log(conn, text, rv, [i for i, _, _ in batch], r)
-        if answer is None:
-            stats["stopped"] = "refused"
+        try:
+            a = themes.ask(conn, client, RUBRIC_SYSTEM, RUBRIC_SCHEMA, text, rv, [i for i, _, _ in batch],
+                           monthly_cap_usd)
+        except llm.Stop as e:
+            stats["stopped"] = str(e)[:200]
             break
+        if a.refused or a.failed:
+            stats["refused" if a.refused else "failed"] += 1
+            continue
+        answer = a.data
         with conn.transaction():
             for s in answer["scores"]:
                 if not 1 <= s["idea"] <= len(batch) or not all(1 <= s[c] <= 5 for c in CRITERIA):

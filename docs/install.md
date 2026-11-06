@@ -110,3 +110,11 @@ Then, outside that transaction:
 - **Route.** The router sends to review whatever I tapped or called a note to self, and any episode where Claude
   captured an item above the confidence bar; the rest is auto-filed (`src/im/router.py`; v1 used the local LLM's flags instead, see
   [decisions/0003-router-v1.md](decisions/0003-router-v1.md)).
+
+Every stage that asks a model (extraction, matching, themes, scores, sensitivity, vocab, the digest) stops, saying
+why in its stats, when the month's spend reaches `extract.monthly_cap_usd`, when the API can't answer now, or when
+the credentials are rejected; the stages after it still run. A request whose reply fails (an error response, no
+answer, one cut off or not in the schema) is logged in `im.egress_log` with what it cost, counted in the stage's
+`failed`, and asked again on the next run; the stage goes on to its next item. A refused filing, scoring, tagging or
+vocab-repair batch is skipped the same way and asked again, rather than recorded or stopping the batches after it; a
+refused extraction is recorded as read, with nothing captured, and a refused match makes a new idea.

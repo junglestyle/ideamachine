@@ -276,3 +276,63 @@ def test_pending_reports_what_would_be_resent(pipe, cfg, stream, monkeypatch, ca
     finally:
         monkeypatch.delenv("TZ")
         time.tzset()
+
+
+class FailsOn(FakeClaude):
+    """FakeClaude, except that the episode where `needle` was said comes back as `how`: a 400 (no usage), a reply
+    that spent its tokens thinking and wrote no text, or JSON cut off at max_tokens (both at 1000 in, 16000 out)."""
+
+    def __init__(self, needle, how, respond=lambda text: []):
+        super().__init__(respond)
+        self.needle, self.how = needle, how
+
+    def create(self, **kw):
+        if self.needle not in kw["messages"][0]["content"]:
+            return super().create(**kw)
+        self.calls.append(kw)
+        if self.how == "400":
+            raise anthropic.BadRequestError("prompt is too long", body=None,
+                                            response=httpx2.Response(400, request=httpx2.Request("POST", "https://x")))
+        content = [SimpleNamespace(type="thinking", thinking="hmm")] if self.how == "no text" else \
+            [SimpleNamespace(type="text", text='{"items": [{"kind": "jo')]
+        return SimpleNamespace(content=content, stop_reason="max_tokens", model="claude-opus-5-5", _request_id="req_x",
+                               usage=SimpleNamespace(input_tokens=1000, output_tokens=16000))
+
+
+@pytest.mark.parametrize("how", ["400", "no text", "cut off"])
+def test_a_reply_that_fails_is_logged_and_counted_and_the_next_episodes_are_read(pipe, cfg, stream, how):
+    run(pipe, cfg, stream)
+    claude = FailsOn("coffee", how)
+    stats = extract.run_stage(pipe, claude)
+    assert (stats["read"], stats["failed"], len(claude.calls)) == (8, 1, 9)
+    (failed,) = table(pipe, "SELECT cardinality(segment_ids), cost_usd, payload LIKE '%%coffee%%' FROM im.egress_log "
+                            "WHERE error IS NOT NULL")
+    paid = 0.0 if how == "400" else 1000 * 4.0 / 1e6 + 16000 * 20.0 / 1e6   # Opus 5.5
+    assert failed[0] > 0 and float(failed[1]) == pytest.approx(paid) and failed[2]
+    assert egress.spent_this_month(pipe) == pytest.approx(8 * (1000 * 4.0 + 200 * 20.0) / 1e6 + paid)
+    again = extract.run_stage(pipe, claude)   # only the failed episode is asked again
+    assert (again["pending"], again["failed"], len(claude.calls)) == (1, 1, 10)
+
+
+def test_im_run_goes_on_past_a_reply_that_fails_to_the_stages_after_extraction(pipe, cfg, stream, monkeypatch,
+                                                                               capsys):
+    from im import backends, cli
+    from test_triage import HashEmbedder
+
+    run(pipe, cfg, stream)
+    monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
+    monkeypatch.setattr(cli.db, "stream_dir", lambda: stream.dir)
+    monkeypatch.setattr(anthropic, "Anthropic", lambda: FailsOn("coffee", "no text"))
+    monkeypatch.setattr(backends, "SentenceEmbedder", lambda model: HashEmbedder())
+    cli.main(["run"])
+    out = json.loads(capsys.readouterr().out)
+    assert (out["extract"]["read"], out["extract"]["failed"]) == (8, 1)
+    assert "lattice" in out and "digest" in out and out["route"]["waiting_for_claude"] == 1   # the failed one waits
+
+
+def test_a_model_with_no_known_price_is_never_sent_to(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    claude = FakeClaude()
+    stats = extract.run_stage(pipe, claude, model="claude-opus-9")
+    assert stats["stopped"] and stats["read"] == 0 and claude.calls == []
+    assert table(pipe, "SELECT count(*) FROM im.egress_log") == [(0,)]

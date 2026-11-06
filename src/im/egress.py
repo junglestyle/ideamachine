@@ -9,13 +9,18 @@ Policy B (`POLICY_VERSION`):
 Policy C (decision 0008) is policy B with names said pseudonymized too (`im.names`). It's what a payload is built
 under when a `Scrubber` is passed; trials only, until every stage that sends what was said uses it.
 - Nothing from the projects registry goes out.
-- Every request is logged in im.egress_log with the segment IDs it carried.
+- Every request goes through `send` (a chat model's through `ask`): it's sent only under the monthly cap, and
+  logged in im.egress_log with the segment IDs it carried and what it cost before its answer is read, so an answer
+  that can't be read is still logged and counted, and fails as one item.
 """
 
 import hashlib
+import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from im import llm
 from im.triage import _part_of_day
 
 POLICY_VERSION = "B1;speakers-pseudonymized;spoken-names-not-scrubbed;no-registry"
@@ -86,3 +91,94 @@ def build(conn, episode_id, scrubber=None) -> Payload:
     text = f"Context: {context}\n\nTranscript:\n" + "\n".join(lines)
     return Payload(episode_id, text, [r[0] for r in rows], {v: k for k, v in alias.items()},
                    scrubber.policy if scrubber else POLICY_VERSION, names)
+
+
+def spent_this_month(conn) -> float:
+    return float(conn.execute(
+        "SELECT coalesce(sum(cost_usd), 0) FROM im.egress_log WHERE created_at >= date_trunc('month', now())"
+    ).fetchone()[0])
+
+
+def segments_of(conn, idea_ids) -> list:
+    """The segments behind these ideas' captures: what a request showing the ideas carried, for its log row."""
+    return [s for (s,) in conn.execute(
+        """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
+           WHERE ev.idea_id = ANY(%s::uuid[])""", (list(idea_ids),))]
+
+
+@dataclass(frozen=True)
+class Answer:
+    """A request that went out, as logged. `data` is its answer, read; None when it was refused or failed, and then
+    `error` says why it failed. A failed item isn't recorded as done, so it's asked again on a later run."""
+    egress_id: int
+    reply: llm.Reply | None     # None when the request itself failed
+    data: object
+    error: str | None
+
+    @property
+    def refused(self) -> bool:
+        return self.error is None and self.reply is not None and self.reply.refused
+
+    @property
+    def failed(self) -> bool:
+        return self.error is not None
+
+    @property
+    def cost_usd(self) -> float:
+        return (self.reply.cost_usd if self.reply else None) or 0.0
+
+
+def _log(conn, model: str, payload: str, segment_ids, prompt_version: str, policy: str, episode_id,
+         reply: llm.Reply | None = None, error: str | None = None) -> int:
+    r = reply
+    return conn.execute(
+        """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version, payload,
+             payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd, error)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING egress_id""",
+        (episode_id, list(segment_ids), model, prompt_version, policy, payload,
+         hashlib.sha256(payload.encode()).hexdigest(), r and r.request_id, r and r.stop_reason, r and r.served_by,
+         r and r.input_tokens, r and r.output_tokens, r.cost_usd if r else 0, error)).fetchone()[0]
+
+
+def send(conn, request: Callable[[], llm.Reply], *, model: str, payload: str, segment_ids, prompt_version: str,
+         monthly_cap_usd: float, policy: str = POLICY_VERSION, episode_id=None,
+         read: Callable[[dict], object] = lambda answer: answer) -> Answer:
+    """The one way a paid request goes out: under the monthly cap, then `request()`, then the log row (its cost from
+    the reply's usage; 0 for an error with none, which is logged all the same, since the payload went), and only
+    then the answer read, by `read` from its JSON.
+
+    Raises llm.Stop, sending nothing, when the cap is reached; and, after logging it, when the provider can't answer
+    now or rejects the credentials. Anything else that goes wrong once it's sent (an error response, no answer, one
+    cut off or not in the schema's shape) comes back as a failed Answer, so the caller skips that item and goes on."""
+    if spent_this_month(conn) >= monthly_cap_usd:
+        raise llm.Stop(f"monthly cap of ${monthly_cap_usd:.2f} reached")
+    where = (model, payload, segment_ids, prompt_version, policy, episode_id)
+    try:
+        reply = request()
+    except llm.Stop as e:
+        _log(conn, *where, error=str(e)[:500])
+        raise
+    except Exception as e:   # an error response: the payload went, but no answer came back
+        error = f"{type(e).__name__}: {e}"[:500]
+        return Answer(_log(conn, *where, error=error), None, None, error)
+    egress_id = _log(conn, *where, reply=reply)
+    if reply.refused:
+        return Answer(egress_id, reply, None, None)
+    try:
+        return Answer(egress_id, reply, read(json.loads(reply.text)), None)
+    except (TypeError, ValueError, KeyError) as e:   # no answer written, one cut off, or not in the schema's shape
+        error = f"stopped: {reply.stop_reason}, " + ("no answer" if reply.text is None else f"{type(e).__name__}: {e}")
+        conn.execute("UPDATE im.egress_log SET error = %s WHERE egress_id = %s", (error[:500], egress_id))
+        return Answer(egress_id, reply, None, error[:500])
+
+
+def ask(conn, client, model: str, effort: str, system: str, schema: dict, text: str, *, segment_ids,
+        prompt_version: str, monthly_cap_usd: float, policy: str = POLICY_VERSION, episode_id=None,
+        max_tokens: int = 16000, read: Callable[[dict], object] = lambda answer: answer) -> Answer:
+    """One request to a chat model (llm.complete), by `send`. A Claude model with no known price isn't sent: what
+    it spent couldn't be counted toward the cap."""
+    if not llm.via_openrouter(model) and llm.price(model) is None:
+        raise llm.Stop(f"no price known for {model} (llm.PRICES): nothing sent")
+    return send(conn, lambda: llm.complete(client, model, effort, system, schema, text, max_tokens), model=model,
+                payload=text, segment_ids=segment_ids, prompt_version=prompt_version,
+                monthly_cap_usd=monthly_cap_usd, policy=policy, episode_id=episode_id, read=read)

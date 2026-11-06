@@ -14,7 +14,7 @@ from pathlib import Path
 
 from wordfreq import zipf_frequency
 
-from im import themes
+from im import llm, themes
 
 RARE = 2.7               # Zipf frequency: about 1 in 2 million words. "moderation" is 3.5, "gnomon" 1.5
 MIN_LEN = 4
@@ -127,13 +127,12 @@ def _repair_todo(conn, fv: str) -> list[tuple]:
 
 
 def repair_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
-    """Ask Claude which rare words in an idea its quotes misheard, for ideas where that's possible."""
-    from im.extract import spent_this_month
-
+    """Ask Claude which rare words in an idea its quotes misheard, for ideas where that's possible. A batch refused
+    or failed isn't recorded as checked, so it's asked again on a later run; the batches after it go on."""
     fv = finder_version()
     todo = _repair_todo(conn, fv)
     ask = [r for r in todo if r[1] is not None]
-    stats = {"checked": len(todo), "asked": len(ask), "repairs": 0, "stopped": None}
+    stats = {"checked": len(todo), "asked": len(ask), "repairs": 0, "refused": 0, "failed": 0, "stopped": None}
     record = lambda rows: conn.cursor().executemany(  # noqa: E731
         """INSERT INTO im.vocab_checks (idea_id, input_hash, finder_version) VALUES (%s, %s, %s)
            ON CONFLICT (idea_id) DO UPDATE SET input_hash = excluded.input_hash,
@@ -141,24 +140,25 @@ def repair_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
     with conn.transaction():
         record([r for r in todo if r[1] is None])
     for start in range(0, len(ask), 25):
-        if spent_this_month(conn) >= monthly_cap_usd:
-            stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
-            break
         batch = ask[start:start + 25]
         text = "\n\n".join(f"Idea {n}. {t}: {s}\n" + "\n".join(f"  Quote {k}: {q}" for k, q in enumerate(qs, 1))
                            for n, (_, t, s, _, qs, _) in enumerate(batch, 1))
-        answer, r = themes._call(client, FIND_SYSTEM, FIND_SCHEMA, text)
-        themes._log(conn, text, f"vocab-repair:{fv}", [b[0] for b in batch], r)
-        if answer is None:
-            stats["stopped"] = "refused"
+        try:
+            a = themes.ask(conn, client, FIND_SYSTEM, FIND_SCHEMA, text, f"vocab-repair:{fv}", [b[0] for b in batch],
+                           monthly_cap_usd)
+        except llm.Stop as e:
+            stats["stopped"] = str(e)[:200]
             break
+        if a.refused or a.failed:
+            stats["refused" if a.refused else "failed"] += 1
+            continue
         with conn.transaction():
-            for a in answer["repairs"]:
-                if not 1 <= a["idea"] <= len(batch):
+            for x in a.data["repairs"]:
+                if not 1 <= x["idea"] <= len(batch):
                     continue
-                idea_id, title, statement, items, quotes, _ = batch[a["idea"] - 1]
-                term, heard = a["term"].strip(), a["heard_as"].strip()
-                k = a["quote"] - 1
+                idea_id, title, statement, items, quotes, _ = batch[x["idea"] - 1]
+                term, heard = x["term"].strip(), x["heard_as"].strip()
+                k = x["quote"] - 1
                 if not (0 <= k < len(quotes)) or not heard or heard.lower() not in quotes[k].lower() \
                         or term.lower() not in _words(f"{title} {statement}") or term.lower() in _words(quotes[k]) \
                         or term not in rare_words(term):
@@ -176,28 +176,30 @@ def repair_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
 
 def pick_archive(conn, client, monthly_cap_usd: float = 20.0) -> dict:
     """Have Claude pick, from the archive's rare words, the ones speech-to-text would get wrong; once per list."""
-    from im.extract import spent_this_month
-
     fv = finder_version()
     rows = archive(conn)
     words = sorted({w for w, _, _ in rows}, key=str.lower)
     h = hashlib.sha256(json.dumps([words, fv]).encode()).hexdigest()[:16]
     got = conn.execute("SELECT picked FROM im.vocab_picks WHERE words_hash = %s", (h,)).fetchone()
-    stats = {"rare": len(words), "asked": got is None, "stopped": None}
+    stats = {"rare": len(words), "asked": got is None, "failed": 0, "stopped": None}
     if got is None:
         if not words:
             got = ([],)
-        elif spent_this_month(conn) >= monthly_cap_usd:
-            stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
-            return stats
         else:
             text = "Words:\n" + "\n".join(words)
-            answer, r = themes._call(client, PICK_SYSTEM, PICK_SCHEMA, text)
-            themes._log(conn, text, f"vocab-pick:{fv}", sorted({i for _, i, _ in rows}), r)
-            if answer is None:
+            try:
+                a = themes.ask(conn, client, PICK_SYSTEM, PICK_SCHEMA, text, f"vocab-pick:{fv}",
+                               sorted({i for _, i, _ in rows}), monthly_cap_usd)
+            except llm.Stop as e:
+                stats["stopped"] = str(e)[:200]
+                return stats
+            if a.refused:
                 stats["stopped"] = "refused"
                 return stats
-            got = ([w for w in answer["words"] if w in words],)
+            if a.failed:   # nothing picked, so asked again next run
+                stats["failed"] = 1
+                return stats
+            got = ([w for w in a.data["words"] if w in words],)
             conn.execute("INSERT INTO im.vocab_picks (words_hash, picked, finder_version) VALUES (%s, %s, %s)",
                          (h, got[0], fv))
     picked = {w.lower() for w in got[0]}

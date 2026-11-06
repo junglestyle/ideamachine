@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from im import citations, egress
+from im import citations, egress, llm
 
 MATCH_K = 5                    # nearest ideas shown to Claude
 RELATED_K, RELATED_MIN = 3, 0.70   # related edges: top 3 neighbours at cosine >= 0.70. bge-small puts a typical
@@ -205,45 +205,24 @@ def carry_by_observation(conn, item_id=None) -> int:
     return len(rows)
 
 
-def _ask(client, item: tuple, candidates: list[tuple]) -> tuple[dict, str, object]:
+def _text(item: tuple, candidates: list[tuple]) -> str:
     _, _, kind, said_by, quote, gist, _, _ = item
     who = "me" if said_by == "me" else "someone else"   # no names leave the box
     lines = [f"Item ({kind}, said by {who}): “{quote}” — {gist}", "", "Candidates:"]
     lines += [f"{n}. {title}: {statement}" + (f" (my note: {note})" if note else "")
               for n, (_, title, statement, note) in enumerate(candidates, 1)]
-    text = "\n".join(lines)
-    r = client.beta.messages.create(
-        model=MATCH_MODEL, max_tokens=4000, system=MATCH_SYSTEM, messages=[{"role": "user", "content": text}],
-        output_config={"effort": MATCH_EFFORT, "format": {"type": "json_schema", "schema": MATCH_SCHEMA}},
-        betas=["server-side-fallback-2026-06-01"], fallbacks=[{"model": "claude-opus-4-8"}])
-    if r.stop_reason == "refusal":
-        return {"decision": "new", "candidate": 0, "title": "", "statement": ""}, text, r
-    return json.loads(next(b.text for b in r.content if b.type == "text")), text, r
+    return "\n".join(lines)
 
 
-def _log(conn, item: tuple, text: str, r) -> int:
-    from im.extract import _cost
-
-    served = getattr(r, "model", MATCH_MODEL) or MATCH_MODEL
-    return conn.execute(
-        """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version, payload,
-             payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING egress_id""",
-        (item[1], item[6], MATCH_MODEL, matcher_version(), egress.POLICY_VERSION, text,
-         hashlib.sha256(text.encode()).hexdigest(), getattr(r, "_request_id", None), r.stop_reason, served,
-         r.usage.input_tokens, r.usage.output_tokens, _cost(served, r.usage))).fetchone()[0]
+NEW = {"decision": "new", "candidate": 0, "title": "", "statement": ""}
 
 
 def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: int | None = None) -> dict:
-    import anthropic
-
-    from im.extract import spent_this_month
-
     version = matcher_version()
     carried = carry_by_observation(conn)
     items = _pending_items(conn)
     stats = {"matcher": version, "carried": carried, "pending": len(items), "new": 0, "same_as": 0, "evolves": 0,
-             "skipped": 0, "stopped": None}
+             "skipped": 0, "failed": 0, "stopped": None}
     if not items:   # ideas I added or corrected still need embedding, relating and placing
         stats["related_links"] = relate(conn, embedder)
         stats["positions"] = place(conn, embedder.model_version)
@@ -264,22 +243,22 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
         if carry_by_observation(conn, item_id):   # another capture of it was matched earlier in this run
             stats["carried"] += 1
             continue
-        if spent_this_month(conn) >= monthly_cap_usd:
-            stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
-            break
         v = vecs[item_id]
         order = np.argsort(-(M @ v))[:MATCH_K] if len(idea_ids) else []
         candidates = [(idea_ids[j], *info[idea_ids[j]]) for j in order]
-        egress_id = None
+        egress_id, answer = None, NEW   # the very first idea: nothing to compare with
         if candidates:
             try:
-                answer, text, r = _ask(client, item, candidates)
-            except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError) as e:
-                stats["stopped"] = f"API unavailable, will retry next run: {type(e).__name__}"
+                a = egress.ask(conn, client, MATCH_MODEL, MATCH_EFFORT, MATCH_SYSTEM, MATCH_SCHEMA,
+                               _text(item, candidates), segment_ids=item[6], prompt_version=version,
+                               monthly_cap_usd=monthly_cap_usd, episode_id=item[1], max_tokens=4000)
+            except llm.Stop as e:
+                stats["stopped"] = str(e)[:200]
                 break
-            egress_id = _log(conn, item, text, r)
-        else:  # the very first idea: nothing to compare with
-            answer = {"decision": "new", "candidate": 0, "title": "", "statement": ""}
+            if a.failed:   # logged and counted; matched on a later run
+                stats["failed"] += 1
+                continue
+            egress_id, answer = a.egress_id, a.data or NEW   # refused: a new idea, never a merge
         decision = answer["decision"]
         target = candidates[answer["candidate"] - 1][0] if 1 <= answer["candidate"] <= len(candidates) else None
         if decision != "new" and target is None:

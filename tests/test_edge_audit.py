@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from im import edge_audit, observations
+from im import edge_audit, egress, observations
 
 from helpers import table
 from test_lattice import lat_setup
@@ -187,6 +187,13 @@ def test_a_pair_the_model_cant_answer_is_skipped_and_asked_again_next_time(latti
 
     out = edge_audit.draft(lattice_with_clusters, llm.OpenRouter(post=post), tmp_path, model="x/y")
     assert out["pairs"] == 2 and [f["pair"] for f in out["failed"]] == [1]
-    assert "stopped: length, it reasoned but wrote no answer" in out["failed"][0]["error"]
+    shown = edge_audit._pairs_as_shown((tmp_path / "sheet.md").read_text())
+    ideas = json.loads((tmp_path / "key.json").read_text())["pairs"]["1"]["ideas"]
+    (failed,) = table(lattice_with_clusters, """SELECT cost_usd, segment_ids FROM im.egress_log
+                                                WHERE payload = %s AND error IS NOT NULL""", shown["1"])
+    assert float(failed[0]) == 0.002   # what it carried went, and both attempts were paid for
+    assert sorted(failed[1]) == sorted(egress.segments_of(lattice_with_clusters, ideas))
     again = edge_audit.draft(lattice_with_clusters, llm.OpenRouter(post=post), tmp_path, model="x/y")
     assert again["pairs"] == 3 and "failed" not in again and len(calls) == 5
+    (spent,) = table(lattice_with_clusters, "SELECT sum(cost_usd) FROM im.egress_log WHERE model = 'x/y'")[0]
+    assert float(spent) == pytest.approx(0.001 * len(calls))   # every attempt is counted toward the cap

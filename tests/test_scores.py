@@ -39,7 +39,7 @@ def test_every_shown_idea_is_scored_once_and_ranked(seeded_lattice, admin):
     assert all(r[1] is None for r in ranked(pipe))   # not scored yet
     claude = FakeScorer()
     assert scores.score_stage(pipe, claude) == {"rubric_version": scores.rubric_version(), "pending": shown,
-                                                "scored": shown, "stopped": None}
+                                                "scored": shown, "refused": 0, "failed": 0, "stopped": None}
     assert scores.score_stage(pipe, claude)["pending"] == 0 and len(claude.calls) == 1
     top = ranked(pipe)
     assert "coffee" in top[0][0].lower() and top[0][2] == 1.0   # all 5s

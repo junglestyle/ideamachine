@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from im import jev, llm, probe_audit
+from im import egress, jev, llm, probe_audit
 
 from test_edge_audit import lattice_with_clusters  # noqa: F401 (fixture)
 from test_lattice import seeded  # noqa: F401 (fixture)
@@ -121,8 +121,11 @@ def test_jevs_pool_picks_up_where_a_stopped_run_left_off(lattice_with_clusters, 
     with pytest.raises(llm.Unavailable):
         probe_audit.jev_pool(lattice_with_clusters, stopped, None, pairs, tmp_path)
     kept = json.loads((tmp_path / "jev-pool.json").read_text())
-    logged = lattice_with_clusters.execute("SELECT count(*) FROM im.egress_log WHERE model = 'jev-1.14.0'").fetchone()[0]
-    assert 0 < len(kept) <= 5 and logged == len(kept)   # what was answered is kept and logged
+    answered, logged = lattice_with_clusters.execute(
+        "SELECT count(*) FILTER (WHERE error IS NULL), count(*) FROM im.egress_log WHERE model = 'jev-1.14.0'"
+    ).fetchone()
+    assert 0 < len(kept) <= 5 and answered == len(kept)   # what was answered is kept and logged
+    assert logged == len(sent)   # and so is every request that went, answered or not
     again, resent = fake_jev()
     got = probe_audit.jev_pool(lattice_with_clusters, again, None, pairs, tmp_path)
     assert len(got) == len(pairs) and len(resent) == len(pairs) - len(kept)
@@ -131,14 +134,14 @@ def test_jevs_pool_picks_up_where_a_stopped_run_left_off(lattice_with_clusters, 
 def test_a_pool_stopped_by_anything_sends_nothing_more_and_keeps_only_what_it_logged(
         lattice_with_clusters, tmp_path, monkeypatch):  # noqa: F811
     pairs = every_pair(lattice_with_clusters)
-    real, calls = probe_audit._log_jev, []
+    real, calls = egress._log, []
 
-    def log_then_interrupt(*args):
+    def log_then_interrupt(*args, **kw):
         calls.append(1)
         if len(calls) >= 3:
             raise KeyboardInterrupt   # Ctrl-C, or the database going away, mid-pool
-        real(*args)
-    monkeypatch.setattr(probe_audit, "_log_jev", log_then_interrupt)
+        return real(*args, **kw)
+    monkeypatch.setattr(egress, "_log", log_then_interrupt)
     monkeypatch.setattr(probe_audit, "JEV_WORKERS", 1)
     client, sent = fake_jev(takes=0.05)   # slower than logging, so the rest are still queued when it stops
     with pytest.raises(KeyboardInterrupt):

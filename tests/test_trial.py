@@ -2,6 +2,7 @@
 the lattice, scored against a reference model."""
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 from im import egress, extract, names, trial
 
@@ -9,6 +10,24 @@ from helpers import run, table
 from test_carry import DATABASE, capture
 from test_extract import FakeClaude
 from test_lattice import items_for, seeded, seeded_lattice  # noqa: F401 (fixtures)
+
+
+class OffSchema(FakeClaude):
+    """Answers in a shape the schema doesn't allow, at $4 a request (a million tokens in, on Opus 5.5)."""
+
+    def create(self, **kw):
+        self.calls.append(kw)
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"captures": []}')], stop_reason="end_turn",
+                               model="claude-opus-5-5", _request_id="r",
+                               usage=SimpleNamespace(input_tokens=1_000_000, output_tokens=0))
+
+
+def test_an_answer_that_doesnt_keep_to_the_schema_is_paid_for_and_counts_toward_the_cap(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    claude = OffSchema()
+    stats = trial.run(pipe, claude, extract.system_prompt("v3"), monthly_cap_usd=5)
+    assert len(claude.calls) == stats["failed"] == 2 and stats["stopped"].startswith("monthly cap")
+    assert egress.spent_this_month(pipe) == 8.0
 
 
 def test_the_first_prompt_keeps_its_version():

@@ -16,7 +16,6 @@ SCHEMA_VERSION = 1
 STAGE_VERSION = "extract/1"
 ITEM_NS = uuid.UUID("3c1e8a52-7d0f-4b6e-9f21-5a8c4e7d1b90")
 KINDS = ["idea", "aphorism", "joke", "observation", "project", "task", "decision"]
-PRICES, FALLBACK_MODEL = llm.PRICES, llm.FALLBACK_MODEL
 
 # v1: the first prompt (58% of its captures kept). Its text must never change: its hash is the prompt_version every
 # extraction so far is filed under, and a new version re-reads every episode.
@@ -189,15 +188,6 @@ def prompt_version(model: str, effort: str, system: str = SYSTEM) -> str:
     return hashlib.sha256(json.dumps([system, SCHEMA, model, effort], sort_keys=True).encode()).hexdigest()[:16]
 
 
-def spent_this_month(conn) -> float:
-    return float(conn.execute(
-        "SELECT coalesce(sum(cost_usd), 0) FROM im.egress_log WHERE created_at >= date_trunc('month', now())"
-    ).fetchone()[0])
-
-
-_cost = llm.cost
-
-
 def _pending(conn, model: str, pv: str) -> list:
     """Current episodes not yet read under this model/prompt/policy, or whose payload changed. Newest first."""
     rows = conn.execute(
@@ -240,15 +230,6 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict
                      "gist": g, "themes": t, "confidence": c,
                      "source_segment_ids": [p.segment_ids[line[s]] for s in segs]}
                     for i, k, by, q, g, t, c, segs in rows]
-
-
-def _log(conn, p: egress.Payload, model: str, pv: str, **fields) -> int:
-    cols = ["episode_id", "segment_ids", "model", "prompt_version", "privacy_policy_version", "payload",
-            "payload_sha256"] + list(fields)
-    vals = [p.episode_id, p.segment_ids, model, pv, p.policy, p.text, p.sha256] + list(fields.values())
-    return conn.execute(
-        f"INSERT INTO im.egress_log ({', '.join(cols)}) VALUES ({', '.join(['%s'] * len(cols))}) RETURNING egress_id",
-        vals).fetchone()[0]
 
 
 def _items(p: egress.Payload, raw: list[dict]) -> list[dict]:
@@ -323,18 +304,12 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
             (p.episode_id, model, pv, p.policy, p.sha256, egress_id, len(items)))
 
 
-def call(client, model: str, effort: str, system: str, text: str) -> llm.Reply:
-    """Opus falls back to FALLBACK_MODEL on a refusal. Other models (trials only) don't take that fallback, so a
-    refusal there is counted as one."""
-    return llm.complete(client, model, effort, system, SCHEMA, text)
-
-
 def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "medium",
               monthly_cap_usd: float = 20.0, limit: int | None = None, system: str = SYSTEM) -> dict:
     pv = prompt_version(model, effort, system)
     todo = _pending(conn, model, pv)
     stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "reused": 0, "items": 0,
-             "refused": 0, "cost_usd": 0.0, "stopped": None}
+             "refused": 0, "failed": 0, "cost_usd": 0.0, "stopped": None}
     for p in todo[:limit] if limit else todo:
         if reused := _reuse(conn, p, model, pv):
             _save(conn, p, model, pv, *reused)
@@ -342,29 +317,24 @@ def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "mediu
             stats["reused"] += 1
             stats["items"] += len(reused[1])
             continue
-        if spent_this_month(conn) >= monthly_cap_usd:
-            stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
-            break
         try:
-            r = call(client, model, effort, system, p.text)
-        except llm.Unavailable as e:
-            _log(conn, p, model, pv, error=str(e)[:500])
-            stats["stopped"] = f"API unavailable, will retry next run: {e}"[:200]
+            a = egress.ask(conn, client, model, effort, system, SCHEMA, p.text, segment_ids=p.segment_ids,
+                           prompt_version=pv, monthly_cap_usd=monthly_cap_usd, policy=p.policy,
+                           episode_id=p.episode_id, read=lambda answer: _items(p, answer["items"]))
+        except llm.Stop as e:
+            stats["stopped"] = str(e)[:200]
             break
-        egress_id = _log(conn, p, model, pv, request_id=r.request_id, stop_reason=r.stop_reason,
-                         served_by=r.served_by, input_tokens=r.input_tokens, output_tokens=r.output_tokens,
-                         cost_usd=r.cost_usd)
-        stats["cost_usd"] += r.cost_usd or 0.0
-        stats["read"] += 1
-        if r.refused:  # the whole chain declined: record it read, with nothing captured
-            stats["refused"] += 1
-            _save(conn, p, model, pv, egress_id, [])
+        stats["cost_usd"] += a.cost_usd
+        if a.failed:   # logged and counted, not recorded as read: read again next run
+            stats["failed"] += 1
             continue
-        items = _items(p, json.loads(r.text)["items"])
-        _save(conn, p, model, pv, egress_id, items)
-        stats["items"] += len(items)
+        stats["read"] += 1
+        if a.refused:  # the whole chain declined: record it read, with nothing captured
+            stats["refused"] += 1
+        _save(conn, p, model, pv, a.egress_id, a.data or [])
+        stats["items"] += len(a.data or [])
     stats["cost_usd"] = round(stats["cost_usd"], 4)
-    stats["spent_this_month_usd"] = round(spent_this_month(conn), 4)
+    stats["spent_this_month_usd"] = round(egress.spent_this_month(conn), 4)
     return stats
 
 

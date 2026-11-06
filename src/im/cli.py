@@ -125,7 +125,8 @@ def _run_stages(conn, cfg) -> dict:
 
 
 def _extract(conn, cfg) -> dict:
-    """Run extraction, or say why it couldn't run (no credentials, API down); the run goes on either way."""
+    """Run extraction, or say why it couldn't run (no credentials, API down); the run goes on either way. A stage
+    stops itself, saying why, at the cap or when Claude can't answer or rejects the credentials (llm.Stop)."""
     import anthropic
 
     from im import extract
@@ -135,8 +136,6 @@ def _extract(conn, cfg) -> dict:
         client = anthropic.Anthropic()
         return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
                                  extract.system_prompt(x.prompt, x.interests))
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:  # e.g. no credentials configured at all
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -151,8 +150,6 @@ def _lattice(conn, cfg) -> dict:
     try:
         return lattice.match_stage(conn, anthropic.Anthropic(), SentenceEmbedder(cfg.lattice.embedding_model),
                                    cfg.extract.monthly_cap_usd, cfg.lattice.max_items_per_run)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -169,8 +166,6 @@ def _themes(conn, cfg) -> dict:
         out["describe"] = themes.describe_stage(conn, client, cfg.extract.monthly_cap_usd)   # the filer reads them
         out["file"] = themes.file_stage(conn, client, cfg.extract.monthly_cap_usd)
         out["propose"] = themes.propose_stage(conn, client, cfg.extract.monthly_cap_usd)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        out["stopped"] = f"Claude credentials rejected: {e}"
     except anthropic.AnthropicError as e:
         out["stopped"] = f"Claude unavailable: {e}"
     return out
@@ -184,8 +179,6 @@ def _scores(conn, cfg) -> dict:
 
     try:
         return scores.score_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -198,8 +191,6 @@ def _sensitivity(conn, cfg) -> dict:
 
     try:
         return sensitivity.tag_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -214,12 +205,7 @@ def _vocab(conn, cfg) -> dict:
         client = anthropic.Anthropic()
     except anthropic.AnthropicError:
         client = None
-    try:
-        return vocab.refresh(conn, client, cfg.extract.monthly_cap_usd)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
-    except anthropic.AnthropicError as e:
-        return {"stopped": f"Claude unavailable: {e}"}
+    return vocab.refresh(conn, client, cfg.extract.monthly_cap_usd)
 
 
 def _digest(conn, cfg, week=None, again=False) -> dict:
@@ -230,8 +216,6 @@ def _digest(conn, cfg, week=None, again=False) -> dict:
 
     try:
         return digest.digest_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd, week, again)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -371,9 +355,10 @@ def cmd_audit_edges(args) -> None:
         if args.action == "draft":
             from im import llm, names
 
-            scrubber = names.for_trials(conn, config.load().egress) if args.policy == "C" else None
+            cfg = config.load()
+            scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
             _print(edge_audit.draft(conn, llm.client_for(args.model), Path(args.folder), args.model, args.effort,
-                                    scrubber))
+                                    scrubber, cfg.extract.monthly_cap_usd))
             return
         _print(edge_audit.write(conn, Path(args.folder), args.seed, args.size))
 
@@ -401,7 +386,7 @@ def cmd_audit_probe(args) -> None:
             else:
                 client = llm.client_for(args.model)
             _print(probe_audit.draft(conn, client, folder, args.model, args.effort, scrubber, args.quotes_only,
-                                     args.probes))
+                                     args.probes, cfg.extract.monthly_cap_usd))
             return
         if args.question == "summary":
             from im import summary_audit
@@ -421,7 +406,7 @@ def cmd_audit_probe(args) -> None:
             scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
         _print(probe_audit.write(conn, anthropic.Anthropic(), embedder, args.question, folder, args.seed, args.only,
                                  args.size, [Path(f) for f in args.exclude], jev_client, scrubber,
-                                 args.pool or probe_audit.JEV_POOL))
+                                 args.pool or probe_audit.JEV_POOL, cfg.extract.monthly_cap_usd))
 
 
 def cmd_analogy_spike(args) -> None:
@@ -436,7 +421,7 @@ def cmd_analogy_spike(args) -> None:
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
         out = analogy_spike.run(conn, anthropic.Anthropic(), SentenceEmbedder(cfg.lattice.embedding_model),
-                                Path(args.folder), args.others)
+                                Path(args.folder), args.others, monthly_cap_usd=cfg.extract.monthly_cap_usd)
     _print({k: v for k, v in out.items() if k != "pairs_detail"} | {"pairs": [
         {k: r[k] for k in ("pair", "rank_by_structure", "rank_by_topic", "note", "structure_a", "structure_b")}
         for r in out["pairs_detail"]]})

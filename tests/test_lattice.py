@@ -190,6 +190,31 @@ def test_discarded_items_are_skipped(seeded, cfg, stream):
     assert stats["skipped"] == 3 and table(seeded, "SELECT count(*) FROM pub.ideas") == [(3,)]
 
 
+class CutsOffFirst(FakeMatcher):
+    """FakeMatcher, except that its first answer is cut off mid-JSON at max_tokens."""
+
+    def create(self, **kw):
+        r = super().create(**kw)
+        if len(self.calls) > 1:
+            return r
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"decision": "sa')], stop_reason="max_tokens",
+                               model="claude-opus-5-5", _request_id="r", usage=SimpleNamespace(input_tokens=300,
+                                                                                               output_tokens=4000))
+
+
+def test_a_match_cut_off_is_logged_and_paid_for_and_the_other_captures_are_matched(seeded, cfg, stream):
+    run(seeded, cfg, stream)
+    extract.run_stage(seeded, FakeClaude(items_for))
+    claude = CutsOffFirst()
+    stats = lattice.match_stage(seeded, claude, HashEmbedder())
+    assert len(claude.calls) == 3 and stats["failed"] == 1 and stats["new"] + stats["same_as"] + stats["evolves"] == 2
+    logged = table(seeded, """SELECT count(*), count(*) FILTER (WHERE error IS NOT NULL AND cost_usd > 0)
+                              FROM im.egress_log WHERE prompt_version = %s""", lattice.matcher_version())
+    assert logged == [(3, 1)]
+    again = lattice.match_stage(seeded, FakeMatcher(), HashEmbedder())   # the one cut off is asked again
+    assert again["pending"] == 1 and again["failed"] == 0
+
+
 def test_lattice_app_reads_pub_and_only_appends_feedback(seeded, admin):
     (idea,) = table(seeded, "SELECT idea_id FROM pub.ideas LIMIT 1")[0]
     with admin.transaction():

@@ -11,7 +11,7 @@ version) alone.
 import hashlib
 import json
 
-from im import themes
+from im import llm, themes
 
 BATCH = 50
 QUOTES = 3
@@ -68,26 +68,29 @@ def _todo(conn, tv: str) -> tuple[list, list]:
 
 
 def tag_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
-    from im.extract import spent_this_month
-
+    """Tag what's new or changed, a batch at a time. A batch refused or failed is tagged on a later run; the
+    batches after it go on."""
     tv = tagger_version()
     ideas, th = _todo(conn, tv)
-    stats = {"tagger_version": tv, "pending": len(ideas) + len(th), "tagged": 0, "sensitive": 0, "stopped": None}
+    stats = {"tagger_version": tv, "pending": len(ideas) + len(th), "tagged": 0, "sensitive": 0, "refused": 0,
+             "failed": 0, "stopped": None}
     work = [("idea", r) for r in ideas] + [("theme", r) for r in th]
     for start in range(0, len(work), BATCH):
-        if spent_this_month(conn) >= monthly_cap_usd:
-            stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
-            break
         batch = work[start:start + BATCH]
         bi = [r for k, r in batch if k == "idea"]
         bt = [r for k, r in batch if k == "theme"]
         text = ("Ideas:\n" + ("\n".join(f"{n}. {line}" for n, (_, line, _) in enumerate(bi, 1)) or "(none)")
                 + "\n\nThemes:\n" + ("\n".join(f"{n}. {line}" for n, (_, line, _) in enumerate(bt, 1)) or "(none)"))
-        answer, r = themes._call(client, SYSTEM, SCHEMA, text)
-        themes._log(conn, text, f"sensitivity:{tv}", [i for i, _, _ in bi], r)
-        if answer is None:
-            stats["stopped"] = "refused"
+        try:
+            a = themes.ask(conn, client, SYSTEM, SCHEMA, text, f"sensitivity:{tv}", [i for i, _, _ in bi],
+                           monthly_cap_usd)
+        except llm.Stop as e:
+            stats["stopped"] = str(e)[:200]
             break
+        if a.refused or a.failed:
+            stats["refused" if a.refused else "failed"] += 1
+            continue
+        answer = a.data
         with conn.transaction():
             for kind, rows, table, key in [("ideas", bi, "idea_sensitivity", "idea_id"),
                                            ("themes", bt, "theme_sensitivity", "theme_id")]:

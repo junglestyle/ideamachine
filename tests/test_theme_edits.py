@@ -118,7 +118,7 @@ def test_a_theme_i_split_off_gets_a_description_on_the_run(lat, admin):
     send(admin, "split_theme", models, payload={"new_theme_id": str(new), "name": "Signals proper",
                                                 "idea_ids": [str(idea(lat, members(lat, models)[0]))]})
     claude = FakeDescriber()
-    assert themes.describe_stage(lat, claude) == {"pending": 1, "described": 1, "stopped": None}
+    assert themes.describe_stage(lat, claude) == {"pending": 1, "described": 1, "failed": 0, "stopped": None}
     assert "Signals proper" in claude.calls[0]["messages"][0]["content"]
     assert table(lat, "SELECT description FROM im.themes WHERE theme_id = %s", new) == [("Signals in the narrow sense.",)]
     assert themes.describe_stage(lat, claude)["pending"] == 0 and len(claude.calls) == 1

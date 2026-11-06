@@ -353,19 +353,21 @@ def _pairs_as_shown(text: str) -> dict[str, str]:
     return out
 
 
-def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: str = "low", scrubber=None) -> dict:
+def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: str = "low", scrubber=None,
+          monthly_cap_usd: float = 20.0) -> dict:
     """A model marks every pair on the sheet, blind to my marks, into draft-<model>-<effort>.json. Each request goes
     to the egress log, like every other call that sends what was said; with a scrubber (policy C), names said are
-    pseudonymized first."""
-    from im import llm, names, themes
+    pseudonymized first. A pair whose answer fails is logged and skipped, so a rerun asks again; the cap, or the
+    model being unavailable, stops the draft."""
+    from im import egress, llm, names, themes
 
     key = json.loads((folder / "key.json").read_text())
     shown = _pairs_as_shown((folder / "sheet.md").read_text())
     out_path = folder / f"draft-{model.replace('/', '_')}-{effort}-labels{LABELSET}.json"
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     pv = themes.version(DRAFT_SYSTEM, DRAFT_SCHEMA, model, effort)
-    policy = scrubber.policy if scrubber else _policy()
-    cost, failed = 0.0, []
+    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+    cost, failed, stopped = 0.0, [], None
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         if num in got or num not in shown:
             continue
@@ -373,39 +375,25 @@ def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: st
         if scrubber:
             (text,), back, _ = scrubber.scrub([text])
         try:
-            r = llm.complete(client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, text, max_tokens=4000)
-        except RuntimeError as e:   # an answer that never kept to the schema: skipped, so a rerun asks again
-            failed.append({"pair": int(num), "error": str(e)[:300]})
+            a = egress.ask(conn, client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, text, max_tokens=4000,
+                           segment_ids=egress.segments_of(conn, p["ideas"]), prompt_version=pv, policy=policy,
+                           monthly_cap_usd=monthly_cap_usd)
+        except llm.Stop as e:
+            stopped = str(e)[:200]
+            break
+        cost += a.cost_usd
+        if a.failed:
+            failed.append({"pair": int(num), "error": a.error[:300]})
             continue
-        segs = [s for (s,) in conn.execute(
-            """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
-               WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
-        conn.execute(
-            """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version,
-                 payload, payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
-               VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (segs, model, pv, policy, text, _sha(text), r.request_id, r.stop_reason, r.served_by, r.input_tokens,
-             r.output_tokens, r.cost_usd))
-        cost += r.cost_usd or 0.0
-        if r.refused:
+        if a.refused:
             got[num] = {"label": "unsure", "direction": "none", "analogy": "", "refused": True}
         else:
-            got[num] = json.loads(r.text)
+            got[num] = a.data
             if got[num].get("analogy"):
                 got[num]["analogy"] = names.unscrub(got[num]["analogy"], back)
         out_path.write_text(json.dumps(got, indent=2))   # as it goes: a rerun picks up where this stopped
     return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "prompt_version": pv,
-            "policy": policy, **({"failed": failed} if failed else {})}
-
-
-def _policy() -> str:
-    from im import egress
-    return egress.POLICY_VERSION
-
-
-def _sha(text: str) -> str:
-    import hashlib
-    return hashlib.sha256(text.encode()).hexdigest()
+            "policy": policy, **({"failed": failed} if failed else {}), **({"stopped": stopped} if stopped else {})}
 
 
 def _num(name: str):

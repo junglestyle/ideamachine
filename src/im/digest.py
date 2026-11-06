@@ -9,7 +9,7 @@ me. The digest keeps the segment IDs behind every idea it was shown, so forgetti
 
 from datetime import date, datetime, time, timedelta
 
-from im import themes
+from im import egress, llm, themes
 
 TOP = 15          # the top of the ranking, beside the week's own ideas, for context
 KINDS = ("recurring", "convergence", "sleeper", "project", "outside_value")
@@ -149,10 +149,8 @@ def payload(conn, week: date) -> tuple[str, list]:
 def digest_stage(conn, client, monthly_cap_usd: float = 20.0, week: date | None = None, again: bool = False) -> dict:
     """Write the week's digest (by default the last completed week) unless it exists. A week with nothing said
     gets a short digest without asking Claude."""
-    from im.extract import spent_this_month
-
     week = week or last_week()
-    stats = {"week": week.isoformat(), "written": False, "points": 0, "stopped": None}
+    stats = {"week": week.isoformat(), "written": False, "points": 0, "failed": 0, "stopped": None}
     if conn.execute("SELECT 1 FROM im.digests WHERE week_start = %s", (week,)).fetchone() and not again:
         return stats
     start, end = _period(week)
@@ -161,17 +159,18 @@ def digest_stage(conn, client, monthly_cap_usd: float = 20.0, week: date | None 
     if not _said(conn, start, end) and not _added(conn, start, end):
         answer, segs = {"summary": "Nothing new was said this week.", "points": []}, []
     else:
-        if spent_this_month(conn) >= monthly_cap_usd:
-            stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
+        try:
+            a = themes.ask(conn, client, SYSTEM, SCHEMA, text, pv, ids, monthly_cap_usd)
+        except llm.Stop as e:
+            stats["stopped"] = str(e)[:200]
             return stats
-        answer, r = themes._call(client, SYSTEM, SCHEMA, text)
-        themes._log(conn, text, pv, ids, r)
-        if answer is None:
+        if a.refused:
             stats["stopped"] = "refused"
             return stats
-        segs = [s for (s,) in conn.execute(
-            """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
-               WHERE ev.idea_id = ANY(%s)""", (ids,))]
+        if a.failed:   # unwritten, so asked again next run
+            stats["failed"] = 1
+            return stats
+        answer, segs = a.data, egress.segments_of(conn, ids)
     with conn.transaction():
         conn.execute("DELETE FROM im.digests WHERE week_start = %s", (week,))
         (digest_id,) = conn.execute(

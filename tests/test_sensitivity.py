@@ -85,3 +85,31 @@ def test_quotes_are_read_too(seeded_lattice, admin):
     lora = table(pipe, "SELECT idea_id FROM pub.ideas WHERE title = 'Something new'")[0][0]
     assert ("idea", str(lora)) in shown(admin)
     assert '[said: "' in claude.calls[0]["messages"][0]["content"]
+
+
+class RefusesThenCutsOff(FakeTagger):
+    """FakeTagger, except that it refuses its first batch and its answer to the second is cut off mid-JSON."""
+
+    def create(self, **kw):
+        r = super().create(**kw)
+        if len(self.calls) == 1:
+            return SimpleNamespace(content=[], stop_reason="refusal", model="claude-opus-5-5", _request_id="r",
+                                   usage=r.usage)
+        if len(self.calls) == 2:
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"ideas": [{"n"')],
+                                   stop_reason="max_tokens", model="claude-opus-5-5", _request_id="r", usage=r.usage)
+        return r
+
+
+def test_a_batch_refused_or_cut_off_is_tagged_next_run_and_the_batches_after_it_now(seeded_lattice, monkeypatch):
+    pipe = seeded_lattice
+    monkeypatch.setattr(sensitivity, "BATCH", 2)
+    claude = RefusesThenCutsOff()
+    stats = sensitivity.tag_stage(pipe, claude)
+    assert stats["pending"] > 4 and stats["tagged"] == stats["pending"] - 4   # the batches after them were tagged
+    assert (stats["refused"], stats["failed"]) == (1, 1)
+    logged = table(pipe, """SELECT count(*), count(*) FILTER (WHERE error IS NOT NULL AND cost_usd > 0)
+                            FROM im.egress_log WHERE prompt_version = %s""", f"sensitivity:{sensitivity.tagger_version()}")
+    assert logged == [(len(claude.calls), 1)]
+    again = sensitivity.tag_stage(pipe, FakeTagger())
+    assert again["pending"] == again["tagged"] == 4
