@@ -110,5 +110,5 @@ filter over both.
     mistranscriptions fixed, words put back), 183 gists note a transcription fix, and gists and statements open
     with labels ("Bit:", "Joke:"), attribution or topic. Prompt `v4` (trials only) asks for the quote exactly as
     transcribed, a reading, an unlabelled gist and who a relayed thought is from; `im trial` reports each read's
-    share of quotes word for word in their lines. Register (joke, irony) leaves `kind` for a judging pass after
-    extraction.
+    `quotes_as_said`, the share whose quote copies its cited lines word for word. Register (joke, irony) leaves
+    `kind` for a judging pass after extraction.

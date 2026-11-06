@@ -150,7 +150,7 @@ def test_v4_keeps_the_quote_as_said_apart_from_its_reading_and_attribution(pipe,
     assert [(it["reading"], it["attributed_to"]) for it in items] == \
         [("Bob, the build broke again.", ""), ("Bob, the build broke again.", "Bob's lead")]   # names come back
     opus = (trial.version("claude-opus-5-5", "medium", v4, schema=schema), "claude-opus-5-5")
-    assert trial.report(pipe, opus, opus, scrubber.policy)["verbatim_quotes"] == {"candidate": 0.5, "reference": 0.5}
+    assert trial.report(pipe, opus, opus, scrubber.policy)["quotes_as_said"] == {"candidate": 0.5, "reference": 0.5}
 
     # The live run can't keep a reading or an attribution yet, so it doesn't read under v4.
     sent = table(pipe, "SELECT count(*) FROM im.egress_log")

@@ -184,8 +184,8 @@ def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy:
         "recall_by_reach": by_reach(conn, found_by_reach),
         "cost_usd": round(cost(cand), 4), "reference_cost_usd": round(cost(ref), 4),
         "cost_vs_reference": rate(cost(cand), cost(ref)),
-        "verbatim_quotes": {"candidate": verbatim(conn, [cand[e][1] for e in both]),
-                            "reference": verbatim(conn, [ref[e][1] for e in both])},
+        "quotes_as_said": {"candidate": as_said(conn, [cand[e][1] for e in both]),
+                           "reference": as_said(conn, [ref[e][1] for e in both])},
         "missed": missed[:EXAMPLES], "extra_examples": extra[:EXAMPLES]}
 
 
@@ -193,9 +193,10 @@ def _words(text: str) -> str:
     return " ".join(re.findall(r"\w+", text.lower()))
 
 
-def verbatim(conn, reads: list[list[dict]]) -> float | None:
-    """The share of captures whose quote is word for word in the lines they cite, case and punctuation aside: v4
-    asks for the quote exactly as transcribed, where earlier prompts let it be tidied (or stitched with "...")."""
+def as_said(conn, reads: list[list[dict]]) -> float | None:
+    """The share of captures whose quote field copies the transcript lines they cite word for word (case and
+    punctuation aside): v4 asks for the quote exactly as said, with the tidied version in `reading`, where earlier
+    prompts let the quote itself be tidied (or stitched with "...")."""
     items = [it for r in reads for it in r]
     if not items:
         return None
