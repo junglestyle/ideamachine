@@ -65,7 +65,7 @@ QUESTIONS = {
 # wordings are scored against my marks without changing what's being compared. PROBE_SET names the draft.
 # Tension's probes2 (2026-11-04) also asked whether the sides differ in structure, only in emphasis, or are an
 # exception, and whether both are mine: all near chance on both sheets, so dropped.
-PROBE_SET = {"tension": "probes4", "analogy": "probes1"}
+PROBE_SET = {"tension": "probes4", "analogy": "probes2"}
 BOTH = {"true": "Someone could hold both without strain", "false": "Holding one means giving up some of the other"}
 PROBES = {
     "tension": {
@@ -95,7 +95,9 @@ PROBES = {
     # Analogy's first probes (2026-11-05), many wordings to pare down as tension's were. The one sheet so far found
     # three analogies, each a specific shared move: a template (X : better X :: then : now), a cause (bad work
     # blamed on its maker's state), a trade-off (easy against perfect); what sounded alike only by genre (two jokes,
-    # two category questions) wasn't one.
+    # two category questions) wasn't one. probes2 (after analogy-2, 2026-11-06: 3 analogies in 25 Jev pairs) drops
+    # the wordings that ranked them worst, AUC 0.65 to 0.68 where most held 0.90 or more: whether `a` explains `b`,
+    # a shared template, the payoff of looking through one at the other, and whether what they share is specific.
     "analogy": {
         # Ways of asking for the same structure.
         "same_structure_v2": ("`a` and `b` rest on the same underlying pattern, in different settings.", None),
@@ -107,23 +109,13 @@ PROBES = {
                       None),
         "general_rule": ("Are `a` and `b` both instances of one general rule or principle?", None),
         "analogy_v2": ("Is there an analogy between `a` and `b`?", None),
-        "explains": ("Could `a` help explain `b` to someone who understands only `a`?", None),
         "same_lesson": ("Would the lesson of `a` apply to the situation in `b`?", None),
-        # The payoff rather than the shape: what a `new` mark means, and how #18's structure showed.
-        "lens": ("Does looking at `a` through `b`, or `b` through `a`, show something about it that isn't plain "
-                 "from it alone?",
-                 {"true": "The other exposes a specific feature, cause or consequence of it",
-                  "false": "Any link is a loose association, or only a shared genre"}),
         # Kinds of shared structure, from the three found.
         "same_trade_off": ("Do `a` and `b` turn on the same trade-off, such as easy against thorough, or cheap "
                            "against reliable?", None),
-        "same_form": ("Are `a` and `b` built on the same template or turn of phrase, with different content in "
-                      "it?", None),
         "same_reasoning": ("Do `a` and `b` reach their point by the same line of reasoning?", None),
         "same_problem": ("Do `a` and `b` describe the same underlying problem in different places?", None),
-        # Strictness: what they share must be specific, not their genre.
-        "specific": ("Could what `a` and `b` share be said in a phrase that wouldn't fit most pairs of ideas?",
-                     None),
+        # Strictness: what they share must be more than their genre.
         "only_genre": ("Is what `a` and `b` have in common only their genre, such as both being jokes, "
                        "complaints or opinions?",
                        {"true": "They share a kind of statement and nothing more specific",
@@ -146,7 +138,6 @@ COMBOS = {
         "structure_mean": lambda q: _mean(q, ("same_structure", "same_structure_v2", "same_move", "same_mechanism",
                                              "same_relation", "roles_map", "general_rule", "analogy_v2")),
         "structure_not_genre": lambda q: q["same_structure"] * (1 - q["only_genre"]),
-        "structure_specific": lambda q: q["same_structure"] * q["specific"],
     },
 }
 

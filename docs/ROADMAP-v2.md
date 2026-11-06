@@ -93,7 +93,11 @@ filter over both.
    structure lines, none of 5 at random. Over the 25 Jev pairs, most wordings ranked my 3 above the other 22 (AUC
    0.90-0.955) and so did their mean (0.92); `specific`, `explains`, `same_form` and `lens` didn't (0.65-0.68).
    Agreement predicted a hit: pairs in 10 or more wordings' top 10 held 2 of 5, those in 2 or fewer 1 of 14. Jev's
-   `surprising` ran the wrong way (0.19). Next: drop the four, and draw the Jev set by the mean of the rest.
+   `surprising` ran the wrong way (0.19). So the next sheet asks `probes2`, without those four, and draws 30 pairs
+   by the mean of the remaining wordings beside 10 at random; facets leave the default (2 of 25 over two sheets, at
+   a Claude request per batch of ideas). Tension isn't where ideas are close: a sheet of only near pairs
+   (tension-near-1, 2026-11-06) held 1 in 30, against 28 in 150 over the four mixed sheets, whose new tensions ran
+   across subjects. Jev's `pulls4` flagged 3 of the 30 at 0.45, the one tension among them.
 9. Do summaries say more than the quotes? The first tension sheet (2026-11-04): the two tensions three models agreed
    on and I didn't were made by the summaries ("comfort beats the stigma" for "they're pretty comfy"), and only
    Sonnet beat chance at all (2 of my 5, precision 0.5), so a tension pass proposes for me to keep, not links on

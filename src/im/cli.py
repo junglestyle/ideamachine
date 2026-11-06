@@ -757,8 +757,9 @@ def main(argv=None) -> None:
     ae.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names said")
     ae.set_defaults(func=cmd_audit_edges)
     for name, question, what in (
-            ("audit-analogies", "analogy", "a blind sheet of possible analogies between unrelated ideas, proposed "
-                                           "several ways (sends to Claude and Jev); score my marks"),
+            ("audit-analogies", "analogy", "a blind sheet of possible analogies between unrelated ideas, ranked by "
+                                           "Jev beside random pairs (sends to Jev; --only facets to Claude); score "
+                                           "my marks"),
             ("audit-tension", "tension", "a blind sheet of possible tensions, proposed several ways (sends to "
                                          "Claude); score my marks"),
             ("audit-summaries", "summary", "a blind sheet of extraction trials' summaries: do they say more than "
@@ -776,7 +777,8 @@ def main(argv=None) -> None:
         pa.add_argument("--quotes-only", action="store_true", help="draft: show the model what was said, no summaries")
         pa.add_argument("--probes", action="store_true",
                         help="draft, Jev: also ask the probe questions (jev.PROBES), scored beside the deciding ones")
-        pa.add_argument("--only", help="sheet: draw every pair from one set, e.g. model or jev")
+        pa.add_argument("--only", help="sheet: draw every pair from one set, e.g. model or jev (or facets, no longer "
+                                       "on an analogy sheet by default)")
         pa.add_argument("--pool", type=int, help="analogy sheet: how many unrelated pairs Jev ranks to propose from "
                                                  "(default 3000)")
         pa.add_argument("--size", type=int, help="sheet, with --only: how many pairs (default 30)")

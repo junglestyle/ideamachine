@@ -77,13 +77,8 @@ def test_an_analogy_sheet_draws_unrelated_pairs_blind_and_scores_each_way(lattic
     far = {tuple(p["ideas"]) for p in probe_audit.unrelated(probe_audit.edge_audit._clusters(lattice_with_clusters))}
     assert all(tuple(p["ideas"]) in far for p in pairs)   # every set draws unrelated pairs only
     body = (tmp_path / "sheet.md").read_text()
-    assert "secret reason" not in body and "facets" not in body and "Jev" not in body and "Is there an analogy" in body
-    assert (tmp_path / "facets.json").exists()
-    assert {c["model"] for c in client.calls} == {probe_audit.FACET_MODEL}
-    logged = lattice_with_clusters.execute(
-        "SELECT count(*) FROM im.egress_log WHERE episode_id IS NULL AND model = %s", (probe_audit.FACET_MODEL,)
-    ).fetchone()[0]
-    assert logged == len(client.calls)
+    assert "secret reason" not in body and "Jev" not in body and "Is there an analogy" in body
+    assert not client.calls and not (tmp_path / "facets.json").exists()   # by default nothing goes to Claude
 
     # Jev was asked every analogy question about each pool pair once, every request logged, and each question
     # but the ones that only describe a pair proposes its best.
@@ -113,10 +108,21 @@ def test_the_facets_are_credited_only_with_the_pairs_they_rank_highest(lattice_w
                                                                        monkeypatch):
     # Nearly every unrelated pair is somewhere in the facets' ranking, so crediting all of it said nothing.
     monkeypatch.setattr(probe_audit, "TOP", 2)
-    client, (jev_client, _) = FakeProposer(), fake_jev()
-    probe_audit.write(lattice_with_clusters, client, HashEmbedder(), "analogy", tmp_path, jev=jev_client)
+    client = FakeProposer()
+    probe_audit.write(lattice_with_clusters, client, HashEmbedder(), "analogy", tmp_path, only="facets")
+    assert {c["model"] for c in client.calls} == {probe_audit.FACET_MODEL} and (tmp_path / "facets.json").exists()
     pairs = json.loads((tmp_path / "key.json").read_text())["pairs"].values()
     assert 0 < sum("facets" in p["proposed_by"] for p in pairs) <= 2
+
+
+def test_the_jev_set_ranks_the_pool_by_the_mean_of_its_wordings():
+    answers = {"a b": {"same_move": 0.9, "same_problem": 0.1, "surprising": 1.0, "structure_mean": 1.0, "p": 1.0},
+               "c d": {"same_move": 0.6, "same_problem": 0.6, "surprising": 0.0, "structure_mean": 0.0, "p": 0.0},
+               "e f": {"same_move": 0.2, "same_problem": 0.2, "surprising": 1.0, "structure_mean": 1.0, "p": 1.0}}
+    proposed, tops = probe_audit._jev_proposals(answers)
+    # c d is no wording's best, but has the highest mean; what only describes a pair, or is computed, doesn't count
+    assert [p["ideas"] for p in proposed] == [["c", "d"], ["a", "b"], ["e", "f"]]
+    assert set(tops) == {"jev:same_move", "jev:same_problem"}
 
 
 def every_pair(conn):
