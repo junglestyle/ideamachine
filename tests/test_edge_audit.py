@@ -3,10 +3,11 @@
 import json
 import re
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from im import edge_audit, egress, names, observations
+from im import edge_audit, egress, jev, names, observations
 
 from helpers import table
 from test_lattice import lat_setup
@@ -162,6 +163,32 @@ def test_a_draft_sees_the_sheet_without_my_marks_and_score_compares(lattice_with
     assert other["pairs"] == 4 and len(claude.calls) == 8 and other["draft"] != out["draft"]
     assert set(edge_audit.score(tmp_path)["drafts"]) == {"claude-opus-5-5-low-labels2-B1",
                                                          "claude-opus-5-5-low-labels2"}
+
+
+def test_jev_drafts_a_sheet_from_each_side_as_shown_and_connection_is_scored_at_every_cut(lattice_with_clusters,
+                                                                                         tmp_path):
+    from test_probe_audit import fake_jev   # test_probe_audit imports this module's fixtures
+
+    edge_audit.write(lattice_with_clusters, tmp_path, size=6)
+    key = json.loads((tmp_path / "key.json").read_text())["pairs"]
+    linked = {tuple(key[n]["ideas"]) for n in sorted(key, key=int)[:3]}   # I link the first three, not the rest
+    fill(tmp_path, lambda p: ("rel" if tuple(p["ideas"]) in linked else "none", ""))
+    client, sent = fake_jev()
+    out = edge_audit.draft(lattice_with_clusters, client, tmp_path, "jev-1.14.0")
+    assert out["pairs"] == 6 and len(sent) == 6
+    assert all(set(b["questions"]) == set(jev.QUESTIONS["edge"]) | set(jev.PROBES["edge"]) for b in sent)
+    for b, (_, p) in zip(sent, sorted(key.items(), key=lambda kv: int(kv[0])), strict=True):
+        assert b["state"]["a"] == edge_audit.side_data(lattice_with_clusters, p["sides"][0])   # A as the sheet shows
+    draft = json.loads(Path(out["draft"]).read_text())
+    assert all(d["label"] == edge_audit.jev_label(d) for d in draft.values())
+
+    d = edge_audit.score(tmp_path)["drafts"]["jev-1.14.0-connected3-kinds1-labels2-B1"]
+    by_cut = d["connection_by_cut"]
+    assert by_cut[str(edge_audit.EDGE_CUT)]["agree"] == d["connection"]["agree"]   # its labels are its cut
+    mine = {n for n in key if tuple(key[n]["ideas"]) in linked}
+    above = {n for n in key if draft[n]["p"] >= 0.3}
+    assert by_cut["0.3"]["recall"] == round(len(mine & above) / len(mine), 3)
+    assert 0.0 <= by_cut["auc"] <= 1.0
 
 
 def test_the_analogy_spike_ranks_a_partner_that_makes_the_same_move_first(lattice_with_clusters, tmp_path):
