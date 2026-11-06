@@ -49,24 +49,18 @@ def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str =
     stats = {"model": model, "prompt_version": pv, "policy": policy, "pending": len(todo), "read": 0, "failed": 0,
              "cost_usd": 0.0, "stopped": None}
     for p in todo[:limit] if limit else todo:
-        if extract.spent_this_month(conn) >= monthly_cap_usd:
-            stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
-            break
         try:
-            r = extract.call(client, model, effort, system, p.text)
-            raw = [] if r.refused else json.loads(r.text)["items"]
-            items = extract._items(p, raw)
-        except llm.Unavailable as e:
-            extract._log(conn, p, model, pv, error=str(e)[:500])
-            stats["stopped"] = f"API unavailable: {e}"[:200]
+            a = egress.ask(conn, client, model, effort, system, extract.SCHEMA, p.text, segment_ids=p.segment_ids,
+                           prompt_version=pv, monthly_cap_usd=monthly_cap_usd, policy=p.policy,
+                           episode_id=p.episode_id, read=lambda answer: extract._items(p, answer["items"]))
+        except llm.Stop as e:
+            stats["stopped"] = str(e)[:200]
             break
-        except (RuntimeError, ValueError, KeyError, TypeError) as e:   # an answer that doesn't keep to the schema
-            extract._log(conn, p, model, pv, error=f"{type(e).__name__}: {e}"[:500])
+        stats["cost_usd"] += a.cost_usd
+        if a.failed:   # an answer that doesn't keep to the schema: logged and paid for, read again next time
             stats["failed"] += 1
             continue
-        egress_id = extract._log(conn, p, model, pv, request_id=r.request_id, stop_reason=r.stop_reason,
-                                 served_by=r.served_by, input_tokens=r.input_tokens, output_tokens=r.output_tokens,
-                                 cost_usd=r.cost_usd)
+        egress_id, items = a.egress_id, a.data or []
         keep = ("kind", "said_by", "quote", "gist", "confidence")
         rows = [{k: it[k] for k in keep} | {"source_segment_ids": [str(s) for s in it["source_segment_ids"]]}
                 for it in items]
@@ -78,7 +72,6 @@ def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str =
                    created_at = now()""",
             (p.episode_id, pv, model, policy, p.sha256, egress_id, json.dumps(rows)))
         stats["read"] += 1
-        stats["cost_usd"] += r.cost_usd or 0.0
     stats["cost_usd"] = round(stats["cost_usd"], 4)
     return stats
 

@@ -198,6 +198,10 @@ if [ -f "$ROWS_BEFORE" ] && [ ! -f "$ROWS_AFTER" ]; then
     mv "$ROWS_AFTER.new" "$ROWS_AFTER"
     echo "all $(wc -l < "$ROWS_AFTER") tables match: $(awk -F'|' '{n += $2} END {print n}' "$ROWS_AFTER") rows"
 fi
+# The per-database setup ran once, when the volume was made; it's safe to re-run, and this brings what was added to
+# it since (jit off) to a database made before.
+"${COMPOSE[@]}" exec -T db psql -q -v ON_ERROR_STOP=1 -U postgres -d im \
+    -f /docker-entrypoint-initdb.d/bootstrap-db.sql.in
 im migrate
 
 say "The names role, for the GPU worker's names job (install/gpu.sh)"

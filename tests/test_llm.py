@@ -1,10 +1,14 @@
 """Other models through OpenRouter: the same Reply as Claude's, the request's own cost, one retry on bad JSON."""
 
+import io
 import json
+import urllib.error
+import urllib.request
+from types import SimpleNamespace
 
 import pytest
 
-from im import llm
+from im import egress, jev, llm
 
 SCHEMA = {"type": "object", "properties": {"items": {"type": "array"}}, "required": ["items"]}
 
@@ -40,9 +44,9 @@ def test_an_answer_that_isnt_json_is_asked_for_again_and_both_are_paid_for():
     client, sent = router(answer("Sure! Here you go"), answer(json.dumps({"items": [1]})))
     r = llm.complete(client, "openai/gpt-6.1-sol", "medium", "s", SCHEMA, "t")
     assert len(sent) == 2 and json.loads(r.text) == {"items": [1]} and r.cost_usd == 0.002
-    client, _ = router(answer("no"), answer("still no"))
-    with pytest.raises(RuntimeError):
-        llm.complete(client, "openai/gpt-6.1-sol", "medium", "s", SCHEMA, "t")
+    client, _ = router(answer("no"), answer("still no"))   # as it came, both paid for: the egress log fails it
+    r = llm.complete(client, "openai/gpt-6.1-sol", "medium", "s", SCHEMA, "t")
+    assert r.text == "still no" and r.cost_usd == 0.002
 
 
 def test_a_refusal_and_a_rate_limit():
@@ -77,3 +81,35 @@ def test_no_provider_that_keeps_nothing_is_said_plainly():
         raise RuntimeError("OpenRouter HTTP 404: No endpoints found matching your data policy")
     with pytest.raises(RuntimeError, match="keeps nothing sent"):
         llm.complete(llm.OpenRouter(post=post), "some/model", "low", "s", SCHEMA, "t")
+
+
+def test_a_dated_model_id_is_priced_as_its_model_and_an_unknown_one_never_as_free():
+    usage = SimpleNamespace(input_tokens=1_000_000, output_tokens=0)
+    assert llm.cost("claude-opus-5-5-20261015", usage) == llm.cost("claude-opus-5-5", usage) == 4.0
+    assert llm.cost("claude-mystery-9", usage) == max(p[0] for p in llm.PRICES.values())
+
+
+@pytest.mark.parametrize("code, raised", [(429, llm.Unavailable), (503, llm.Unavailable), (402, llm.Stop),
+                                          (400, RuntimeError)])
+def test_a_rate_limit_or_server_error_is_worth_retrying_and_other_http_errors_arent(monkeypatch, code, raised):
+    def fail(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, code, "no", {}, io.BytesIO(b"detail"))
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    with pytest.raises(raised):
+        llm.complete(llm.OpenRouter(key="k"), "z-ai/glm-5.3", "low", "s", SCHEMA, "t")
+    with pytest.raises(raised):
+        jev.Jev(key="k", route="typesafe").complete({"questions": {}})
+
+
+@pytest.mark.parametrize("second, stops", [({"error": {"code": 503, "message": "down"}}, True),
+                                           ({"error": {"code": 400, "message": "bad"}}, False),
+                                           ({"id": "no choices"}, False)])
+def test_a_retry_that_fails_still_logs_and_counts_what_the_first_attempt_cost(pipe, second, stops):
+    client, sent = router(answer("Sure! Here you go", cost=0.003), second)
+    try:
+        a = egress.ask(pipe, client, "z-ai/glm-5.3", "low", "s", SCHEMA, "t", segment_ids=[], prompt_version="v",
+                       monthly_cap_usd=1)
+        assert not stops and a.failed and a.cost_usd == 0.003
+    except llm.Unavailable:
+        assert stops
+    assert len(sent) == 2 and egress.spent_this_month(pipe) == pytest.approx(0.003)

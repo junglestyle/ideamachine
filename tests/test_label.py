@@ -1,5 +1,8 @@
 """Labels and the projects registry."""
 
+import re
+import uuid
+
 import pytest
 
 from im import label, pipeline, projects
@@ -38,13 +41,15 @@ def test_a_scripted_session_saves_labels(pipe, cfg, stream):
         "s", "n", "n", "1", "2", "y",           # ...then save
         "q")
     assert label.session(pipe, read, write) == 2
-    rows = table(pipe, "SELECT answers, note FROM im.labels ORDER BY label_id")
-    assert rows[0] == ({"boundaries": "ok", "is_self_thinking": True, "kind": "idea", "project": "backups",
-                        "keep_score": 4}, None)
-    assert rows[1] == ({"boundaries": "split", "is_self_thinking": False, "kind": "noise", "project": "backups",
-                        "keep_score": 2}, None)
-    assert any("one of: y, n" in line for line in out)  # "maybe" was re-asked
-    assert "labeled episodes: 2 / 50" in label.status(pipe)
+    rows = table(pipe, "SELECT answers, note, episode_id FROM im.labels ORDER BY label_id")
+    assert rows[0][:2] == ({"boundaries": "ok", "is_self_thinking": True, "kind": "idea", "project": "backups",
+                            "keep_score": 4}, None)   # "maybe" was asked again, not read as the next answer
+    assert rows[1][:2] == ({"boundaries": "split", "is_self_thinking": False, "kind": "noise", "project": "backups",
+                            "keep_score": 2}, None)
+    shown = list(dict.fromkeys(re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                                          "\n".join(out))))
+    # Four shown: labeled, skipped, labeled, and the one I quit at. The skipped one didn't come back.
+    assert len(shown) == 4 and [r[2] for r in rows] == [uuid.UUID(shown[0]), uuid.UUID(shown[2])]
 
 
 def test_next_episode_balances_episode_kinds(pipe, cfg, stream):
@@ -102,7 +107,8 @@ def test_forgetting_deletes_labels_and_nothing_else(pipe, cfg, stream):
 def test_answers_are_validated(pipe, cfg, stream):
     run(pipe, cfg, stream)
     (eid,) = episodes_with_text(pipe, HOSTING)
-    for bad in [{"kind": "rant"}, {"keep_score": 0}, {"project": "nope"}, {"is_self_thinking": "y"}]:
+    for bad in [{"kind": "rant"}, {"keep_score": 0}, {"keep_score": True}, {"keep_score": 3.0}, {"project": "nope"},
+                {"is_self_thinking": "y"}]:
         with pytest.raises(ValueError):
             label.save(pipe, eid, ANSWERS | bad, None)
     with pytest.raises(ValueError):
@@ -133,7 +139,7 @@ def test_relabeling_replaces_an_episodes_label_and_review_finds_them(pipe, cfg, 
                               "q")
     assert label.session(pipe, read, write, review=("kind", "idea")) == 1
     assert len(label.review_queue(pipe, "kind", "idea")) == 1
-    assert any("previous label" in line for line in out)
+    assert any('"kind": "idea"' in line for line in out)   # the label it replaces was shown
     latest = label.current_labels(pipe)
     assert len(latest) == 3 and table(pipe, "SELECT count(*) FROM im.labels") == [(4,)]
     from im.backends import exact_labels

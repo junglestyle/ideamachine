@@ -102,7 +102,12 @@ def test_a_stitched_quote_doesnt_chain_two_points_into_one_observation(pipe, cfg
     def respond(text):   # three captures of the database line; nothing on other episodes
         return [dict(line, quote=q) for line in capture(DATABASE)(text) for q in (HOSTING, STITCHED, MOVE)]
     extract.run_stage(pipe, FakeClaude(respond))
+    # Assigned in this order, the stitched quote joins the first point's observation before the second point
+    # comes; it matches the stitched quote, not the first point.
+    for n, quote in enumerate((HOSTING, STITCHED, MOVE)):
+        pipe.execute("UPDATE im.items SET created_at = created_at + %s * interval '1 second' WHERE quote = %s",
+                     (n, quote))
     assert observations.assign_stage(pipe) == {"new": 2, "joined": 1, "dropped": 0, "typed": 0}
     obs = dict(table(pipe, "SELECT quote, observation_id FROM im.items"))
-    assert obs[HOSTING] != obs[MOVE]                       # B5's false merges: two points, one observation
-    assert obs[STITCHED] in (obs[HOSTING], obs[MOVE])      # the stitched quote joins one of them, whichever came first
+    assert obs[HOSTING] != obs[MOVE]   # B5's false merges: two points, one observation
+    assert obs[STITCHED] == obs[HOSTING]

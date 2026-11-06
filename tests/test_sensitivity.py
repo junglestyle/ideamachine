@@ -78,6 +78,18 @@ def test_my_marks_win_at_once_either_way(seeded_lattice, admin):
     assert ("theme", str(jokes)) not in shown(admin)   # the theme is gone; its old mark stays as history
 
 
+def test_my_latest_mark_is_what_demo_mode_hides(seeded_lattice, admin):
+    pipe = seeded_lattice
+    coffee = table(pipe, "SELECT idea_id FROM pub.ideas WHERE statement LIKE '%%coffee%%'")[0][0]
+    jokes = themes.find(pipe, "jokes")
+    mark = "INSERT INTO pub.feedback_events (kind, idea_id, theme_id, payload) VALUES (%s, %s, %s, %s)"
+    for sensitive in (True, False, True, False):   # I change my mind, and back, and again
+        as_lattice(admin, mark, "idea_sensitive", coffee, None, json.dumps({"sensitive": sensitive}))
+        as_lattice(admin, mark, "theme_sensitive", None, jokes, json.dumps({"sensitive": not sensitive}))
+        assert shown(admin) == {("idea", str(coffee)): (sensitive, [], "owner"),
+                                ("theme", str(jokes)): (not sensitive, [], "owner")}
+
+
 def test_quotes_are_read_too(seeded_lattice, admin):
     pipe = seeded_lattice
     claude = FakeTagger(word="lora")   # only the LoRa idea's quote says "LoRa"; its title doesn't
@@ -85,3 +97,31 @@ def test_quotes_are_read_too(seeded_lattice, admin):
     lora = table(pipe, "SELECT idea_id FROM pub.ideas WHERE title = 'Something new'")[0][0]
     assert ("idea", str(lora)) in shown(admin)
     assert '[said: "' in claude.calls[0]["messages"][0]["content"]
+
+
+class RefusesThenCutsOff(FakeTagger):
+    """FakeTagger, except that it refuses its first batch and its answer to the second is cut off mid-JSON."""
+
+    def create(self, **kw):
+        r = super().create(**kw)
+        if len(self.calls) == 1:
+            return SimpleNamespace(content=[], stop_reason="refusal", model="claude-opus-5-5", _request_id="r",
+                                   usage=r.usage)
+        if len(self.calls) == 2:
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"ideas": [{"n"')],
+                                   stop_reason="max_tokens", model="claude-opus-5-5", _request_id="r", usage=r.usage)
+        return r
+
+
+def test_a_batch_refused_or_cut_off_is_tagged_next_run_and_the_batches_after_it_now(seeded_lattice, monkeypatch):
+    pipe = seeded_lattice
+    monkeypatch.setattr(sensitivity, "BATCH", 2)
+    claude = RefusesThenCutsOff()
+    stats = sensitivity.tag_stage(pipe, claude)
+    assert stats["pending"] > 4 and stats["tagged"] == stats["pending"] - 4   # the batches after them were tagged
+    assert (stats["refused"], stats["failed"]) == (1, 1)
+    logged = table(pipe, """SELECT count(*), count(*) FILTER (WHERE error IS NOT NULL AND cost_usd > 0)
+                            FROM im.egress_log WHERE prompt_version = %s""", f"sensitivity:{sensitivity.tagger_version()}")
+    assert logged == [(len(claude.calls), 1)]
+    again = sensitivity.tag_stage(pipe, FakeTagger())
+    assert again["pending"] == again["tagged"] == 4

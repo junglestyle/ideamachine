@@ -4,11 +4,12 @@ import hashlib
 import itertools
 import json
 import re
+import time
 from types import SimpleNamespace
 
 import pytest
 
-from im import jev, llm, probe_audit
+from im import egress, jev, llm, names, probe_audit
 
 from test_edge_audit import lattice_with_clusters  # noqa: F401 (fixture)
 from test_lattice import seeded  # noqa: F401 (fixture)
@@ -41,13 +42,15 @@ class FakeProposer:
                                                                                          output_tokens=90))
 
 
-def fake_jev(fail_after: int | None = None):
+def fake_jev(fail_after: int | None = None, takes: float = 0.0):
     """Jev answering each question with a probability that differs by pair and question, the same every time; and
-    every body it was sent. With `fail_after`, the requests after that many are rate-limited."""
+    every body it was sent. With `fail_after`, the requests after that many are rate-limited; each answer takes
+    `takes` seconds."""
     sent = []
 
     def post(body):
         sent.append(body)
+        time.sleep(takes)
         if fail_after is not None and len(sent) > fail_after:
             raise llm.Unavailable("Jev via openrouter, HTTP 429")
         state = json.dumps(body["state"], sort_keys=True)
@@ -106,32 +109,115 @@ def test_an_analogy_sheet_draws_unrelated_pairs_blind_and_scores_each_way(lattic
         assert (c["pairs"], c["held"]) == (len(theirs), sum(p["set"] != "random" for p in theirs))
 
 
+def test_the_facets_are_credited_only_with_the_pairs_they_rank_highest(lattice_with_clusters, tmp_path,  # noqa: F811
+                                                                       monkeypatch):
+    # Nearly every unrelated pair is somewhere in the facets' ranking, so crediting all of it said nothing.
+    monkeypatch.setattr(probe_audit, "TOP", 2)
+    client, (jev_client, _) = FakeProposer(), fake_jev()
+    probe_audit.write(lattice_with_clusters, client, HashEmbedder(), "analogy", tmp_path, jev=jev_client)
+    pairs = json.loads((tmp_path / "key.json").read_text())["pairs"].values()
+    assert 0 < sum("facets" in p["proposed_by"] for p in pairs) <= 2
+
+
+def every_pair(conn):
+    ids = sorted(r[0] for r in probe_audit.edge_audit._clusters(conn) if r[2])
+    return [{"ideas": [a, b]} for a, b in itertools.combinations(ids, 2)]
+
+
 def test_jevs_pool_picks_up_where_a_stopped_run_left_off(lattice_with_clusters, tmp_path):  # noqa: F811
-    ids = sorted(r[0] for r in probe_audit.edge_audit._clusters(lattice_with_clusters) if r[2])
-    pairs = [{"ideas": [a, b]} for a, b in itertools.combinations(ids, 2)]
+    pairs = every_pair(lattice_with_clusters)
     assert len(pairs) > 5
     stopped, sent = fake_jev(fail_after=5)
     with pytest.raises(llm.Unavailable):
         probe_audit.jev_pool(lattice_with_clusters, stopped, None, pairs, tmp_path)
     kept = json.loads((tmp_path / "jev-pool.json").read_text())
-    logged = lattice_with_clusters.execute("SELECT count(*) FROM im.egress_log WHERE model = 'jev-1.14.0'").fetchone()[0]
-    assert 0 < len(kept) <= 5 and logged == len(kept)   # what was answered is kept and logged
+    answered, logged = lattice_with_clusters.execute(
+        "SELECT count(*) FILTER (WHERE error IS NULL), count(*) FROM im.egress_log WHERE model = 'jev-1.14.0'"
+    ).fetchone()
+    assert 0 < len(kept) <= 5 and answered == len(kept)   # what was answered is kept and logged
+    assert logged == len(sent)   # and so is every request that went, answered or not
     again, resent = fake_jev()
     got = probe_audit.jev_pool(lattice_with_clusters, again, None, pairs, tmp_path)
     assert len(got) == len(pairs) and len(resent) == len(pairs) - len(kept)
 
 
+def test_a_pool_stopped_by_anything_sends_nothing_more_and_keeps_only_what_it_logged(
+        lattice_with_clusters, tmp_path, monkeypatch):  # noqa: F811
+    pairs = every_pair(lattice_with_clusters)
+    real, calls = egress._log, []
+
+    def log_then_interrupt(*args, **kw):
+        calls.append(1)
+        if len(calls) >= 3:
+            raise KeyboardInterrupt   # Ctrl-C, or the database going away, mid-pool
+        return real(*args, **kw)
+    monkeypatch.setattr(egress, "_log", log_then_interrupt)
+    monkeypatch.setattr(probe_audit, "JEV_WORKERS", 1)
+    client, sent = fake_jev(takes=0.05)   # slower than logging, so the rest are still queued when it stops
+    with pytest.raises(KeyboardInterrupt):
+        probe_audit.jev_pool(lattice_with_clusters, client, None, pairs, tmp_path)
+    kept = json.loads((tmp_path / "jev-pool.json").read_text())
+    logged = lattice_with_clusters.execute("SELECT count(*) FROM im.egress_log WHERE model = 'jev-1.14.0'").fetchone()[0]
+    assert len(sent) <= 4 < len(pairs)   # the queue was dropped: at most the one in flight went too
+    assert len(kept) == logged == 2
+
+
+class CutsOff(FakeProposer):
+    """FakeProposer, its every answer cut off mid-JSON."""
+
+    def create(self, **kw):
+        r = super().create(**kw)
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"pairs": [{"a"')], stop_reason="max_tokens",
+                               model=kw["model"], _request_id="r", usage=r.usage)
+
+
+@pytest.mark.parametrize("question, only", [("tension", "model"), ("analogy", "facets")])
+def test_a_proposer_that_fails_writes_no_sheet_and_a_rerun_asks_again(lattice_with_clusters, tmp_path, question,  # noqa: F811
+                                                                      only):
+    embedder = HashEmbedder() if question == "analogy" else None
+    with pytest.raises(SystemExit):
+        probe_audit.write(lattice_with_clusters, CutsOff(), embedder, question, tmp_path, only=only)
+    assert not (tmp_path / "sheet.md").exists()
+    assert probe_audit.write(lattice_with_clusters, FakeProposer(), embedder, question, tmp_path, only=only)["pairs"]
+
+
+def test_a_pool_answer_that_cant_be_read_stops_the_sheet_and_is_asked_again(lattice_with_clusters, tmp_path):  # noqa: F811
+    pairs = every_pair(lattice_with_clusters)
+    good, _ = fake_jev()
+    count = itertools.count(1)
+
+    def post(body):   # the second answer comes back without any
+        n = next(count)   # atomic: the pool asks from several threads
+        return {"model": "jev-1.14.0", "usage": {"input_tokens": 1000}} if n == 2 else good.post(body)
+    with pytest.raises(SystemExit):
+        probe_audit.jev_pool(lattice_with_clusters, jev.Jev(post=post), None, pairs, tmp_path)
+    assert len(json.loads((tmp_path / "jev-pool.json").read_text())) == len(pairs) - 1
+    again, resent = fake_jev()
+    assert len(probe_audit.jev_pool(lattice_with_clusters, again, None, pairs, tmp_path)) == len(pairs)
+    assert len(resent) == 1
+
+
+
+def test_tied_scores_propose_the_same_pairs_whatever_order_the_answers_came_back_in():
+    answers = {f"{a} {b}": {"same_move": 0.5, "same_form": 0.5 if a < "m" else 0.4}
+               for a, b in [("a", "z"), ("q", "r"), ("c", "d"), ("x", "y")]}
+    backwards = dict(reversed(answers.items()))
+    assert probe_audit._jev_proposals(answers) == probe_audit._jev_proposals(backwards)
+    swapped = {pair: dict(reversed(qs.items())) for pair, qs in answers.items()}   # Jev's answers in another order
+    assert probe_audit._jev_proposals(answers) == probe_audit._jev_proposals(swapped)
+
+
 def test_a_tension_sheet_scores_yes_no_and_says_when_a_mark_isnt_one(lattice_with_clusters, tmp_path):  # noqa: F811
     out = probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", tmp_path)
-    assert out["pairs"] > 0 and "Do A and B pull against each other" in (tmp_path / "sheet.md").read_text()
+    assert out["pairs"] > 0
     fill(tmp_path, lambda p: "maybe")
     r = probe_audit.score(tmp_path)
     assert r["marked"] == 0 and [u["mark"] for u in r["unreadable"]] == ["maybe"] * out["pairs"]
 
 
-def test_marks_are_one_word():
-    got = probe_audit.marks("## 1\nmark: y\nnote: same move\n## 2\nmark: ?\n## 3\nmark: \n")
-    assert got == {"1": {"mark": "yes", "note": "same move"}, "2": {"mark": "unsure"}}
+def test_marks_are_one_word_and_a_note_runs_to_the_next_pair():
+    got = probe_audit.marks("## 1\nmark: y\nnote: same move,\n  in two trades\n\n## 2\nmark: ?\n## 3\nmark: \n")
+    assert got == {"1": {"mark": "yes", "note": "same move,\nin two trades"}, "2": {"mark": "unsure"}}
 
 
 def test_a_model_answers_the_sheet_blind_and_is_scored_against_me(lattice_with_clusters, tmp_path):  # noqa: F811
@@ -141,13 +227,17 @@ def test_a_model_answers_the_sheet_blind_and_is_scored_against_me(lattice_with_c
     d = probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-opus-5-5")
     assert d["pairs"] == out["pairs"] == len(model.calls)
     sent = "\n".join(c["messages"][0]["content"] for c in model.calls)
-    assert "mark:" not in sent and "Do they pull against each other" in model.calls[0]["system"]
+    assert "mark:" not in sent and model.calls[0]["system"] == probe_audit.DRAFT_SYSTEM["tension"]
     assert probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-opus-5-5")["pairs"] == out["pairs"]
     assert len(model.calls) == out["pairs"]   # a rerun asks nothing it has already answered
-    r = probe_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low"]
+    r = probe_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low-B1"]
     mine_yes = sum(1 for p in json.loads((tmp_path / "key.json").read_text())["pairs"].values() if p["set"] == "model")
     assert r["recall"] == (1.0 if mine_yes else None) and r["pairs"] == out["pairs"]
     assert r["precision"] == (round(mine_yes / out["pairs"], 3) if out["pairs"] else None)
+    # Under policy C it's another draft: policy B's answers don't stand in for it, nor are they scored as C's.
+    c = probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-opus-5-5", scrubber=names.Scrubber(b"k"))
+    assert c["pairs"] == out["pairs"] and len(model.calls) == 2 * out["pairs"] and c["policy"].startswith("C")
+    assert set(probe_audit.score(tmp_path)["drafts"]) == {"claude-opus-5-5-low-B1", "claude-opus-5-5-low"}
 
 
 def test_agreement_counts_only_pairs_both_answered():
@@ -163,7 +253,7 @@ def test_a_sheet_from_one_set_leaves_out_pairs_already_asked(lattice_with_cluste
     probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", first)
     out = probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", second, only="model", size=5,
                             exclude_folders=[first])
-    asked = probe_audit.earlier([first])
+    asked = {tuple(p["ideas"]) for p in json.loads((first / "key.json").read_text())["pairs"].values()}
     pairs = json.loads((second / "key.json").read_text())["pairs"].values()
     assert out["by_set"] == {"model": len(pairs)} and all(p["set"] == "model" for p in pairs)
     assert not {tuple(p["ideas"]) for p in pairs} & asked
@@ -173,7 +263,7 @@ def test_a_quotes_only_draft_never_shows_the_summaries(lattice_with_clusters, tm
     probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", tmp_path)
     model = FakeProposer()
     d = probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-sonnet-5-5", quotes_only=True)
-    assert d["draft"].endswith("-low-quotes.json") and model.calls
+    assert d["draft"].endswith("-low-B1-quotes.json") and model.calls
     assert not any("Claude's summary" in c["messages"][0]["content"] for c in model.calls)
     assert "then a summary" not in model.calls[0]["system"]
     assert any("> \"" in c["messages"][0]["content"] for c in model.calls)   # quotes still go, where there are any
@@ -189,7 +279,9 @@ def test_new_and_known_both_hold_and_only_new_counts_as_novel(lattice_with_clust
     total = {k: sum(c.get(k, 0) for c in r["by_set"].values()) for k in ("new", "known", "no")}
     assert total == {k: sum(m == k for m in marks.values()) for k in ("new", "known", "no")}
     assert {y["mark"] for y in r["yes"]} <= {"new", "known"} and len(r["yes"]) == total["new"] + total["known"]
-    assert "Judge whether it's worth seeing" in (tmp_path / "sheet.md").read_text()
+    for s, c in r["by_set"].items():   # known holds, but only new was new to me
+        mine = [marks[n] for n, q in key.items() if q["set"] == s]
+        assert c["novel_rate"] == (round(mine.count("new") / len(mine), 3) if mine else None)
 
 
 def test_a_filter_that_drops_what_was_new_to_me_says_so():

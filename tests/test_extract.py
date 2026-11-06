@@ -12,7 +12,7 @@ from im import egress, extract, feedback, importer, router
 
 from helpers import assert_invariants, episodes_with_text, run, table
 from test_label import script
-from test_pipeline import COFFEE, CORRECTIONS, SECRET
+from test_pipeline import COFFEE, CORRECTIONS, SECRET, V3_IDENTITY
 from test_triage import fixtures_iso
 
 class FakeClaude:
@@ -57,11 +57,14 @@ def test_payload_pseudonymizes_speakers_and_numbers_lines(pipe, cfg, stream):
 
 def test_extraction_maps_items_back_and_logs_what_went_out(pipe, cfg, stream):
     run(pipe, cfg, stream)
-    claude = FakeClaude(coffee_item)
+    def respond(text):   # the coffee capture, citing lines 0 and 999 too; and one citing only line 0
+        return [dict(c, lines=[0, *c["lines"]]) for c in coffee_item(text)] + \
+            [dict(c, quote="nothing on line 0", lines=[0]) for c in coffee_item(text)]
+    claude = FakeClaude(respond)
     stats = extract.run_stage(pipe, claude)
-    assert stats["read"] == 9 and stats["items"] == 1 and len(claude.calls) == 9
+    assert stats["read"] == 9 and stats["items"] == 1 and len(claude.calls) == 9   # citing no real line: dropped
     (kind, said_by, segs), = table(pipe, "SELECT kind, said_by, source_segment_ids FROM im.items")
-    assert (kind, said_by) == ("joke", "anon A") and len(segs) == 1  # line 999 didn't exist: dropped
+    assert (kind, said_by) == ("joke", "anon A") and len(segs) == 1  # lines 0 and 999 don't exist: dropped
     assert table(pipe, "SELECT text FROM im.source_segments WHERE segment_id = %s", segs[0]) == [(COFFEE,)]
     logged = table(pipe, "SELECT count(*), sum(cost_usd)::float, bool_and(payload IS NOT NULL) FROM im.egress_log")
     assert logged == [(9, pytest.approx(9 * (1000 * 4 + 200 * 20) / 1e6), True)]
@@ -127,7 +130,7 @@ def test_merging_voices_reads_that_episode_again(pipe, cfg, stream):
 def test_reuse_after_a_rekey_sends_nothing(pipe, cfg, stream, monkeypatch):
     with monkeypatch.context() as m:
         m.setattr(importer, "STAGE_VERSION", "import/stream-v3")
-        m.setattr(importer, "NOT_IDENTITY", {"utterance_id", "affect", "delivery"})
+        m.setattr(importer, "IDENTITY", V3_IDENTITY)
         run(pipe, cfg, stream)
         claude = FakeClaude(coffee_item)
         extract.run_stage(pipe, claude)
@@ -137,6 +140,9 @@ def test_reuse_after_a_rekey_sends_nothing(pipe, cfg, stream, monkeypatch):
     assert len(claude.calls) == sent and stats["read"] == 0 and stats["reused"] == 9 and stats["items"] == 1
     assert table(pipe, """SELECT w.said_by FROM im.items i JOIN im.item_said_by w USING (item_id)
                           JOIN im.episodes e USING (episode_id) WHERE e.current""") == [("anon A",)]
+    assert table(pipe, """SELECT i.source_segment_ids <@ ARRAY(SELECT es.segment_id FROM im.episode_segments es
+                                                              WHERE es.episode_id = i.episode_id)
+                          FROM im.items i JOIN im.episodes e USING (episode_id) WHERE e.current""") == [(True,)]
     assert_invariants(pipe)
 
 
@@ -145,7 +151,7 @@ def test_reuse_keeps_each_duplicate_captures_own_verdict(pipe, cfg, stream, monk
     twice = lambda text: coffee_item(text) * 2  # noqa: E731
     with monkeypatch.context() as m:
         m.setattr(importer, "STAGE_VERSION", "import/stream-v3")
-        m.setattr(importer, "NOT_IDENTITY", {"utterance_id", "affect", "delivery"})
+        m.setattr(importer, "IDENTITY", V3_IDENTITY)
         run(pipe, cfg, stream)
         extract.run_stage(pipe, FakeClaude(twice))
     a, b = (r[0] for r in table(pipe, "SELECT item_id FROM im.items ORDER BY item_id"))
@@ -228,6 +234,16 @@ def test_reviewing_items(pipe, cfg, stream):
     assert d[2] == "coffee order" and d[6] == "a song lyric, not an idea"
 
 
+def test_a_capture_on_a_replaced_episode_isnt_offered_for_review(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    extract.run_stage(pipe, FakeClaude(coffee_item))
+    assert len(extract.review_items(pipe)) == 1
+    stream.name_speaker("c-conv", "anon A", "Alice")   # S2 is S1: the coffee episode is replaced, and not read yet
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    assert extract.review_items(pipe) == []
+
+
 @pytest.mark.parametrize("state, items, expect", [
     ("me: nothing much", [], ("auto_file", [])),
     ("me: Note to self, buy batteries", None, ("review", ["note_to_self"])),
@@ -247,8 +263,6 @@ def test_im_run_goes_on_without_claude(pipe, cfg, stream, monkeypatch, capsys):
     run(pipe, cfg, stream)
     monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
     monkeypatch.setattr(cli.db, "stream_dir", lambda: stream.dir)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("ANTHROPIC_PROFILE", "im-test-no-such-profile")
     cli.main(["run"])
     out = json.loads(capsys.readouterr().out)
     assert out["extract"]["stopped"].startswith("Claude")
@@ -276,3 +290,79 @@ def test_pending_reports_what_would_be_resent(pipe, cfg, stream, monkeypatch, ca
     finally:
         monkeypatch.delenv("TZ")
         time.tzset()
+
+
+class FailsOn(FakeClaude):
+    """FakeClaude, except that the episode where `needle` was said comes back as `how`: a 400 (no usage), a reply
+    that spent its tokens thinking and wrote no text, or JSON cut off at max_tokens (both at 1000 in, 16000 out)."""
+
+    def __init__(self, needle, how, respond=lambda text: []):
+        super().__init__(respond)
+        self.needle, self.how = needle, how
+
+    def create(self, **kw):
+        if self.needle not in kw["messages"][0]["content"]:
+            return super().create(**kw)
+        self.calls.append(kw)
+        if self.how == "400":
+            raise anthropic.BadRequestError("prompt is too long", body=None,
+                                            response=httpx2.Response(400, request=httpx2.Request("POST", "https://x")))
+        content = [SimpleNamespace(type="thinking", thinking="hmm")] if self.how == "no text" else \
+            [SimpleNamespace(type="text", text='{"items": [{"kind": "jo')]
+        return SimpleNamespace(content=content, stop_reason="max_tokens", model="claude-opus-5-5", _request_id="req_x",
+                               usage=SimpleNamespace(input_tokens=1000, output_tokens=16000))
+
+
+@pytest.mark.parametrize("how", ["400", "no text", "cut off"])
+def test_a_reply_that_fails_is_logged_and_counted_and_the_next_episodes_are_read(pipe, cfg, stream, how):
+    run(pipe, cfg, stream)
+    claude = FailsOn("coffee", how)
+    stats = extract.run_stage(pipe, claude)
+    assert (stats["read"], stats["failed"], len(claude.calls)) == (8, 1, 9)
+    (failed,) = table(pipe, "SELECT cardinality(segment_ids), cost_usd, payload LIKE '%%coffee%%' FROM im.egress_log "
+                            "WHERE error IS NOT NULL")
+    paid = 0.0 if how == "400" else 1000 * 4.0 / 1e6 + 16000 * 20.0 / 1e6   # Opus 5.5
+    assert failed[0] > 0 and float(failed[1]) == pytest.approx(paid) and failed[2]
+    assert egress.spent_this_month(pipe) == pytest.approx(8 * (1000 * 4.0 + 200 * 20.0) / 1e6 + paid)
+    again = extract.run_stage(pipe, claude)   # only the failed episode is asked again
+    assert (again["pending"], again["failed"], len(claude.calls)) == (1, 1, 10)
+
+
+def test_im_run_goes_on_past_a_reply_that_fails_to_the_stages_after_extraction(pipe, cfg, stream, monkeypatch,
+                                                                               capsys):
+    from im import backends, cli
+    from test_triage import HashEmbedder
+
+    run(pipe, cfg, stream)
+    monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
+    monkeypatch.setattr(cli.db, "stream_dir", lambda: stream.dir)
+    monkeypatch.setattr(anthropic, "Anthropic", lambda: FailsOn("coffee", "no text"))
+    monkeypatch.setattr(backends, "SentenceEmbedder", lambda model: HashEmbedder())
+    cli.main(["run"])
+    out = json.loads(capsys.readouterr().out)
+    assert (out["extract"]["read"], out["extract"]["failed"]) == (8, 1)
+    assert "lattice" in out and "digest" in out and out["route"]["waiting_for_claude"] == 1   # the failed one waits
+
+
+def test_a_model_with_no_known_price_is_never_sent_to(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    claude = FakeClaude()
+    stats = extract.run_stage(pipe, claude, model="claude-opus-9")
+    assert stats["stopped"] and stats["read"] == 0 and claude.calls == []
+    assert table(pipe, "SELECT count(*) FROM im.egress_log") == [(0,)]
+
+
+def status_error(cls, code, body=None):
+    return cls("rejected", body=body, response=httpx2.Response(code, request=httpx2.Request("POST", "https://x")))
+
+
+@pytest.mark.parametrize("error", [
+    status_error(anthropic.NotFoundError, 404),   # a retired model id
+    status_error(anthropic.APIStatusError, 402, {"type": "error", "error": {"type": "billing_error"}}),
+    status_error(anthropic.AuthenticationError, 401)])
+def test_an_error_every_request_would_get_stops_extraction_after_the_first(pipe, cfg, stream, error):
+    run(pipe, cfg, stream)
+    claude = FakeClaude(error=error)
+    stats = extract.run_stage(pipe, claude)
+    assert len(claude.calls) == 1 and stats["stopped"] and stats["failed"] == 0
+    assert table(pipe, "SELECT count(*), count(error) FROM im.egress_log") == [(1, 1)]   # it went, so it's logged

@@ -1,7 +1,7 @@
 """Themes (ROADMAP Phase 2, slice 4): my categories, proposed by the system and steered by me.
 
 - The filer puts each unthemed idea into up to two current themes, or none. It looks at an idea again only when
-  the set of themes changes.
+  the set of themes changes, or when its batch was refused or failed (it's filed on the next run).
 - The proposer, once enough ideas fit no theme, asks Claude to group them into new themes. These arrive unpinned
   (`origin = 'clustered'`) and stay proposals until I pin, rename or reject them.
 - My theme feedback (pin, unpin, rename, reject, merge, split, filing or unfiling one idea) arrives as events in
@@ -15,7 +15,7 @@ import hashlib
 import json
 import string
 
-from im import egress
+from im import egress, llm
 
 MODEL, EFFORT = "claude-opus-5-5", "low"
 BATCH = 25
@@ -84,30 +84,12 @@ def _letters(n: int) -> list[str]:
     return [string.ascii_uppercase[i] if i < 26 else f"Z{i - 25}" for i in range(n)]
 
 
-def _call(client, system: str, schema: dict, text: str):
-    r = client.beta.messages.create(
-        model=MODEL, max_tokens=16000, system=system, messages=[{"role": "user", "content": text}],
-        output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": schema}},
-        betas=["server-side-fallback-2026-06-01"], fallbacks=[{"model": "claude-opus-4-8"}])
-    if r.stop_reason == "refusal":
-        return None, r
-    return json.loads(next(b.text for b in r.content if b.type == "text")), r
-
-
-def _log(conn, text: str, prompt_version: str, idea_ids: list, r) -> None:
-    from im.extract import _cost
-
-    segs = [s for (s,) in conn.execute(
-        """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
-           WHERE ev.idea_id = ANY(%s)""", (idea_ids,))]
-    served = getattr(r, "model", MODEL) or MODEL
-    conn.execute(
-        """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version, payload,
-             payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
-           VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-        (segs, MODEL, prompt_version, egress.POLICY_VERSION, text, hashlib.sha256(text.encode()).hexdigest(),
-         getattr(r, "_request_id", None), r.stop_reason, served, r.usage.input_tokens, r.usage.output_tokens,
-         _cost(served, r.usage)))
+def ask(conn, client, system: str, schema: dict, text: str, prompt_version: str, idea_ids: list,
+        monthly_cap_usd: float) -> egress.Answer:
+    """A request about lattice ideas, on the lattice's model, logged with the segments behind the ideas it shows.
+    Raises llm.Stop at the cap or when Claude can't answer now; a request that failed comes back failed."""
+    return egress.ask(conn, client, MODEL, EFFORT, system, schema, text, prompt_version=prompt_version,
+                      segment_ids=egress.segments_of(conn, idea_ids), monthly_cap_usd=monthly_cap_usd)
 
 
 def _unthemed(conn, tv: str) -> list[tuple]:
@@ -134,29 +116,31 @@ def refile_corrected(conn) -> int:
 
 
 def file_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
-    from im.extract import spent_this_month
-
     refiled = refile_corrected(conn)
 
     tv = themes_version(conn)
     themes = current_themes(conn)
     todo = _unthemed(conn, tv)
     stats = {"themes_version": tv, "pending": len(todo), "refiled_after_correction": refiled, "assigned": 0, "none": 0,
-             "stopped": None}
+             "refused": 0, "failed": 0, "stopped": None}
     if not themes or not todo:
         return stats
     letters = _letters(len(themes))
     by_letter = dict(zip(letters, (t[0] for t in themes), strict=True))
     header = "Themes:\n" + "\n".join(f"{L}. {n}" + (f": {d}" if d else "") for L, (_, n, d) in zip(letters, themes))
     for start in range(0, len(todo), BATCH):
-        if spent_this_month(conn) >= monthly_cap_usd:
-            stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
-            break
         batch = todo[start:start + BATCH]
         text = header + "\n\nIdeas:\n" + "\n".join(f"{n}. {t}: {s}" for n, (_, t, s) in enumerate(batch, 1))
-        answer, r = _call(client, FILE_SYSTEM, FILE_SCHEMA, text)
-        _log(conn, text, f"themes-file:{tv}", [b[0] for b in batch], r)
-        got = {a["idea"]: a["themes"] for a in (answer or {"assignments": []})["assignments"]}
+        try:
+            a = ask(conn, client, FILE_SYSTEM, FILE_SCHEMA, text, f"themes-file:{tv}", [b[0] for b in batch],
+                    monthly_cap_usd)
+        except llm.Stop as e:
+            stats["stopped"] = str(e)[:200]
+            break
+        if a.refused or a.failed:   # no answer isn't "fits no theme": filed on the next run
+            stats["refused" if a.refused else "failed"] += 1
+            continue
+        got = {x["idea"]: x["themes"] for x in a.data["assignments"]}
         with conn.transaction():
             for n, (idea_id, _, _) in enumerate(batch, 1):
                 blocked = {b for (b,) in conn.execute(
@@ -177,27 +161,30 @@ def file_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
 
 def propose_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
     """Group ideas that fit no theme into proposed themes, once enough new ones have piled up."""
-    from im.extract import spent_this_month
-
     loose = conn.execute(
         """SELECT d.idea_id, d.title, d.statement, c.proposal_seen FROM pub.ideas d
            JOIN im.theme_checks c ON c.idea_id = d.idea_id AND c.result = 'none'
            WHERE NOT EXISTS (SELECT 1 FROM im.idea_themes it WHERE it.idea_id = d.idea_id)
            ORDER BY d.created_at""").fetchall()
     fresh = sum(not seen for *_, seen in loose)
-    stats = {"unthemed": len(loose), "unseen": fresh, "proposed": 0, "stopped": None}
+    stats = {"unthemed": len(loose), "unseen": fresh, "proposed": 0, "failed": 0, "stopped": None}
     if fresh < PROPOSE_MIN:
-        return stats
-    if spent_this_month(conn) >= monthly_cap_usd:
-        stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
         return stats
     rejected = [n for (n,) in conn.execute("SELECT name FROM im.theme_rejections ORDER BY name")]
     text = ("Existing themes:\n" + "\n".join(f"- {n}" for _, n, _ in current_themes(conn))
             + "\n\nRejected names:\n" + ("\n".join(f"- {n}" for n in rejected) or "(none)")
             + "\n\nIdeas that fit no theme:\n" + "\n".join(f"{n}. {t}: {s}" for n, (_, t, s, _) in enumerate(loose, 1)))
     pv = version(PROPOSE_SYSTEM, PROPOSE_SCHEMA, MODEL, EFFORT)
-    answer, r = _call(client, PROPOSE_SYSTEM, PROPOSE_SCHEMA, text)
-    _log(conn, text, f"themes-propose:{pv}", [x[0] for x in loose], r)
+    try:
+        a = ask(conn, client, PROPOSE_SYSTEM, PROPOSE_SCHEMA, text, f"themes-propose:{pv}", [x[0] for x in loose],
+                monthly_cap_usd)
+    except llm.Stop as e:
+        stats["stopped"] = str(e)[:200]
+        return stats
+    if a.failed:   # the ideas stay unseen, for the next run
+        stats["failed"] = 1
+        return stats
+    answer = a.data
     taken = {n.lower() for _, n, _ in current_themes(conn)} | {n.lower() for n in rejected}
     with conn.transaction():
         for t in (answer or {"themes": []})["themes"]:
@@ -243,14 +230,9 @@ def apply_feedback(conn) -> dict:
 
 def describe_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
     """Give themes without a description (ones I split off) one, from their name and up to 12 of their ideas."""
-    from im.extract import spent_this_month
-
     todo = conn.execute("SELECT theme_id, name FROM im.themes WHERE description IS NULL ORDER BY created_at").fetchall()
-    stats = {"pending": len(todo), "described": 0, "stopped": None}
+    stats = {"pending": len(todo), "described": 0, "failed": 0, "stopped": None}
     if not todo:
-        return stats
-    if spent_this_month(conn) >= monthly_cap_usd:
-        stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
         return stats
     blocks, ideas = [], []
     for n, (theme_id, name) in enumerate(todo, 1):
@@ -260,8 +242,14 @@ def describe_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
         ideas += [r[0] for r in rows]
         blocks.append(f"{n}. {name}\n" + ("\n".join(f"   - {t}" for _, t in rows) or "   (no ideas yet)"))
     text = "Themes:\n" + "\n".join(blocks)
-    answer, r = _call(client, DESCRIBE_SYSTEM, DESCRIBE_SCHEMA, text)
-    _log(conn, text, f"themes-describe:{version(DESCRIBE_SYSTEM, DESCRIBE_SCHEMA, MODEL, EFFORT)}", ideas, r)
+    try:
+        a = ask(conn, client, DESCRIBE_SYSTEM, DESCRIBE_SCHEMA, text,
+                f"themes-describe:{version(DESCRIBE_SYSTEM, DESCRIBE_SCHEMA, MODEL, EFFORT)}", ideas, monthly_cap_usd)
+    except llm.Stop as e:
+        stats["stopped"] = str(e)[:200]
+        return stats
+    stats["failed"] = int(a.failed)   # undescribed, so asked again next run
+    answer = a.data
     with conn.transaction():
         for t in (answer or {"themes": []})["themes"]:
             desc = t["description"].strip()[:300]

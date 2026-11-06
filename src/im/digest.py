@@ -1,7 +1,8 @@
 """Weekly synthesis (ROADMAP Phase 2, slice 6): once a week Claude reads what the lattice gained and writes a digest.
 
 A week runs Monday 00:00 to Monday 00:00 in local time (the machine's TZ). The run writes the last completed week's
-digest once; `im digest --again` rewrites it. Claude sees ideas, not raw speech: each idea's title and statement
+digest once, when all of the week's speech has been read and matched; `im digest --again` rewrites it. Claude sees
+ideas, not raw speech: each idea's title and statement
 (my corrections win), its themes, how often it was said, its rank, and what I did with it that week (stars, links,
 comparisons). Speakers aren't named, though an idea's text, and so the digest, may name people: it's written for
 me. The digest keeps the segment IDs behind every idea it was shown, so forgetting any of that speech deletes it.
@@ -9,7 +10,7 @@ me. The digest keeps the segment IDs behind every idea it was shown, so forgetti
 
 from datetime import date, datetime, time, timedelta
 
-from im import themes
+from im import egress, llm, themes
 
 TOP = 15          # the top of the ranking, beside the week's own ideas, for context
 KINDS = ("recurring", "convergence", "sleeper", "project", "outside_value")
@@ -82,6 +83,19 @@ def _added(conn, start: datetime, end: datetime) -> list[tuple]:
            ORDER BY d.created_at, d.idea_id""", (start, end)).fetchall()
 
 
+def _unread(conn, start: datetime, end: datetime) -> bool:
+    """Whether speech in the week hasn't reached the lattice yet: an episode extraction hasn't read, or a capture
+    matching hasn't placed. Until it has, the week's ideas aren't all there to digest."""
+    return conn.execute(
+        """SELECT EXISTS (
+             SELECT 1 FROM im.episodes e
+             WHERE e.current AND e.started_at < %s AND e.ended_at >= %s
+               AND (NOT EXISTS (SELECT 1 FROM im.extractions x WHERE x.episode_id = e.episode_id)
+                    OR EXISTS (SELECT 1 FROM im.items i WHERE i.episode_id = e.episode_id
+                               AND NOT EXISTS (SELECT 1 FROM im.item_matches m WHERE m.item_id = i.item_id))))""",
+        (end, start)).fetchone()[0]
+
+
 def _top(conn, exclude: list) -> list[tuple]:
     return conn.execute(
         """SELECT d.idea_id, d.title, d.statement, d.themes, 0, d.n_evidence, d.first_said, s.score, d.starred
@@ -147,31 +161,35 @@ def payload(conn, week: date) -> tuple[str, list]:
 
 
 def digest_stage(conn, client, monthly_cap_usd: float = 20.0, week: date | None = None, again: bool = False) -> dict:
-    """Write the week's digest (by default the last completed week) unless it exists. A week with nothing said
-    gets a short digest without asking Claude."""
-    from im.extract import spent_this_month
-
+    """Write the week's digest (by default the last completed week) unless it exists. It waits while the week has
+    speech extraction or matching hasn't got to (the cap, an outage, a backlog), and is written on a later run: a
+    digest written then would miss those ideas for good. A week with nothing said gets a short digest without asking
+    Claude."""
     week = week or last_week()
-    stats = {"week": week.isoformat(), "written": False, "points": 0, "stopped": None}
+    stats = {"week": week.isoformat(), "written": False, "points": 0, "failed": 0, "stopped": None}
     if conn.execute("SELECT 1 FROM im.digests WHERE week_start = %s", (week,)).fetchone() and not again:
         return stats
     start, end = _period(week)
+    if _unread(conn, start, end):
+        stats["waiting"] = True
+        return stats
     text, ids = payload(conn, week)
     pv = prompt_version()
     if not _said(conn, start, end) and not _added(conn, start, end):
         answer, segs = {"summary": "Nothing new was said this week.", "points": []}, []
     else:
-        if spent_this_month(conn) >= monthly_cap_usd:
-            stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
+        try:
+            a = themes.ask(conn, client, SYSTEM, SCHEMA, text, pv, ids, monthly_cap_usd)
+        except llm.Stop as e:
+            stats["stopped"] = str(e)[:200]
             return stats
-        answer, r = themes._call(client, SYSTEM, SCHEMA, text)
-        themes._log(conn, text, pv, ids, r)
-        if answer is None:
+        if a.refused:
             stats["stopped"] = "refused"
             return stats
-        segs = [s for (s,) in conn.execute(
-            """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
-               WHERE ev.idea_id = ANY(%s)""", (ids,))]
+        if a.failed:   # unwritten, so asked again next run
+            stats["failed"] = 1
+            return stats
+        answer, segs = a.data, egress.segments_of(conn, ids)
     with conn.transaction():
         conn.execute("DELETE FROM im.digests WHERE week_start = %s", (week,))
         (digest_id,) = conn.execute(

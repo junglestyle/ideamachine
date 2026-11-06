@@ -1,4 +1,5 @@
--- Per-database setup an admin does once (on the NAS too, by hand, when agreed).
+-- Per-database setup, as the superuser. Safe to re-run: dev/init/10-roles.sh runs it when the volume is created,
+-- install/nas.sh on every install, and the tests on each test database.
 -- The pipeline role owns schemas im (its own) and pub (what Lattice reads: ROADMAP §3.5).
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE SCHEMA IF NOT EXISTS im AUTHORIZATION im_pipeline;
@@ -10,3 +11,6 @@ DO $$ BEGIN
 END $$;
 -- A schema's grants belong with the schema: pg_restore -n (install/nas.sh) restores objects, not schemas.
 GRANT USAGE ON SCHEMA pub TO lattice_app;
+-- No JIT, for every role: the pub views' cost estimates pass jit_above_cost, so each query on pub.idea_scores spent
+-- about 5 s compiling for 12 ms of work, even on a 3-idea database (review 2026-11-05). New sessions pick it up.
+DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET jit = off', current_database()); END $$;

@@ -125,7 +125,8 @@ def _run_stages(conn, cfg) -> dict:
 
 
 def _extract(conn, cfg) -> dict:
-    """Run extraction, or say why it couldn't run (no credentials, API down); the run goes on either way."""
+    """Run extraction, or say why it couldn't run (no credentials, API down); the run goes on either way. A stage
+    stops itself, saying why, at the cap or when Claude can't answer or rejects the credentials (llm.Stop)."""
     import anthropic
 
     from im import extract
@@ -135,8 +136,6 @@ def _extract(conn, cfg) -> dict:
         client = anthropic.Anthropic()
         return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
                                  extract.system_prompt(x.prompt, x.interests))
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:  # e.g. no credentials configured at all
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -151,8 +150,6 @@ def _lattice(conn, cfg) -> dict:
     try:
         return lattice.match_stage(conn, anthropic.Anthropic(), SentenceEmbedder(cfg.lattice.embedding_model),
                                    cfg.extract.monthly_cap_usd, cfg.lattice.max_items_per_run)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -169,8 +166,6 @@ def _themes(conn, cfg) -> dict:
         out["describe"] = themes.describe_stage(conn, client, cfg.extract.monthly_cap_usd)   # the filer reads them
         out["file"] = themes.file_stage(conn, client, cfg.extract.monthly_cap_usd)
         out["propose"] = themes.propose_stage(conn, client, cfg.extract.monthly_cap_usd)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        out["stopped"] = f"Claude credentials rejected: {e}"
     except anthropic.AnthropicError as e:
         out["stopped"] = f"Claude unavailable: {e}"
     return out
@@ -184,8 +179,6 @@ def _scores(conn, cfg) -> dict:
 
     try:
         return scores.score_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -198,8 +191,6 @@ def _sensitivity(conn, cfg) -> dict:
 
     try:
         return sensitivity.tag_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -214,12 +205,7 @@ def _vocab(conn, cfg) -> dict:
         client = anthropic.Anthropic()
     except anthropic.AnthropicError:
         client = None
-    try:
-        return vocab.refresh(conn, client, cfg.extract.monthly_cap_usd)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
-    except anthropic.AnthropicError as e:
-        return {"stopped": f"Claude unavailable: {e}"}
+    return vocab.refresh(conn, client, cfg.extract.monthly_cap_usd)
 
 
 def _digest(conn, cfg, week=None, again=False) -> dict:
@@ -230,8 +216,6 @@ def _digest(conn, cfg, week=None, again=False) -> dict:
 
     try:
         return digest.digest_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd, week, again)
-    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-        return {"stopped": f"Claude credentials rejected: {e}"}
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -371,9 +355,10 @@ def cmd_audit_edges(args) -> None:
         if args.action == "draft":
             from im import llm, names
 
-            scrubber = names.for_trials(conn, config.load().egress) if args.policy == "C" else None
+            cfg = config.load()
+            scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
             _print(edge_audit.draft(conn, llm.client_for(args.model), Path(args.folder), args.model, args.effort,
-                                    scrubber))
+                                    scrubber, cfg.extract.monthly_cap_usd))
             return
         _print(edge_audit.write(conn, Path(args.folder), args.seed, args.size))
 
@@ -401,7 +386,7 @@ def cmd_audit_probe(args) -> None:
             else:
                 client = llm.client_for(args.model)
             _print(probe_audit.draft(conn, client, folder, args.model, args.effort, scrubber, args.quotes_only,
-                                     args.probes))
+                                     args.probes, cfg.extract.monthly_cap_usd))
             return
         if args.question == "summary":
             from im import summary_audit
@@ -413,15 +398,17 @@ def cmd_audit_probe(args) -> None:
         from im.backends import SentenceEmbedder
 
         embedder = SentenceEmbedder(cfg.lattice.embedding_model) if args.question == "analogy" else None
-        jev_client = scrubber = None
+        from im import names
+
+        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
+        jev_client = None
         if args.question == "analogy" and args.only in (None, "jev"):
-            from im import jev, names
+            from im import jev
 
             jev_client = jev.Jev()
-            scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
         _print(probe_audit.write(conn, anthropic.Anthropic(), embedder, args.question, folder, args.seed, args.only,
                                  args.size, [Path(f) for f in args.exclude], jev_client, scrubber,
-                                 args.pool or probe_audit.JEV_POOL))
+                                 args.pool or probe_audit.JEV_POOL, cfg.extract.monthly_cap_usd))
 
 
 def cmd_analogy_spike(args) -> None:
@@ -430,13 +417,15 @@ def cmd_analogy_spike(args) -> None:
 
     import anthropic
 
-    from im import analogy_spike
+    from im import analogy_spike, names
     from im.backends import SentenceEmbedder
 
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
+        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
         out = analogy_spike.run(conn, anthropic.Anthropic(), SentenceEmbedder(cfg.lattice.embedding_model),
-                                Path(args.folder), args.others)
+                                Path(args.folder), args.others, monthly_cap_usd=cfg.extract.monthly_cap_usd,
+                                scrubber=scrubber)
     _print({k: v for k, v in out.items() if k != "pairs_detail"} | {"pairs": [
         {k: r[k] for k in ("pair", "rank_by_structure", "rank_by_topic", "note", "structure_a", "structure_b")}
         for r in out["pairs_detail"]]})
@@ -658,7 +647,8 @@ def main(argv=None) -> None:
     f.add_argument("--scenario", choices=fixtures.SCENARIOS, default="base",
                    help="base, or base plus every correction and a forget")
     f.set_defaults(func=cmd_load_fixtures)
-    sub.add_parser("run", help="import, segment and triage; idempotent").set_defaults(func=cmd_run)
+    sub.add_parser("run", help="import and segment, then send new speech to Claude to extract, match, file, score, "
+                   "tag and digest it (and triage, if a backend is set); idempotent").set_defaults(func=cmd_run)
     t = sub.add_parser("train", help="train the logreg baseline on my exact labels")
     t.add_argument("-C", type=float, default=1.0, help="inverse regularization strength")
     t.set_defaults(func=cmd_train)
@@ -691,7 +681,8 @@ def main(argv=None) -> None:
     dg.add_argument("--write", action="store_true", help="write the week's digest if it isn't written (sends to Claude)")
     dg.add_argument("--again", action="store_true", help="rewrite the week's digest (sends to Claude)")
     dg.set_defaults(func=cmd_digest)
-    tr = sub.add_parser("trial", help="try an extraction model or prompt on a sample of episodes, against a reference")
+    tr = sub.add_parser("trial", help="try an extraction model or prompt on a sample of episodes, against a reference "
+                        "(sends the episodes to the models)")
     tr.add_argument("prompt", help="a name in extract.PROMPTS, e.g. v3")
     tr.add_argument("--limit", type=int, help="read at most this many episodes this time")
     tr.add_argument("--report", action="store_true", help="only report on what's been read; send nothing")
@@ -705,7 +696,8 @@ def main(argv=None) -> None:
                     help="a further independent read by the same model (2, 3...): the reference against its own "
                          "replicate is the ceiling for every candidate's recall")
     tr.add_argument("--effort", help="the candidate's effort (default: the configured one)")
-    tr.add_argument("--monthly-cap-usd", type=float, help="stop before the month's spend passes this (default: config)")
+    tr.add_argument("--monthly-cap-usd", type=float, help="send nothing once the month's spend reaches this "
+                    "(default: config)")
     tr.set_defaults(func=cmd_trial)
     tu = sub.add_parser("tune", help="preview weight and proposal settings, e.g. recurrence_minutes=45 (writes nothing)")
     tu.add_argument("knobs", nargs="*", metavar="knob=value")
@@ -724,7 +716,8 @@ def main(argv=None) -> None:
     nm.set_defaults(func=cmd_names)
     ae = sub.add_parser("audit-edges", help="B4: a blind sheet of pairs of clusters to type; tally my marks")
     ae.add_argument("action", choices=["sheet", "score", "draft"],
-                    help="draft: a model marks the same sheet blind (sends to Claude); score then compares it with me")
+                    help="draft: a model marks the same sheet blind (sends to it: Claude, or OpenRouter for a "
+                         "provider/model name); score then compares it with me")
     ae.add_argument("folder", nargs="+", help="where sheet.md and key.json go (it quotes people: keep it in saved/); "
                     "score takes several, to score them as one")
     ae.add_argument("--seed", type=int, default=4, help="the sample and shuffle's seed")
@@ -739,7 +732,8 @@ def main(argv=None) -> None:
             ("audit-tension", "tension", "a blind sheet of possible tensions, proposed several ways (sends to "
                                          "Claude); score my marks"),
             ("audit-summaries", "summary", "a blind sheet of extraction trials' summaries: do they say more than "
-                                           "what was said? (sends nothing); score my marks")):
+                                           "what was said? (the sheet sends nothing; draft sends to the model); "
+                                           "score my marks")):
         pa = sub.add_parser(name, help=what)
         pa.add_argument("action", choices=["sheet", "draft", "score"])
         pa.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
@@ -748,7 +742,7 @@ def main(argv=None) -> None:
                         help="draft: the model answering, e.g. z-ai/glm-5.3, or jev-1.14.0 (TypeSafe's Jev)")
         pa.add_argument("--effort", default="low", help="draft: its effort")
         pa.add_argument("--policy", choices=["B", "C"], default="C",
-                        help="draft, and the analogy sheet's Jev set: C (default) pseudonymizes names")
+                        help="draft and sheet (every request either makes): C (default) pseudonymizes names said")
         pa.add_argument("--quotes-only", action="store_true", help="draft: show the model what was said, no summaries")
         pa.add_argument("--probes", action="store_true",
                         help="draft, Jev: also ask the probe questions (jev.PROBES), scored beside the deciding ones")
@@ -761,6 +755,7 @@ def main(argv=None) -> None:
     sp = sub.add_parser("analogy-spike", help="can structure find my analogy pairs where topic can't? (sends to Claude)")
     sp.add_argument("folder", help="a marked B4 sheet's folder, e.g. /saved/b4-1")
     sp.add_argument("--others", type=int, default=300, help="other clusters to rank the partners among")
+    sp.add_argument("--policy", choices=["B", "C"], default="C", help="C (default) pseudonymizes names said")
     sp.set_defaults(func=cmd_analogy_spike)
     so = sub.add_parser("seed-observations",
                         help="what I said into the ChatGPT Idea Machine, from its export, as archive observations")

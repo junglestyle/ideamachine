@@ -2,6 +2,7 @@
 the lattice, scored against a reference model."""
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 from im import egress, extract, names, trial
 
@@ -9,6 +10,24 @@ from helpers import run, table
 from test_carry import DATABASE, capture
 from test_extract import FakeClaude
 from test_lattice import items_for, seeded, seeded_lattice  # noqa: F401 (fixtures)
+
+
+class OffSchema(FakeClaude):
+    """Answers in a shape the schema doesn't allow, at $4 a request (a million tokens in, on Opus 5.5)."""
+
+    def create(self, **kw):
+        self.calls.append(kw)
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"captures": []}')], stop_reason="end_turn",
+                               model="claude-opus-5-5", _request_id="r",
+                               usage=SimpleNamespace(input_tokens=1_000_000, output_tokens=0))
+
+
+def test_an_answer_that_doesnt_keep_to_the_schema_is_paid_for_and_counts_toward_the_cap(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    claude = OffSchema()
+    stats = trial.run(pipe, claude, extract.system_prompt("v3"), monthly_cap_usd=5)
+    assert len(claude.calls) == stats["failed"] == 2 and stats["stopped"].startswith("monthly cap")
+    assert egress.spent_this_month(pipe) == 8.0
 
 
 def test_the_first_prompt_keeps_its_version():
@@ -92,8 +111,13 @@ def test_under_policy_c_names_said_go_out_pseudonymized_and_come_back(pipe, cfg,
     (items,) = [i for (i,) in table(pipe, "SELECT items FROM im.prompt_trials WHERE privacy_policy_version = %s",
                                     scrubber.policy) if i]
     assert items[0]["quote"] == "Did you see the build broke again, Bob?"
-    logged = table(pipe, "SELECT payload FROM im.egress_log WHERE privacy_policy_version = %s", scrubber.policy)
-    assert logged and not any("Bob" in p for (p,) in logged)
+    # One row per request: exactly what was sent, and the episode's segments, line by line.
+    logged = table(pipe, """SELECT g.payload, g.segment_ids, (SELECT array_agg(segment_id ORDER BY ord)
+                                                              FROM im.episode_segments WHERE episode_id = g.episode_id)
+                            FROM im.egress_log g WHERE privacy_policy_version = %s ORDER BY egress_id""",
+                   scrubber.policy)
+    assert [p for p, _, _ in logged] == [c["messages"][0]["content"] for c in claude.calls]
+    assert all(sent_ids == lines for _, sent_ids, lines in logged) and not any("Bob" in p for p, _, _ in logged)
 
     # The same model and prompt under policy B is another trial, read again.
     assert trial.run(pipe, claude, v3)["read"] == table(pipe, "SELECT count(*) FROM im.episodes WHERE current")[0][0]

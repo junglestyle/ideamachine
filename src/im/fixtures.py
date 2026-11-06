@@ -64,6 +64,10 @@ class Conversation:
     open: bool = False
     taps: list[str] = field(default_factory=list)
     places: list[dict] = field(default_factory=list)
+    span: tuple[float, float] | None = None   # where its turns were, once forgetting has left none
+
+    def bounds(self) -> tuple[float, float]:
+        return (self.turns[0].start, self.turns[-1].end) if self.turns else self.span
 
 
 def iso(seconds: float) -> str:
@@ -202,9 +206,17 @@ class FixtureStream:
         self.forgotten.append({"forgotten_at": iso(20000), "start": iso(start), "end": iso(end),
                                "conversation_id": hits[0][0] if hits else None,
                                "utterance_ids": [u for _, u in hits], "reason": reason})
-        # Hearsay applies forgetting on every reprocess, so the speech leaves the stream too.
-        for conv in self.conversations.values():
+        # Hearsay applies forgetting on every reprocess, so the speech leaves the stream too. A conversation left
+        # with none goes from the index if it lay wholly inside the stretch, and is otherwise kept, untranscribed.
+        for cid, conv in list(self.conversations.items()):
+            first, last = conv.bounds()
             conv.turns = [t for t in conv.turns if not (t.start < end and start < t.end)]
+            if conv.turns:
+                continue
+            if start <= first and last <= end:
+                del self.conversations[cid]
+            else:
+                conv.span = (first, last)
 
     # Rendering, in Hearsay's format.
 
@@ -236,16 +248,20 @@ class FixtureStream:
         _claim(stream_dir)
         (stream_dir / "conversations").mkdir(exist_ok=True)
         index = []
-        for cid, conv in sorted(self.conversations.items(), key=lambda kv: kv[1].turns[0].start):
+        for cid, conv in sorted(self.conversations.items(), key=lambda kv: kv[1].bounds()[0]):
             utts = self.utterances(cid)
-            data = "".join(json.dumps(u, ensure_ascii=False) + "\n" for u in utts).encode()
-            name = f"conversations/{cid}.jsonl"
-            _write_if_changed(stream_dir / name, data)
-            index.append({"conversation_id": cid, "start": iso(conv.turns[0].start),
-                          "end": iso(conv.turns[-1].end), "open": conv.open, "transcribed": True,
-                          "taps": conv.taps, "places": conv.places, "utterances": len(utts),
-                          "revision": hashlib.sha256(data).hexdigest()[:16],
-                          "transcript_revision": self.transcript_revision(cid), "file": name})
+            first, last = conv.bounds()
+            if utts:
+                data = "".join(json.dumps(u, ensure_ascii=False) + "\n" for u in utts).encode()
+                name = f"conversations/{cid}.jsonl"
+                _write_if_changed(stream_dir / name, data)
+                revision, transcript = hashlib.sha256(data).hexdigest()[:16], self.transcript_revision(cid)
+            else:   # no utterances: as if not yet transcribed, with no file
+                name = revision = transcript = None
+            index.append({"conversation_id": cid, "start": iso(first), "end": iso(last), "open": conv.open,
+                          "transcribed": bool(utts), "taps": conv.taps, "places": conv.places,
+                          "utterances": len(utts), "revision": revision, "transcript_revision": transcript,
+                          "file": name})
         _write_if_changed(stream_dir / "forgotten.json", json.dumps(self.forgotten, indent=2).encode())
         _write_if_changed(stream_dir / "index.json",
                           json.dumps({"format_version": FORMAT_VERSION, "conversations": index}, indent=2).encode())

@@ -35,7 +35,8 @@ uv run im train                   # fit the logreg baseline on my labels
 uv run im eval --llm              # accuracy and reliability per question, per backend, plus the router's precision
 uv run im review                  # work through what the router sent me (pendant taps and notes to self first)
 uv run im reset --stage triage    # drop triage rows; the next run re-triages
-uv run pytest                     # each test gets a fresh im_test database and stream directory
+make check                        # the whole suite; fails without the IM_* env vars or the models extra
+uv run pytest                     # a quick run: without them the database or logreg tests skip instead
 IM_TEST_MODELS=1 uv run pytest    # also load the real Laya model
 ```
 
@@ -50,7 +51,8 @@ Settings are env vars:
   first, no score; [decision 0007](decisions/0007-neutral-proposals.md)). It reads `pub` and appends feedback as
   Lattice's role, logs in with Lattice's token, and listens on 127.0.0.1:8792.
 - `IM_DEV_ADMIN_URL`: the local dev superuser, used only by tests to create and drop `im_test`. Code refuses it
-  unless it points at localhost.
+  unless every host it (or `PGHOST`) names is localhost, a loopback address or a socket directory. Each test gets a
+  fresh `im_test` database and stream directory, and none of the other settings here.
 
 `IM_CONFIG` can name a TOML file that overrides the defaults in `src/im/config.py` (`[segment]` and `[triage]`).
 Every segmentation value goes into the episodes' `stage_version`, so changing one re-derives episodes on the
@@ -87,10 +89,13 @@ One REPEATABLE READ transaction:
 
 1. **Import** ([ROADMAP §3.3](ROADMAP.md)). Re-read conversations whose `revision` changed in `index.json`, checking each file
    against its revision (a mismatch waits for the next run). Store new utterance versions in `im.source_segments`,
-   keyed by content, so unchanged speech keeps its ID when Hearsay renumbers. Link replaced versions: by
+   keyed by content (conversation, start, end and text; any other field is an annotation), so unchanged speech
+   keeps its ID when Hearsay renumbers or adds a field. Link replaced versions: by
    `utterance_id` when the transcript is the same, by time overlap otherwise. Then purge everything that overlaps
    a `forgotten.json` span.
-2. **Purge.** Delete every episode, current or retired, that contains a forgotten segment.
+2. **Purge.** Delete everything made from a forgotten segment: every episode (current or retired) that contains
+   one; every label, idea, digest, verdict and observation made from one; Lattice's events on captures of it, even
+   once the capture is gone; and the classifiers trained on those labels.
 3. **Segment.** Re-segment conversations whose membership changed, or whose episodes are stale or missing.
    Episodes are content-addressed (`uuid5(stage_version, input_hash)`), so unchanged episodes aren't touched,
    ones that no longer come out are retired (`current = false`), and new ones are inserted.
@@ -103,6 +108,9 @@ Then, outside that transaction:
 - **Lattice.** Each new capture is matched against the nearest existing ideas (local embeddings), and Claude
   decides new / same as / evolves. Related-idea edges are rebuilt. Lattice, the separate presentation app, reads
   the result through schema `pub` ([ROADMAP §3.5](ROADMAP.md)).
+- **Digest.** Claude writes the last completed week's digest (Monday to Monday) once every episode of that week
+  has been read and its captures matched; until then the run leaves it, with `"waiting": true` in its stats, and a
+  later run writes it.
 - **Observations and weight** ([M2 design](design/m2-observations-candidates-ideas.md)). Each new capture joins
   the observation it re-captures, or starts one. Each cluster is weighed (`[weight]` in `im.toml`), and up to 10
   candidates a week, the most recently said first, are proposed to me to keep as canonical or pinned. `im tune knob=value ...` previews a change to
@@ -110,3 +118,12 @@ Then, outside that transaction:
 - **Route.** The router sends to review whatever I tapped or called a note to self, and any episode where Claude
   captured an item above the confidence bar; the rest is auto-filed (`src/im/router.py`; v1 used the local LLM's flags instead, see
   [decisions/0003-router-v1.md](decisions/0003-router-v1.md)).
+
+Every stage that asks a model (extraction, matching, themes, scores, sensitivity, vocab, the digest) stops, saying
+why in its stats, when the month's spend reaches `extract.monthly_cap_usd`, when the API can't answer now, or when
+no request would get through (the credentials or the account's credit rejected, a model id that doesn't exist); the
+stages after it still run. A request whose reply fails (an error response, no answer, one cut off or not in the
+schema) is logged in `im.egress_log` with what it cost, counted in the stage's
+`failed`, and asked again on the next run; the stage goes on to its next item. A refused filing, scoring, tagging or
+vocab-repair batch is skipped the same way and asked again, rather than recorded or stopping the batches after it; a
+refused extraction is recorded as read, with nothing captured, and a refused match makes a new idea.

@@ -2,21 +2,20 @@
 
 Each current episode goes out once per model / prompt / privacy policy, and again only if what would be
 sent changed. A payload already read on another episode isn't sent again: its items are reused. Claude returns items anchored to transcript line numbers; they're mapped back to segment
-IDs and to who said them locally. Every request is logged in im.egress_log, and a monthly budget stops the
-stage before it's exceeded.
+IDs and to who said them locally. Every request is logged in im.egress_log, and the monthly cap stops the stage
+once the month's spend reaches it (egress.send).
 """
 
 import hashlib
 import json
 import uuid
 
-from im import egress, llm, names
+from im import egress, feedback, llm, names
 
 SCHEMA_VERSION = 1
 STAGE_VERSION = "extract/1"
 ITEM_NS = uuid.UUID("3c1e8a52-7d0f-4b6e-9f21-5a8c4e7d1b90")
 KINDS = ["idea", "aphorism", "joke", "observation", "project", "task", "decision"]
-PRICES, FALLBACK_MODEL = llm.PRICES, llm.FALLBACK_MODEL
 
 # v1: the first prompt (58% of its captures kept). Its text must never change: its hash is the prompt_version every
 # extraction so far is filed under, and a new version re-reads every episode.
@@ -189,15 +188,6 @@ def prompt_version(model: str, effort: str, system: str = SYSTEM) -> str:
     return hashlib.sha256(json.dumps([system, SCHEMA, model, effort], sort_keys=True).encode()).hexdigest()[:16]
 
 
-def spent_this_month(conn) -> float:
-    return float(conn.execute(
-        "SELECT coalesce(sum(cost_usd), 0) FROM im.egress_log WHERE created_at >= date_trunc('month', now())"
-    ).fetchone()[0])
-
-
-_cost = llm.cost
-
-
 def _pending(conn, model: str, pv: str) -> list:
     """Current episodes not yet read under this model/prompt/policy, or whose payload changed. Newest first."""
     rows = conn.execute(
@@ -242,15 +232,6 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict
                     for i, k, by, q, g, t, c, segs in rows]
 
 
-def _log(conn, p: egress.Payload, model: str, pv: str, **fields) -> int:
-    cols = ["episode_id", "segment_ids", "model", "prompt_version", "privacy_policy_version", "payload",
-            "payload_sha256"] + list(fields)
-    vals = [p.episode_id, p.segment_ids, model, pv, p.policy, p.text, p.sha256] + list(fields.values())
-    return conn.execute(
-        f"INSERT INTO im.egress_log ({', '.join(cols)}) VALUES ({', '.join(['%s'] * len(cols))}) RETURNING egress_id",
-        vals).fetchone()[0]
-
-
 def _items(p: egress.Payload, raw: list[dict]) -> list[dict]:
     """The model's items, mapped back to segments, local speakers and the names said (policy C). Items citing no
     real line are dropped."""
@@ -273,12 +254,12 @@ def _item_id(p: egress.Payload, model: str, pv: str, i: int) -> uuid.UUID:
     return uuid.uuid5(ITEM_NS, f"{p.episode_id}|{model}|{pv}|{p.policy}|{p.sha256}|{i}")
 
 
-def _carry_matches(conn, p: egress.Payload, model: str, pv: str, items: list[dict]) -> None:
+def _carry_matches(conn, ids: list[uuid.UUID], items: list[dict]) -> None:
     """Reused items keep the matcher's decision and my verdicts on the items they were copied from: the same capture
     isn't judged (or paid for) twice, and can't turn into a second idea. Verdicts go item to item, so two captures
-    with the same quote each keep their own; feedback.carry_verdicts, which matches by quote, sees them settled."""
-    for i, it in enumerate(items):
-        new = _item_id(p, model, pv, i)
+    with the same quote each keep their own; feedback.carry_verdicts, which matches by quote, sees them settled.
+    `ids` are the saved items' ids, in the order of `items`."""
+    for new, it in zip(ids, items, strict=True):
         copied = conn.execute(
             """INSERT INTO im.item_verdicts (item_id, segment_ids, quote, verdict, note, how, decided_at, carried_from)
                SELECT n.item_id, n.source_segment_ids, n.quote, v.verdict, v.note, v.how, v.decided_at, v.verdict_id
@@ -296,11 +277,39 @@ def _carry_matches(conn, p: egress.Payload, model: str, pv: str, items: list[dic
                         ON CONFLICT DO NOTHING""", (new, it["from_item_id"]))
 
 
-def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: list[dict]) -> None:
+def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: list[dict]) -> list[uuid.UUID]:
+    """Make `items` the episode's captures under this model, prompt and policy. Returns their ids, in order.
+
+    A re-read of the same episode (what would be sent changed, e.g. a tap was added) keeps each earlier capture it
+    makes again: one citing a line the new one cites, with a matching quote (feedback.quote_score), one to one and
+    best first. The earlier item stays as it was, with all that hangs off it: the matcher's decision and the idea's
+    evidence (so the capture doesn't become a second idea), my verdicts, and Lattice's events on it. Only captures
+    the re-read doesn't make again are replaced."""
     with conn.transaction():
+        old = conn.execute("""SELECT item_id, kind, quote, source_segment_ids FROM im.items
+                              WHERE episode_id = %s AND model = %s AND prompt_version = %s
+                                AND privacy_policy_version = %s""", (p.episode_id, model, pv, p.policy)).fetchall()
+        scored = sorted((-feedback.quote_score(quote, it["quote"]), kind != it["kind"], str(item_id), n, item_id)
+                        for item_id, kind, quote, segs in old for n, it in enumerate(items)
+                        if set(segs) & set(it["source_segment_ids"]))
+        kept: dict[int, uuid.UUID] = {}
+        for neg_score, _, _, n, item_id in scored:
+            if -neg_score >= feedback.CARRY_MIN_SCORE and n not in kept and item_id not in kept.values():
+                kept[n] = item_id
         conn.execute("""DELETE FROM im.items WHERE episode_id = %s AND model = %s AND prompt_version = %s
-                        AND privacy_policy_version = %s""", (p.episode_id, model, pv, p.policy))
+                        AND privacy_policy_version = %s AND item_id <> ALL(%s::uuid[])""",
+                     (p.episode_id, model, pv, p.policy, list(kept.values())))
+        ids = []
         for i, it in enumerate(items):
+            if i in kept:
+                ids.append(kept[i])
+                continue
+            item_id = _item_id(p, model, pv, i)
+            # What would be sent can come back to an earlier read's (a tap added, then dropped), and a capture kept
+            # from that read holds the id of whatever new capture now sits at its old position: step past it.
+            while item_id in kept.values():
+                item_id = uuid.uuid5(ITEM_NS, f"{item_id}|taken")
+            ids.append(item_id)
             # said_by_segment_id: the first cited segment the speaker said, so a later rename reaches the item.
             conn.execute(
                 """INSERT INTO im.items (item_id, episode_id, kind, said_by, quote, gist, themes, confidence,
@@ -310,7 +319,7 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
                      (SELECT u.seg FROM unnest(%s::uuid[]) WITH ORDINALITY AS u(seg, n)
                       JOIN im.source_segments s ON s.segment_id = u.seg
                       WHERE s.speaker_label = %s ORDER BY u.n LIMIT 1))""",
-                (_item_id(p, model, pv, i),
+                (ids[-1],
                  p.episode_id, it["kind"], it["said_by"], it["quote"], it["gist"], it["themes"], it["confidence"],
                  it["source_segment_ids"], egress_id, model, pv, p.policy, SCHEMA_VERSION,
                  STAGE_VERSION, p.sha256, it["source_segment_ids"], it["said_by"]))
@@ -321,12 +330,7 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
                SET input_hash = excluded.input_hash, egress_id = excluded.egress_id, n_items = excluded.n_items,
                    created_at = now()""",
             (p.episode_id, model, pv, p.policy, p.sha256, egress_id, len(items)))
-
-
-def call(client, model: str, effort: str, system: str, text: str) -> llm.Reply:
-    """Opus falls back to FALLBACK_MODEL on a refusal. Other models (trials only) don't take that fallback, so a
-    refusal there is counted as one."""
-    return llm.complete(client, model, effort, system, SCHEMA, text)
+    return ids
 
 
 def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "medium",
@@ -334,37 +338,31 @@ def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "mediu
     pv = prompt_version(model, effort, system)
     todo = _pending(conn, model, pv)
     stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "reused": 0, "items": 0,
-             "refused": 0, "cost_usd": 0.0, "stopped": None}
+             "refused": 0, "failed": 0, "cost_usd": 0.0, "stopped": None}
     for p in todo[:limit] if limit else todo:
         if reused := _reuse(conn, p, model, pv):
-            _save(conn, p, model, pv, *reused)
-            _carry_matches(conn, p, model, pv, reused[1])
+            _carry_matches(conn, _save(conn, p, model, pv, *reused), reused[1])
             stats["reused"] += 1
             stats["items"] += len(reused[1])
             continue
-        if spent_this_month(conn) >= monthly_cap_usd:
-            stats["stopped"] = f"monthly cap of ${monthly_cap_usd:.2f} reached"
-            break
         try:
-            r = call(client, model, effort, system, p.text)
-        except llm.Unavailable as e:
-            _log(conn, p, model, pv, error=str(e)[:500])
-            stats["stopped"] = f"API unavailable, will retry next run: {e}"[:200]
+            a = egress.ask(conn, client, model, effort, system, SCHEMA, p.text, segment_ids=p.segment_ids,
+                           prompt_version=pv, monthly_cap_usd=monthly_cap_usd, policy=p.policy,
+                           episode_id=p.episode_id, read=lambda answer: _items(p, answer["items"]))
+        except llm.Stop as e:
+            stats["stopped"] = str(e)[:200]
             break
-        egress_id = _log(conn, p, model, pv, request_id=r.request_id, stop_reason=r.stop_reason,
-                         served_by=r.served_by, input_tokens=r.input_tokens, output_tokens=r.output_tokens,
-                         cost_usd=r.cost_usd)
-        stats["cost_usd"] += r.cost_usd or 0.0
-        stats["read"] += 1
-        if r.refused:  # the whole chain declined: record it read, with nothing captured
-            stats["refused"] += 1
-            _save(conn, p, model, pv, egress_id, [])
+        stats["cost_usd"] += a.cost_usd
+        if a.failed:   # logged and counted, not recorded as read: read again next run
+            stats["failed"] += 1
             continue
-        items = _items(p, json.loads(r.text)["items"])
-        _save(conn, p, model, pv, egress_id, items)
-        stats["items"] += len(items)
+        stats["read"] += 1
+        if a.refused:  # the whole chain declined: record it read, with nothing captured
+            stats["refused"] += 1
+        _save(conn, p, model, pv, a.egress_id, a.data or [])
+        stats["items"] += len(a.data or [])
     stats["cost_usd"] = round(stats["cost_usd"], 4)
-    stats["spent_this_month_usd"] = round(spent_this_month(conn), 4)
+    stats["spent_this_month_usd"] = round(egress.spent_this_month(conn), 4)
     return stats
 
 

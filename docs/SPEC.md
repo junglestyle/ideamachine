@@ -76,6 +76,9 @@ storing the index's `open` flag per conversation, which the format already carri
   `compare_pair`, `record_comparison`, `rate_digest_point`) asked me for verdicts and ratings that nothing reads.
 - All human input stays feedback events: stars, links, notes, theme edits, and V2's keep (canonical or pinned) /
   unkeep / dismiss / merge / reject. Old verdict and comparison events stay in the ledger; nothing reads them.
+- Where events disagree (a star and an unstar, a link and an unlink, two corrections, two marks), my latest is the
+  one that arrived last, the highest `event_id`, in every view. `at` is when an event was made: it bounds windows,
+  such as the digest's week, and doesn't order them.
 
 ## 3. Data model
 

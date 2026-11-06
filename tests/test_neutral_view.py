@@ -1,5 +1,9 @@
 """The neutral view (decision 0007): every cluster past the gates, newest first, no score, no verdict filter."""
 
+import http.client
+import threading
+from http.server import ThreadingHTTPServer
+
 import pytest
 
 from im import web
@@ -7,6 +11,8 @@ from im import web
 from helpers import table
 from test_lattice import seeded  # noqa: F401
 from test_weight import idea, matched  # noqa: F401
+
+TOKEN = "a-long-enough-test-token"
 
 
 def as_app(admin, fn, *args):
@@ -47,6 +53,33 @@ def test_keeping_from_a_card_is_my_feedback(matched, admin):  # noqa: F811
     assert table(matched, "SELECT kept_as FROM im.idea_kept WHERE idea_id = %s", new) == [(None,)]
 
 
+def test_my_latest_event_is_the_last_to_arrive_whatever_time_it_carries(matched, admin):  # noqa: F811
+    import json
+
+    new = str(idea(matched, "Something new"))
+
+    def events(*rows):   # as Lattice, in one transaction: (at or None for now(), kind, payload)
+        as_app(admin, lambda c: [c.execute("""INSERT INTO pub.feedback_events (at, kind, idea_id, payload)
+                                               VALUES (coalesce(%s, now()), %s, %s, %s)""",
+                                           (at, kind, new, json.dumps(p))) for at, kind, p in rows])
+
+    def shown():
+        return (table(matched, "SELECT starred, title FROM pub.ideas WHERE idea_id = %s", new)[0]
+                + table(matched, "SELECT kept_as FROM im.idea_kept WHERE idea_id = %s", new)[0]
+                + (dict(table(matched, "SELECT id::text, sensitive FROM pub.sensitivity")).get(new),))
+
+    events((None, "star", {}), (None, "unstar", {}))   # one transaction: both carry the same now()
+    assert shown() == (False, "Something new", None, None)
+    # One device's events, made at 11:00, arrive before another's made at 10:00: what arrived last is my latest.
+    later, earlier = "2026-09-01T11:00:00Z", "2026-09-01T10:00:00Z"
+    events((later, "star", {}), (later, "idea_keep", {"as": "pinned"}), (later, "idea_sensitive", {"sensitive": False}),
+           (later, "idea_correct", {"title": "Later title"}))
+    events((earlier, "unstar", {}), (earlier, "idea_unkeep", {}), (earlier, "idea_sensitive", {"sensitive": True}),
+           (earlier, "idea_correct", {"title": "Earlier title"}))
+    assert shown() == (False, "Earlier title", None, True)
+
+
+
 def test_only_a_cookie_signed_with_the_token_logs_in(monkeypatch):
     monkeypatch.setenv("LATTICE_TOKEN", "a-long-enough-test-token")
     assert web.logged_in(f"other=1; {web.COOKIE}={web._session()}")
@@ -54,6 +87,49 @@ def test_only_a_cookie_signed_with_the_token_logs_in(monkeypatch):
     monkeypatch.setenv("LATTICE_TOKEN", "short")
     with pytest.raises(SystemExit):
         web.logged_in(f"{web.COOKIE}=x")
+
+
+@pytest.fixture
+def served(matched, lattice_dsn, monkeypatch):  # noqa: F811
+    """The view, served on a loopback port as `im web` serves it: its port."""
+    monkeypatch.setenv("LATTICE_TOKEN", TOKEN)
+    monkeypatch.setattr(web.Handler, "dsn", lattice_dsn)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    yield server.server_address[1]
+    server.shutdown()
+    thread.join()
+    server.server_close()
+
+
+def request(port, method, path, form=None, cookie=None):
+    """(status, headers, body) of one request to the view."""
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request(method, path, body=form, headers={"Content-Type": "application/x-www-form-urlencoded"}
+              | ({"Cookie": cookie} if cookie else {}))
+    r = c.getresponse()
+    return r.status, dict(r.getheaders()), r.read().decode()
+
+
+def test_without_the_token_the_view_shows_nothing_and_takes_nothing(served, matched):  # noqa: F811
+    new = str(idea(matched, "Something new"))
+    events = lambda: table(matched, "SELECT count(*) FROM pub.feedback_events")  # noqa: E731
+    before = events()
+    for path in ("/", f"/idea/{new}", "/sky"):
+        status, headers, body = request(served, "GET", path)
+        assert (status, headers.get("Location")) == (303, "/login") and "Something new" not in body
+    assert request(served, "POST", f"/idea/{new}", "action=dismiss")[0] == 403
+    status, headers, _ = request(served, "POST", "/login", "token=another-long-enough-token")
+    assert status == 403 and "Set-Cookie" not in headers
+    assert events() == before
+
+    status, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")   # with it, both
+    cookie = headers["Set-Cookie"].split(";")[0]
+    assert status == 303 and "Something new" in request(served, "GET", "/", cookie=cookie)[2]
+    assert request(served, "POST", f"/idea/{new}", "action=dismiss", cookie)[0] == 303
+    assert events() == [(before[0][0] + 1,)]
+
 
 
 def test_the_app_icons_ship_and_need_no_login():
@@ -98,6 +174,24 @@ def test_a_lens_lights_its_seed_and_what_it_reaches(matched, admin):  # noqa: F8
     assert data["seed"] == build and data["rel"][build] == 1.0
     assert data["rel"][signal] > 0   # it evolves from the signal idea
     assert all(0 < v <= 1 for v in data["rel"].values())
+    assert max(v for k, v in data["rel"].items() if k != build) == 1.0   # the most relevant other is lit fully
     assert {s[0]: (s[1], s[2]) for s in data["stars"]} == \
         {s[0]: (s[1], s[2]) for s in sky_data(as_app(admin, web.sky))["stars"]}   # a lens moves nothing
     assert as_app(admin, web.sky, "00000000-0000-0000-0000-000000000000") is None
+
+
+class Nearby:
+    """What the lens reads: my links, and the seed's nearest cards by meaning with their similarity."""
+
+    def __init__(self, links, near):
+        self.links, self.near = links, near
+
+    def execute(self, sql, args=None):
+        return iter(self.near if "card_neighbours" in sql else self.links)
+
+
+def test_a_seed_nothing_is_like_lights_only_itself():
+    from im import lens
+
+    assert lens.relevance(Nearby([], [("b", -0.2), ("c", 0.0)]), "a") == {"a": 1.0}
+    assert lens.relevance(Nearby([("b", "c")], [("b", 0.0)]), "a") == {"a": 1.0}   # linked, but not to the seed

@@ -18,12 +18,17 @@ STAGE_VERSION = "import/stream-v4"  # v2: affect isn't part of a segment's ident
                                      # v4: nor who spoke or how sure Hearsay is (docs/design/m1-segment-identity.md)
 SCHEMA_VERSION = 2
 SEGMENT_NS = uuid.UUID("0b8f4f5e-6a43-4d1f-9a3c-2f7e9d1c5b60")
-# Annotations Hearsay can change without the speech changing: kept on the segment, not part of its identity.
-# A segment is its conversation, start, end and text.
-NOT_IDENTITY = {"utterance_id", "affect", "delivery", "speaker", "speaker_confidence", "text_confidence"}
+# A segment is its conversation, start, end and text: only these are hashed into its id. Everything else on an
+# utterance (its id, speaker, confidences, affect, delivery, and any field Hearsay adds, which doesn't bump
+# format_version) is an annotation, kept on the segment but not part of its identity. Hashing exactly these four
+# keeps every stream-v4 id: they were all v4 hashed, as the record minus its annotations.
+IDENTITY = ("conversation_id", "start", "end", "text")
 # Updated in place on a kept segment when the stream says otherwise (naming a voice, relabeling the owner).
 SPEAKER_FIELDS = ("speaker_kind", "speaker_name", "speaker_label", "speaker_basis", "is_self", "speaker_conf",
                   "asr_confidence")
+# Columns stored as real. A parameter is a double, and a real compared with a double differs whenever float4 can't
+# hold the value exactly (0.93 is 0.9300000071525574), so these are cast to real before they're compared.
+REAL = ("speaker_conf", "asr_confidence", "arousal")
 
 
 class StreamError(Exception):
@@ -78,7 +83,7 @@ def parse_utterance(line: str, conversation_id: str) -> Utterance:
     rec = json.loads(line)
     if rec["conversation_id"] != conversation_id:
         raise StreamError(f"{rec['utterance_id']} is in the file for {conversation_id}")
-    content = {k: v for k, v in rec.items() if k not in NOT_IDENTITY}
+    content = {k: rec[k] for k in IDENTITY}
     digest = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     speaker, conf = rec["speaker"], rec["speaker_confidence"]
     arousal = (rec.get("affect") or {}).get("arousal")
@@ -226,17 +231,18 @@ def _replace_conversation(conn, cid: str, entry: dict | None, utts: list[Utteran
         # Affect and delivery can be (re)measured without the speech changing, so they follow the latest import.
         cur.executemany(
             """UPDATE im.source_segments SET arousal = %s, delivery = %s::jsonb WHERE segment_id = %s
-               AND (arousal, delivery) IS DISTINCT FROM (%s, %s::jsonb)""",
+               AND (arousal, delivery) IS DISTINCT FROM (%s::real, %s::jsonb)""",
             [(u.arousal, _json(u.delivery), sid, u.arousal, _json(u.delivery)) for sid, u in by_id.items()])
     # So does who spoke. A change here can move episode boundaries or what would be sent, so it counts as a change.
     relabeled = 0
     cols = ", ".join(SPEAKER_FIELDS)
+    params = ", ".join("%s::real" if f in REAL else "%s" for f in SPEAKER_FIELDS)
     for sid, u in by_id.items():
         if sid in old:
             vals = tuple(getattr(u, f) for f in SPEAKER_FIELDS)
             relabeled += conn.execute(
-                f"""UPDATE im.source_segments SET ({cols}) = ROW({", ".join(["%s"] * len(vals))})
-                    WHERE segment_id = %s AND ({cols}) IS DISTINCT FROM ({", ".join(["%s"] * len(vals))})""",
+                f"""UPDATE im.source_segments SET ({cols}) = ROW({params})
+                    WHERE segment_id = %s AND ({cols}) IS DISTINCT FROM ({params})""",
                 (*vals, sid, *vals)).rowcount
 
     if entry is None:

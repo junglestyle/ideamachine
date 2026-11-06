@@ -26,8 +26,9 @@ def relevance(conn, seed: str) -> dict[str, float]:
             weights[b][a] += 1.0
     for other, similarity in conn.execute("SELECT idea_id::text, similarity FROM pub.card_neighbours(%s, %s)",
                                           (seed, NEAR)):
-        weights[seed][other] += max(float(similarity), 0.0)
-        weights[other][seed] += max(float(similarity), 0.0)
+        if float(similarity) > 0:   # an edge of weight 0 would leave a card with nowhere to go
+            weights[seed][other] += float(similarity)
+            weights[other][seed] += float(similarity)
     if seed not in weights:
         return {seed: 1.0}
     out_sum = {n: sum(w.values()) for n, w in weights.items()}

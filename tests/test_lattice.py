@@ -8,10 +8,12 @@ import numpy as np
 import psycopg
 import pytest
 
-from im import extract, lattice, observations
+from im import extract, fixtures, lattice, observations, pipeline
+from im.checks import run_checks
 
-from helpers import run, table
+from helpers import assert_invariants, run, segment_of, table
 from test_extract import FakeClaude
+from test_pipeline import LORA
 from test_triage import HashEmbedder
 
 ARCHIVE = """Current idea archive:
@@ -190,6 +192,31 @@ def test_discarded_items_are_skipped(seeded, cfg, stream):
     assert stats["skipped"] == 3 and table(seeded, "SELECT count(*) FROM pub.ideas") == [(3,)]
 
 
+class CutsOffFirst(FakeMatcher):
+    """FakeMatcher, except that its first answer is cut off mid-JSON at max_tokens."""
+
+    def create(self, **kw):
+        r = super().create(**kw)
+        if len(self.calls) > 1:
+            return r
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"decision": "sa')], stop_reason="max_tokens",
+                               model="claude-opus-5-5", _request_id="r", usage=SimpleNamespace(input_tokens=300,
+                                                                                               output_tokens=4000))
+
+
+def test_a_match_cut_off_is_logged_and_paid_for_and_the_other_captures_are_matched(seeded, cfg, stream):
+    run(seeded, cfg, stream)
+    extract.run_stage(seeded, FakeClaude(items_for))
+    claude = CutsOffFirst()
+    stats = lattice.match_stage(seeded, claude, HashEmbedder())
+    assert len(claude.calls) == 3 and stats["failed"] == 1 and stats["new"] + stats["same_as"] + stats["evolves"] == 2
+    logged = table(seeded, """SELECT count(*), count(*) FILTER (WHERE error IS NOT NULL AND cost_usd > 0)
+                              FROM im.egress_log WHERE prompt_version = %s""", lattice.matcher_version())
+    assert logged == [(3, 1)]
+    again = lattice.match_stage(seeded, FakeMatcher(), HashEmbedder())   # the one cut off is asked again
+    assert again["pending"] == 1 and again["failed"] == 0
+
+
 def test_lattice_app_reads_pub_and_only_appends_feedback(seeded, admin):
     (idea,) = table(seeded, "SELECT idea_id FROM pub.ideas LIMIT 1")[0]
     with admin.transaction():
@@ -205,6 +232,60 @@ def test_lattice_app_reads_pub_and_only_appends_feedback(seeded, admin):
     assert table(seeded, "SELECT starred FROM pub.ideas WHERE idea_id = %s", idea) == [(True,)]
 
 
+def test_my_latest_star_or_unstar_is_what_lattice_shows(seeded, admin):
+    (idea,) = table(seeded, "SELECT idea_id FROM pub.ideas ORDER BY idea_id LIMIT 1")[0]
+    for kind, starred in [("star", True), ("unstar", False), ("star", True)]:
+        with admin.transaction():
+            admin.execute("SET LOCAL ROLE lattice_app")
+            admin.execute("INSERT INTO pub.feedback_events (kind, idea_id) VALUES (%s, %s)", (kind, idea))
+        assert table(seeded, "SELECT starred FROM pub.ideas WHERE idea_id = %s", idea) == [(starred,)]
+
+
+def lattice_app_can(admin) -> dict:
+    """Everything lattice_app may do, from the catalog: on the relations, columns, sequences, functions and schemas
+    the database has beyond Postgres's own, and the roles it could become."""
+    q = lambda sql: set(admin.execute(sql).fetchall())  # noqa: E731
+    return {
+        "relations": q("""SELECT n.nspname, c.relname, p FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace,
+                            unnest('{SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER}'::text[]) p
+                          WHERE n.nspname IN ('im', 'pub', 'public') AND c.relkind IN ('r', 'v', 'm', 'p', 'f')
+                            AND has_table_privilege('lattice_app', c.oid, p)"""),
+        "columns": q("""SELECT n.nspname, c.relname, a.attname, p FROM pg_attribute a
+                        JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace,
+                          unnest('{SELECT,INSERT,UPDATE,REFERENCES}'::text[]) p
+                        WHERE n.nspname IN ('im', 'pub', 'public') AND a.attnum > 0 AND NOT a.attisdropped
+                          AND has_column_privilege('lattice_app', c.oid, a.attnum, p)
+                          AND NOT has_table_privilege('lattice_app', c.oid, p)"""),
+        "sequences": q("""SELECT n.nspname, c.relname, p FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace,
+                            unnest('{USAGE,SELECT,UPDATE}'::text[]) p
+                          WHERE n.nspname IN ('im', 'pub', 'public') AND c.relkind = 'S'
+                            AND has_sequence_privilege('lattice_app', c.oid, p)"""),
+        # What it can call: EXECUTE, in a schema it can use. Public holds pgvector's functions, not ours.
+        "functions": q("""SELECT n.nspname, p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                          WHERE n.nspname IN ('im', 'pub') AND has_function_privilege('lattice_app', p.oid, 'EXECUTE')
+                            AND has_schema_privilege('lattice_app', n.oid, 'USAGE')"""),
+        "schemas": q("""SELECT n.nspname, p FROM pg_namespace n, unnest('{USAGE,CREATE}'::text[]) p
+                        WHERE n.nspname IN ('im', 'pub') AND has_schema_privilege('lattice_app', n.oid, p)"""),
+        "roles": q("""SELECT r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
+                      WHERE m.member = 'lattice_app'::regrole"""),
+    }
+
+
+def test_lattice_app_can_read_pub_append_feedback_and_call_its_functions_and_nothing_else(seeded, admin):
+    pub = {r for (r,) in admin.execute("""SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                                          WHERE n.nspname = 'pub' AND c.relkind IN ('r', 'v', 'm')""")}
+    assert lattice_app_can(admin) == {
+        "relations": {("pub", r, "SELECT") for r in pub} | {("pub", "feedback_events", "INSERT")},
+        "columns": set(), "sequences": set(),
+        "functions": {("pub", "card_neighbours"), ("pub", "embedding_model"), ("pub", "ideas_near")},
+        "schemas": {("pub", "USAGE")}, "roles": set()}
+    # They run as their owner (SECURITY DEFINER), reading im: only the roles granted them may call them, not PUBLIC.
+    assert admin.execute("""SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                            WHERE n.nspname = 'pub' AND p.prosecdef
+                              AND has_function_privilege('public', p.oid, 'EXECUTE')""").fetchall() == []
+
+
+
 def test_forgetting_removes_ideas_born_from_it_and_their_stars(seeded, cfg, stream):
     run(seeded, cfg, stream)
     extract.run_stage(seeded, FakeClaude(items_for))
@@ -218,6 +299,92 @@ def test_forgetting_removes_ideas_born_from_it_and_their_stars(seeded, cfg, stre
     run(seeded, cfg, stream)
     assert table(seeded, "SELECT count(*) FROM im.ideas WHERE idea_id = %s", lora) == [(0,)]
     assert table(seeded, "SELECT idea_id FROM pub.feedback_events") == [(archived,)]
+
+
+def _star_the_lora_capture(conn):
+    (item,) = table(conn, "SELECT item_id FROM im.items WHERE quote LIKE '%%LoRa%%'")[0]
+    conn.execute("INSERT INTO pub.feedback_events (kind, item_id, source) VALUES ('item_star', %s, 'test')", (item,))
+    return item
+
+
+def _tap_the_lora_line(conn, cfg, stream):
+    """Hearsay lists a tap beside the LoRa line: its episode stays, but what would be sent changes."""
+    stream.conversations["c-mono"].taps.append(fixtures.iso(3605))
+    stream.write(stream.dir)
+    run(conn, cfg, stream)
+
+
+def test_a_re_read_in_place_keeps_the_captures_it_makes_again(seeded, cfg, stream):
+    lat_setup(seeded, cfg, stream)
+    observations.assign_stage(seeded)
+    starred = _star_the_lora_capture(seeded)
+    before = table(seeded, "SELECT idea_id, title, n_evidence FROM pub.ideas ORDER BY idea_id")
+    _tap_the_lora_line(seeded, cfg, stream)
+    assert extract.run_stage(seeded, FakeClaude(items_for))["read"] == 1
+    observations.assign_stage(seeded)
+    matcher = FakeMatcher()
+    lattice.match_stage(seeded, matcher, HashEmbedder())
+    assert matcher.calls == []   # nothing to match again: the capture, its idea and my star are as they were
+    assert table(seeded, "SELECT idea_id, title, n_evidence FROM pub.ideas ORDER BY idea_id") == before
+    assert table(seeded, "SELECT count(*) FROM im.ideas WHERE title = 'Something new'") == [(1,)]
+    assert table(seeded, "SELECT item_id FROM pub.feedback_events WHERE kind = 'item_star'") == [(starred,)]
+
+
+def _captures_of(*words):
+    """Claude's reply: a capture of each line saying one of `words`, in the order of `words`."""
+    def respond(text):
+        lines = [line[1:].split("] ", 1) for line in text.splitlines() if line.startswith("[")]
+        return [{"kind": "idea", "said_by": said.split(": ", 1)[0], "quote": said.split(": ", 1)[1],
+                 "lines": [int(n)], "gist": said, "themes": [], "confidence": 0.6}
+                for word in words for n, said in lines if word in said]
+    return respond
+
+
+def test_a_re_read_back_to_an_earlier_payload_saves_its_captures_in_any_order(seeded, cfg, stream):
+    # The tap comes and goes, so the third read sends what the first did, and Claude lists a new capture first:
+    # the position the kept LoRa capture had in the first read.
+    run(seeded, cfg, stream)
+    extract.run_stage(seeded, FakeClaude(_captures_of("LoRa")))
+    (lora,) = table(seeded, "SELECT item_id FROM im.items")[0]
+    _tap_the_lora_line(seeded, cfg, stream)
+    extract.run_stage(seeded, FakeClaude(_captures_of("LoRa")))
+    stream.conversations["c-mono"].taps.clear()
+    stream.write(stream.dir)
+    run(seeded, cfg, stream)
+    claude = FakeClaude(_captures_of("Battery", "LoRa"))
+    assert extract.run_stage(seeded, claude)["read"] == 1
+    assert table(seeded, "SELECT quote LIKE '%%LoRa%%', item_id = %s FROM im.items ORDER BY 1", lora) == \
+        [(False, False), (True, True)]
+    assert extract.run_stage(seeded, claude)["read"] == 0 and len(claude.calls) == 1   # read once, and done
+
+
+
+@pytest.mark.parametrize("lose_the_capture", ["re-read without it", "reset --stage extract"])
+def test_forgetting_reaches_an_idea_and_events_whose_capture_is_gone(seeded, cfg, stream, lose_the_capture):
+    lat_setup(seeded, cfg, stream)
+    _star_the_lora_capture(seeded)
+    if lose_the_capture == "reset --stage extract":
+        pipeline.reset(seeded, "extract")
+    else:
+        _tap_the_lora_line(seeded, cfg, stream)
+        extract.run_stage(seeded, FakeClaude(lambda text: [i for i in items_for(text) if "LoRa" not in i["quote"]]))
+    assert not table(seeded, "SELECT 1 FROM im.items WHERE quote LIKE '%%LoRa%%'")
+    assert table(seeded, "SELECT count(*) FROM pub.feedback_events WHERE kind = 'item_star'") == [(1,)]   # a record
+    stream.forget(3600, 3612)   # the LoRa idea's line
+    stream.write(stream.dir)
+    run(seeded, cfg, stream)
+    assert not table(seeded, "SELECT 1 FROM im.ideas WHERE statement = 'A new thing.'")
+    assert not table(seeded, "SELECT 1 FROM pub.feedback_events WHERE kind = 'item_star'")
+    assert table(seeded, "SELECT count(*) FROM im.ideas WHERE title = 'Broken builds as signal'") == [(1,)]
+    assert_invariants(seeded)
+
+
+def test_the_checks_find_an_idea_made_from_forgotten_speech(seeded, cfg, stream):
+    lat_setup(seeded, cfg, stream)
+    (idea,) = table(seeded, "SELECT idea_id FROM im.ideas WHERE title = 'Something new'")[0]
+    lora = segment_of(seeded, LORA)
+    seeded.execute("INSERT INTO im.source_tombstones (segment_id, forgotten_at) VALUES (%s, now())", (lora,))
+    assert (idea, lora) in run_checks(seeded)["tombstoned"]   # as if forgetting had missed it
 
 
 def test_projection_holds_still_as_ideas_are_added():
@@ -263,13 +430,18 @@ def test_my_links_show_at_once_and_unlinking_removes_them(seeded, admin):
         return lattice_does("SELECT a, b, weight, method FROM pub.connections WHERE kind = 'mine' ORDER BY a, b"
                             ).fetchall()
 
+    def on_cards():   # the neutral view's edges: the same, links to clusters Lattice hides included
+        return lattice_does("SELECT a, b FROM pub.card_links WHERE kind = 'mine' ORDER BY a, b").fetchall()
+
     link = "INSERT INTO pub.feedback_events (kind, idea_id, other_idea_id) VALUES (%s, %s, %s)"
     lattice_does(link, "link", b, a)
     lattice_does(link, "link", a, b)   # the same pair, either way round
     lattice_does(link, "link", a, c)
-    assert mine() == [(a, b, 1.0, "feedback"), (a, c, 1.0, "feedback")]
+    assert mine() == [(a, b, 1.0, "feedback"), (a, c, 1.0, "feedback")] and on_cards() == [(a, b), (a, c)]
     lattice_does(link, "unlink", c, a)
-    assert mine() == [(a, b, 1.0, "feedback")]
+    assert mine() == [(a, b, 1.0, "feedback")] and on_cards() == [(a, b)]
+    lattice_does(link, "link", c, a)   # linked again: my latest decides
+    assert on_cards() == [(a, b), (a, c)]
     for args in [("link", a, a), ("unlink", a, None)]:
         with pytest.raises(psycopg.errors.CheckViolation):
             lattice_does(link, *args)

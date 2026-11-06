@@ -104,7 +104,7 @@ No raw audio is needed for either. Keep Hearsay's audio retention on hold until 
 
 It can engage: Opus 5.5's minimum cacheable prefix is 512 tokens, and the extraction system prompt is about 750. The refusal fallback, Opus 4.8, needs 1024, so a fallback call won't cache. That's rare and doesn't matter.
 
-Change (proposed): put `cache_control: {"type": "ephemeral"}` on the system block in `extract.call` (`extract.py`, the `call` function). `_cost` already prices cache writes and reads. The default 5-minute TTL fits, because an hourly run sends its episodes back to back. Check it in production by looking for non-zero `cache_read_input_tokens` on the second and later calls of a run. That needs those two usage fields logged in `egress_log`, which they aren't today.
+Change (proposed): put `cache_control: {"type": "ephemeral"}` on the system block in `llm.complete` (`llm.py`), which extraction calls through `egress.ask`. `llm.cost` already prices cache writes and reads. The default 5-minute TTL fits, because an hourly run sends its episodes back to back. Check it in production by looking for non-zero `cache_read_input_tokens` on the second and later calls of a run. That needs those two usage fields logged in `egress_log`, which they aren't today.
 
 Worth: about $2 a month now, $20 at 10× (the architecture review's cost estimate). It's independent of the re-key, so it can ship any time.
 

@@ -1,17 +1,20 @@
 """The weekly digest: Claude synthesizes what the lattice gained in a week, citing the ideas it rests on."""
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import psycopg
 import pytest
 
-from im import digest, scores
+from im import digest, extract, lattice, scores
 
 from helpers import run, table
+from test_extract import FakeClaude
+from test_lattice import FakeMatcher, items_for
 from test_review import as_lattice
 from test_scores import FakeScorer
+from test_triage import HashEmbedder
 
 WEEK = date(2026, 8, 31)   # the fixture stream is said on Tuesday 2026-09-01
 
@@ -47,10 +50,12 @@ def test_a_week_is_digested_once_from_ideas_not_speech(seeded_lattice, admin):
     stats = digest.digest_stage(pipe, claude, week=WEEK)
     assert stats["written"] and stats["points"] == 2   # the point citing nothing it was shown is dropped
     text = claude.calls[0]["messages"][0]["content"]
-    assert text.startswith("Week of 2026-08-31 to 2026-09-06.")
-    assert "Said this week (3 ideas):" in text and "Top of the ranking, not said this week:" in text
-    assert "said 1x this week" in text and "score " in text
+    said = table(pipe, """SELECT DISTINCT d.title FROM pub.ideas d JOIN pub.evidence e USING (idea_id)
+                          WHERE e.said_at >= '2026-08-31' AND e.said_at < '2026-09-07'""")
+    assert len(said) == 3 and all(title in text for (title,) in said)   # every idea said that week
     assert "Alice" not in text and "Bob" not in text   # ideas only: no speakers, no quotes
+    (start, end), = table(pipe, "SELECT period_start, period_end FROM im.digests")
+    assert start.astimezone().date() == WEEK and end - start == timedelta(days=7)   # local Monday to Monday
 
     assert digest.digest_stage(pipe, claude, week=WEEK)["written"] is False and len(claude.calls) == 1
     (summary, points), = as_lattice(admin, "SELECT summary, points FROM pub.digests")
@@ -68,7 +73,19 @@ def test_a_quiet_week_costs_nothing(seeded_lattice):
     claude = FakeDigester()
     stats = digest.digest_stage(seeded_lattice, claude, week=date(2026, 9, 7))
     assert stats["written"] and stats["points"] == 0 and not claude.calls
-    assert table(seeded_lattice, "SELECT summary FROM pub.digests") == [("Nothing new was said this week.",)]
+    assert table(seeded_lattice, "SELECT jsonb_array_length(points) FROM pub.digests") == [(0,)]
+
+
+def test_a_week_read_late_is_digested_once_it_has_been_read(seeded, cfg, stream):
+    pipe = seeded
+    run(pipe, cfg, stream)   # the week arrived, but extraction didn't get to it: the cap, an outage, a backlog
+    claude = FakeDigester()
+    assert digest.digest_stage(pipe, claude, week=WEEK)["waiting"]
+    extract.run_stage(pipe, FakeClaude(items_for))
+    assert digest.digest_stage(pipe, claude, week=WEEK)["waiting"]   # read, but its captures aren't matched yet
+    lattice.match_stage(pipe, FakeMatcher(), HashEmbedder())
+    stats = digest.digest_stage(pipe, claude, week=WEEK)
+    assert stats["written"] and stats["points"] == 2 and len(claude.calls) == 1
 
 
 def test_the_cap_stops_the_digest(seeded_lattice):

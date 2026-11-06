@@ -13,8 +13,6 @@ from helpers import table
 def run_cli(pipe, stream, monkeypatch, capsys):
     monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
     monkeypatch.setattr(cli.db, "stream_dir", lambda: stream.dir)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("ANTHROPIC_PROFILE", "im-test-no-such-profile")   # no Claude: extraction stops, and says so
 
     def go():
         cli.main(["run"])

@@ -14,8 +14,6 @@ directly, where zero retention is for enterprise accounts. Price: $0.042 per mil
 
 import json
 import os
-import urllib.error
-import urllib.request
 
 from im import llm
 
@@ -185,18 +183,7 @@ class Jev:
         self.post = post or self._post
 
     def _post(self, body: dict) -> dict:
-        req = urllib.request.Request(self.url, data=json.dumps(body).encode(), headers={
-            "Authorization": f"Bearer {self.key}", "Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                return json.load(r)
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode(errors="replace")[:300]
-            if e.code == 429 or e.code >= 500:
-                raise llm.Unavailable(f"Jev via {self.route}, HTTP {e.code}: {detail}") from None
-            raise RuntimeError(f"Jev via {self.route}, HTTP {e.code}: {detail}") from None
-        except (urllib.error.URLError, TimeoutError) as e:
-            raise llm.Unavailable(f"Jev via {self.route}: {e}") from None
+        return llm.post_json(self.url, self.key, body, f"Jev via {self.route}", 120)
 
     def body(self, question: str, state: dict, probes: bool = False) -> dict:
         qs = {}
@@ -205,17 +192,19 @@ class Jev:
             qs[name] = {"type": "noul", "instructions": instructions, **({"criteria": criteria} if criteria else {})}
         return {"model": self.sent_as, "state": state, "questions": qs}
 
-    def ask(self, question: str, state: dict, probes: bool = False) -> tuple[dict, dict]:
-        """The atomic probabilities, the combined one, and with probes their answers and combinations; and what
-        the request cost: ({name: p, "p": p, ...}, usage)."""
-        body = self.body(question, state, probes)
+    def complete(self, body: dict) -> llm.Reply:
+        """Send a body (egress.send logs it): Jev's answer as it came, as JSON, and what it cost (output is free)."""
         r = self.post(body)
-        got = {name: float(a["noul"]) for name, a in r["answers"].items()}
-        deciding = {k: v for k, v in got.items() if k in QUESTIONS[question]}
-        combos = {k: f(got) for k, f in COMBOS.get(question, {}).items()} if probes else {}
         usage = r.get("usage") or {}
         tokens_in = usage.get("input_tokens") or 0
-        return got | combos | {"p": combine(question, deciding)}, {
-            "served_by": r.get("model") or self.model, "input_tokens": tokens_in,
-            "output_tokens": usage.get("output_tokens") or 0, "cost_usd": round(tokens_in * PRICE_IN, 8),
-            "payload": json.dumps(body)}
+        return llm.Reply(json.dumps(r), "end_turn", r.get("model") or self.model, r.get("id"), tokens_in,
+                         usage.get("output_tokens") or 0, round(tokens_in * PRICE_IN, 8))
+
+
+def read(question: str, r: dict, probes: bool = False) -> dict[str, float]:
+    """From Jev's answer, the atomic probabilities, the combined one, and with probes their combinations:
+    {name: p, ..., "p": p}. An answer missing a deciding question raises KeyError."""
+    got = {name: float(a["noul"]) for name, a in r["answers"].items()}
+    deciding = {k: got[k] for k in QUESTIONS[question]}
+    combos = {k: f(got) for k, f in COMBOS.get(question, {}).items()} if probes else {}
+    return got | combos | {"p": combine(question, deciding)}

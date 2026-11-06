@@ -215,25 +215,40 @@ def write(conn, out: Path, seed: int = 4, size: int = SIZE) -> dict:
             "by_set": {s: sets.count(s) for s in SETS}, "available": k["available"]}
 
 
+def read_sheet(text: str) -> dict[str, tuple[str, str | None, str | None]]:
+    """Pair number -> (what the sheet showed, what I wrote after `mark:`, my note), None where I wrote nothing. The
+    sheet's own text ends at the pair's first `mark:` or `note:` line, so nothing I type under it reaches a draft;
+    my note runs from `note:` to the next pair, however many lines it takes."""
+    out = {}
+    parts = re.split(r"^##[ \t]+(\d+)[ \t]*$", text, flags=re.M)
+    for n, body in zip(parts[1::2], parts[2::2]):
+        cut = re.search(r"^[ \t]*(?:mark|note):", body, re.M | re.I)
+        shown, mine = (body[:cut.start()], body[cut.start():]) if cut else (body, "")
+        mark = re.search(r"^[ \t]*mark:(.*)$", mine, re.M | re.I)
+        note = re.search(r"^[ \t]*note:(.*)", mine, re.M | re.I | re.S)
+        note_lines = [x.strip() for x in note.group(1).splitlines() if x.strip()] if note else []
+        out[n] = (shown.strip(), (mark.group(1).strip() or None) if mark else None, "\n".join(note_lines) or None)
+    return out
+
+
 def marks(text: str) -> dict:
     """Pair number -> {"label", "direction", "note"} from a filled-in sheet. A blank mark is missing; one that isn't
     a label is kept as {"unreadable": what was written}, so a typo doesn't hide among the pairs I skipped."""
-    out, n = {}, None
-    for line in text.splitlines():
-        line = line.strip()
-        if m := re.match(r"##\s+(\d+)\s*$", line):
-            n = m.group(1)
-        elif n and (m := re.match(r"mark:\s*`?([a-z?]+)`?\s*([AB]\s*>\s*[AB])?", line, re.I)):
+    out = {}
+    for n, (_, mark, note) in read_sheet(text).items():
+        got = {}
+        if mark and (m := re.match(r"`?([a-z?]+)`?\s*([AB]\s*>\s*[AB])?", mark, re.I)):
             label = LABELS.get(m.group(1).lower())
-            if not label:
-                out.setdefault(n, {})["unreadable"] = line.split(":", 1)[1].strip()
             if label:
                 arrow = re.sub(r"\s", "", m.group(2) or "").upper()
-                out.setdefault(n, {})["label"] = label
-                out[n]["direction"] = arrow if label in DIRECTED and arrow in ("A>B", "B>A") else None
-        elif n and (m := re.match(r"note:\s*(.+)$", line, re.I)):
-            out.setdefault(n, {})["note"] = m.group(1).strip()
-    return {k: v for k, v in out.items() if "label" in v or "note" in v or "unreadable" in v}
+                got = {"label": label, "direction": arrow if label in DIRECTED and arrow in ("A>B", "B>A") else None}
+            else:
+                got["unreadable"] = mark
+        if note:
+            got["note"] = note
+        if got:
+            out[n] = got
+    return out
 
 
 def score(folder: Path) -> dict:
@@ -339,33 +354,36 @@ DRAFT_SCHEMA = {
                    "analogy": {"type": "string"}},
     "required": ["label", "direction", "analogy"], "additionalProperties": False,
 }
-CORE = ("none", "related", "elaborates", "tension")   # what B4's bar scores (macro-F1, over labels I've used)
+CORE = ("none", "related", "elaborates", "tension")   # the labels macro_f1_core averages, over those I've used
 
 
 def _pairs_as_shown(text: str) -> dict[str, str]:
     """Pair number -> what the sheet showed for it, without my mark or note: what the model sees is what I saw."""
-    out, n, lines = {}, None, []
-    for line in text.split("\n## ")[1:]:
-        head, _, body = line.partition("\n")
-        n = head.strip()
-        lines = [x for x in body.splitlines() if not re.match(r"\s*(mark|note):", x, re.I)]
-        out[n] = "\n".join(lines).strip()
-    return out
+    return {n: shown for n, (shown, _, _) in read_sheet(text).items()}
 
 
-def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: str = "low", scrubber=None) -> dict:
-    """A model marks every pair on the sheet, blind to my marks, into draft-<model>-<effort>.json. Each request goes
-    to the egress log, like every other call that sends what was said; with a scrubber (policy C), names said are
-    pseudonymized first."""
-    from im import llm, names, themes
+def policy_tag(policy: str) -> str:
+    """What a draft's file name says of the policy its pairs went out under, so a draft under one policy never
+    resumes, or is scored as, a draft under another. Policy C, the CLI's default for drafts, keeps the plain name
+    drafts have always had; any other is named, e.g. `-B1`."""
+    return "" if policy.startswith("C") else "-" + policy.split(";")[0]
+
+
+def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: str = "low", scrubber=None,
+          monthly_cap_usd: float = 20.0) -> dict:
+    """A model marks every pair on the sheet, blind to my marks, into draft-<model>-<effort>-labels<n>[-<policy>].json.
+    Each request goes to the egress log, like every other call that sends what was said; with a scrubber (policy C),
+    names said are pseudonymized first. A pair whose answer fails is logged and skipped, so a rerun asks again; the
+    cap, or the model being unavailable, stops the draft."""
+    from im import egress, llm, names, themes
 
     key = json.loads((folder / "key.json").read_text())
     shown = _pairs_as_shown((folder / "sheet.md").read_text())
-    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}-labels{LABELSET}.json"
+    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}-labels{LABELSET}{policy_tag(policy)}.json"
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     pv = themes.version(DRAFT_SYSTEM, DRAFT_SCHEMA, model, effort)
-    policy = scrubber.policy if scrubber else _policy()
-    cost, failed = 0.0, []
+    cost, failed, stopped = 0.0, [], None
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         if num in got or num not in shown:
             continue
@@ -373,39 +391,25 @@ def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: st
         if scrubber:
             (text,), back, _ = scrubber.scrub([text])
         try:
-            r = llm.complete(client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, text, max_tokens=4000)
-        except RuntimeError as e:   # an answer that never kept to the schema: skipped, so a rerun asks again
-            failed.append({"pair": int(num), "error": str(e)[:300]})
+            a = egress.ask(conn, client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, text, max_tokens=4000,
+                           segment_ids=egress.segments_of(conn, p["ideas"]), prompt_version=pv, policy=policy,
+                           monthly_cap_usd=monthly_cap_usd)
+        except llm.Stop as e:
+            stopped = str(e)[:200]
+            break
+        cost += a.cost_usd
+        if a.failed:
+            failed.append({"pair": int(num), "error": a.error[:300]})
             continue
-        segs = [s for (s,) in conn.execute(
-            """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
-               WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
-        conn.execute(
-            """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version,
-                 payload, payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
-               VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (segs, model, pv, policy, text, _sha(text), r.request_id, r.stop_reason, r.served_by, r.input_tokens,
-             r.output_tokens, r.cost_usd))
-        cost += r.cost_usd or 0.0
-        if r.refused:
+        if a.refused:
             got[num] = {"label": "unsure", "direction": "none", "analogy": "", "refused": True}
         else:
-            got[num] = json.loads(r.text)
+            got[num] = a.data
             if got[num].get("analogy"):
                 got[num]["analogy"] = names.unscrub(got[num]["analogy"], back)
         out_path.write_text(json.dumps(got, indent=2))   # as it goes: a rerun picks up where this stopped
     return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "prompt_version": pv,
-            "policy": policy, **({"failed": failed} if failed else {})}
-
-
-def _policy() -> str:
-    from im import egress
-    return egress.POLICY_VERSION
-
-
-def _sha(text: str) -> str:
-    import hashlib
-    return hashlib.sha256(text.encode()).hexdigest()
+            "policy": policy, **({"failed": failed} if failed else {}), **({"stopped": stopped} if stopped else {})}
 
 
 def _num(name: str):
@@ -444,7 +448,7 @@ def agreement(mine: dict, theirs: dict) -> dict:
     ratio = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
     my_tensions = {n for n in pairs if mine[n]["label"] == "tension"}
     return {"pairs": len(pairs),
-            # B4's bar (labels 3): whether there's an edge. The kind is a suggestion; it's reported below.
+            # B4's bar (decision 0009): whether there's an edge. The kind is a suggestion; it's reported below.
             "connection": {"agree": ratio(sum((n in mine_linked) == (n in their_linked) for n in pairs), len(pairs)),
                            "precision": ratio(len(mine_linked & their_linked), len(their_linked)),
                            "recall": ratio(len(mine_linked & their_linked), len(mine_linked)),

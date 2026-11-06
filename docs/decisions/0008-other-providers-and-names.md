@@ -48,11 +48,11 @@ pairs for whichever reach Sonnet's 82%.
 
 ## Before the live switch
 
-Policy C is for trials until each of these is done. A switch re-reads every episode once, so it goes out together
-with any prompt switch, as one re-read.
+Policy C is for trials, and the audits' sheets, drafts and analogy spike (`--policy C`, the default), until each of
+these is done. A switch re-reads every episode once, so it goes out together with any prompt switch, as one re-read.
 
-1. Every stage that sends what was said scrubs it: matching (`lattice.py`), themes, vocabulary, and the analogy
-   spike. Today they send stored quotes, which keep real names.
+1. Every live stage that sends what was said scrubs it: matching (`lattice.py`), themes and vocabulary. Today they
+   send stored quotes, which keep real names.
 2. ~~GLiNER's results are cached by segment in the database: the live run rebuilds every pending payload each
    hour.~~ Done 2026-11-04 (`im.segment_names`, `im names warm`), after ten trials in parallel each ran GLiNER over
    the same sample on the NAS's CPU and sent nothing for 40 minutes. Batched, with long lines chunked, and two

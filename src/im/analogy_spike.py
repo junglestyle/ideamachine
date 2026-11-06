@@ -6,8 +6,8 @@ alternative on those pairs: a model writes each cluster's structure in one line 
 the lines are embedded, and each analogy pair's partner is ranked among all the clusters, by structure and, as the
 baseline, by topic. If partners rank high by structure and low by topic, structure is worth a design doc.
 
-Everything goes to the egress log; the structures and the result are written into the sheet's folder, which quotes
-people (saved/). Nothing in the lattice changes.
+Everything goes to the egress log, with names said pseudonymized under policy C (the CLI's default); the structures
+and the result are written into the sheet's folder, which quotes people (saved/). Nothing in the lattice changes.
 """
 
 import json
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from im import edge_audit
+from im import edge_audit, egress
 
 MODEL, EFFORT = "claude-opus-5-5", "low"
 BATCH = 25
@@ -61,9 +61,10 @@ def _rank(M: np.ndarray, i: int, j: int) -> int:
     return int((s > s[j]).sum()) + 1
 
 
-def run(conn, client, embedder, folder: Path, others: int = 300, seed: int = 7) -> dict:
-    from im import themes
-    from im.extract import _cost
+def run(conn, client, embedder, folder: Path, others: int = 300, seed: int = 7, monthly_cap_usd: float = 20.0,
+        scrubber=None) -> dict:
+    """With a scrubber (policy C), names said are pseudonymized before each batch goes out."""
+    from im import names, themes
 
     pairs = analogy_pairs(folder)
     if not pairs:
@@ -78,23 +79,20 @@ def run(conn, client, embedder, folder: Path, others: int = 300, seed: int = 7) 
     path = folder / "structures.json"
     structures = json.loads(path.read_text()) if path.exists() else {}
     pv = themes.version(STRUCTURE_SYSTEM, STRUCTURE_SCHEMA, MODEL, EFFORT)
+    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     todo = [i for i in ids if i not in structures]
     cost = 0.0
     for start in range(0, len(todo), BATCH):
         batch = todo[start:start + BATCH]
-        text = "Ideas:\n" + "\n".join(f"{n}. {_text(conn, i)}" for n, i in enumerate(batch, 1))
-        r = client.beta.messages.create(
-            model=MODEL, max_tokens=16000, system=STRUCTURE_SYSTEM, messages=[{"role": "user", "content": text}],
-            output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": STRUCTURE_SCHEMA}},
-            betas=["server-side-fallback-2026-06-01"], fallbacks=[{"model": "claude-opus-4-8"}])
-        themes._log(conn, text, pv, batch, r)
-        served = getattr(r, "model", MODEL) or MODEL
-        cost += _cost(served, r.usage) or 0.0
-        if r.stop_reason == "refusal":
-            continue
-        for s in json.loads(next(b.text for b in r.content if b.type == "text"))["structures"]:
+        text, back = "Ideas:\n" + "\n".join(f"{n}. {_text(conn, i)}" for n, i in enumerate(batch, 1)), {}
+        if scrubber:
+            (text,), back, _ = scrubber.scrub([text])
+        a = egress.ask(conn, client, MODEL, EFFORT, STRUCTURE_SYSTEM, STRUCTURE_SCHEMA, text, prompt_version=pv,
+                       segment_ids=egress.segments_of(conn, batch), policy=policy, monthly_cap_usd=monthly_cap_usd)
+        cost += a.cost_usd
+        for s in (a.data or {"structures": []})["structures"]:   # refused or failed: asked again by a rerun
             if 1 <= s["idea"] <= len(batch):
-                structures[batch[s["idea"] - 1]] = s["structure"]
+                structures[batch[s["idea"] - 1]] = names.unscrub(s["structure"], back)
         path.write_text(json.dumps(structures, indent=2))   # as it goes: a rerun picks up where this stopped
 
     ids = [i for i in ids if i in structures]

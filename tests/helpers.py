@@ -15,7 +15,7 @@ def episodes(conn):
 
 
 def derived_state(conn):
-    """Everything `im run` writes, except the runs log."""
+    """What `im run`'s import, purge and segmentation write: the source and episode tables."""
     return {name: table(conn, f"SELECT * FROM im.{name} ORDER BY 1, 2")
             for name in ["source_conversations", "source_segments", "source_members",
                          "source_supersessions", "source_tombstones", "episodes", "episode_segments"]}
@@ -54,7 +54,7 @@ def kinds(conn):
 
 
 def changed_episodes(before, after):
-    """(retired, created, untouched-but-different) between two `episodes()` snapshots."""
+    """(retired, created) between two `episodes()` snapshots: retired is every episode that's gone or changed."""
     b, a = {r[0]: r for r in before}, {r[0]: r for r in after}
     retired = {e for e in b if b[e] != a.get(e)}
     created = set(a) - set(b)

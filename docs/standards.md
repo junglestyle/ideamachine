@@ -26,7 +26,9 @@ What the pipeline keeps true, whatever the stage:
 - **Eval before trust.** An automated tier drives nothing until it beats its exit threshold on the hand-labeled set.
 - **Egress is a logged, versioned policy.** What goes to Claude is decided by `im.egress.POLICY_VERSION` (policy B:
   everyone's words, speakers pseudonymized; [decision 0004](decisions/0004-claude-extraction.md)), and every request
-  is logged with the segment IDs it carried.
+  is logged with the segment IDs it carried and what it cost. Every paid request goes one way, `im.egress.send`: it
+  checks the monthly cap, sends, and logs before reading the answer, so a reply that can't be read is still logged
+  and counted, and fails as one item. A model with no known price isn't sent to.
 
 ## Dependencies
 
@@ -48,12 +50,17 @@ What the pipeline keeps true, whatever the stage:
   resets, the stream is only read, unknown formats and speakers fail closed, `lattice_app` can only read `pub` and
   append feedback, and the monthly cap stops extraction, scoring and the digest.
 - Tests run on synthetic streams from `im.fixtures` and never read the real one. Each gets a fresh `im_test`
-  database; the code refuses a dev admin URL that isn't localhost.
+  database; the code refuses a dev admin URL that isn't localhost or a local socket, in any DSN form. Each runs
+  without the developer's `IM_*`, `ANTHROPIC_*`, `LATTICE_*`, `CORRAL_*`, OpenRouter and Typesafe variables
+  (`tests/conftest.py`), so a shell that exports the deployment's settings can't send a test to Claude or overwrite
+  Hearsay's vocabulary.
 
 ## Running it
 
-- The tests need the database env vars from `.env.example`; without them the database tests skip. Setup and
-  configuration live in [install.md](install.md), deployment in [deploy.md](deploy.md) and `install/nas.sh`.
+- `make check` is the whole suite or nothing: it fails unless the database env vars from `.env.example` are set and
+  the `models` extra is installed (`uv sync --extra models`), as in CI. Plain `uv run pytest` is for quick runs:
+  without the env vars the database tests skip, and without the extra the logreg tests do. Setup and configuration
+  live in [install.md](install.md), deployment in [deploy.md](deploy.md) and `install/nas.sh`.
 
 ## Docs
 
@@ -85,6 +92,8 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
 - Privacy: the NAS layout (`/mnt/fast/ideamachine/...`) is committed, and nothing here overrides the org rule for it, as
   hearsay's and lattice's standards do.
 - Privacy: `IM_VOCAB_PATH` isn't in `.env.example`. `install/compose.yaml` sets it, and `im.vocab` reads it.
+- Privacy: the owner's time zone, `America/New_York`, is the default for reading a ChatGPT export's times
+  (`im seed-observations --tz`, and `tz` in `archive_observations.parse` and `plan`).
 - Secrets: `install/nas.sh` prints Lattice's login token (`LATTICE_TOKEN`) at the end of every run (line 325).
 - Docs: V2's roadmap is `docs/ROADMAP-v2.md`, not `docs/ROADMAP.md`, because code comments cite V1's
   [ROADMAP.md](ROADMAP.md) by section. V1's spec stays in its §1–3; V2's is [SPEC.md](SPEC.md).
