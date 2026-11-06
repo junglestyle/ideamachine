@@ -137,8 +137,10 @@ def test_cross_validation_learns_a_separable_question():
     assert sum(b["n"] for b in m["kind"]["reliability"]) == 60
 
 
-def _label_everything(pipe):
+def _label_everything(pipe, but=()):
     for eid, kind in table(pipe, "SELECT episode_id, kind FROM im.episodes WHERE current"):
+        if eid in but:
+            continue
         label.save(pipe, eid, {"boundaries": "ok", "is_self_thinking": kind == "monologue",
                                "kind": "idea" if kind == "monologue" else "chatter",
                                "project": None, "keep_score": 4 if kind == "monologue" else 2}, None)
@@ -159,6 +161,23 @@ def test_train_then_triage_with_logreg(pipe, cfg, stream):
         assert abs(sum(answers["kind"]["probabilities"].values()) - 1) < 1e-3
         assert 1 <= answers["keep_score"]["value"] <= 5
     assert table(pipe, "SELECT count(*) FROM im.episode_embeddings") == [(9,)]
+
+
+@needs_sklearn
+def test_forgetting_a_label_retires_the_classifier_trained_on_it(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    secret = episodes_with_text(pipe, SECRET)
+    _label_everything(pipe, but=secret)
+    without = backends.train(pipe, HashEmbedder())["model_version"]
+    _label_everything(pipe, but={r[0] for r in table(pipe, "SELECT episode_id FROM im.episodes")} - secret)
+    with_secret = backends.train(pipe, HashEmbedder())["model_version"]
+    assert backends.LogregBackend(pipe, HashEmbedder()).model_version == with_secret != without
+    stream.forget(14406, 14412)
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    assert backends.LogregBackend(pipe, HashEmbedder()).model_version == without
+    assert backends.train(pipe, HashEmbedder())["model_version"] == without
+    assert backends.LogregBackend(pipe, HashEmbedder()).model_version == without
 
 
 @needs_sklearn

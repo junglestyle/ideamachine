@@ -10,7 +10,7 @@ import hashlib
 import json
 import uuid
 
-from im import egress, llm, names
+from im import egress, feedback, llm, names
 
 SCHEMA_VERSION = 1
 STAGE_VERSION = "extract/1"
@@ -254,12 +254,12 @@ def _item_id(p: egress.Payload, model: str, pv: str, i: int) -> uuid.UUID:
     return uuid.uuid5(ITEM_NS, f"{p.episode_id}|{model}|{pv}|{p.policy}|{p.sha256}|{i}")
 
 
-def _carry_matches(conn, p: egress.Payload, model: str, pv: str, items: list[dict]) -> None:
+def _carry_matches(conn, ids: list[uuid.UUID], items: list[dict]) -> None:
     """Reused items keep the matcher's decision and my verdicts on the items they were copied from: the same capture
     isn't judged (or paid for) twice, and can't turn into a second idea. Verdicts go item to item, so two captures
-    with the same quote each keep their own; feedback.carry_verdicts, which matches by quote, sees them settled."""
-    for i, it in enumerate(items):
-        new = _item_id(p, model, pv, i)
+    with the same quote each keep their own; feedback.carry_verdicts, which matches by quote, sees them settled.
+    `ids` are the saved items' ids, in the order of `items`."""
+    for new, it in zip(ids, items, strict=True):
         copied = conn.execute(
             """INSERT INTO im.item_verdicts (item_id, segment_ids, quote, verdict, note, how, decided_at, carried_from)
                SELECT n.item_id, n.source_segment_ids, n.quote, v.verdict, v.note, v.how, v.decided_at, v.verdict_id
@@ -277,11 +277,34 @@ def _carry_matches(conn, p: egress.Payload, model: str, pv: str, items: list[dic
                         ON CONFLICT DO NOTHING""", (new, it["from_item_id"]))
 
 
-def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: list[dict]) -> None:
+def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: list[dict]) -> list[uuid.UUID]:
+    """Make `items` the episode's captures under this model, prompt and policy. Returns their ids, in order.
+
+    A re-read of the same episode (what would be sent changed, e.g. a tap was added) keeps each earlier capture it
+    makes again: one citing a line the new one cites, with a matching quote (feedback.quote_score), one to one and
+    best first. The earlier item stays as it was, with all that hangs off it: the matcher's decision and the idea's
+    evidence (so the capture doesn't become a second idea), my verdicts, and Lattice's events on it. Only captures
+    the re-read doesn't make again are replaced."""
     with conn.transaction():
+        old = conn.execute("""SELECT item_id, kind, quote, source_segment_ids FROM im.items
+                              WHERE episode_id = %s AND model = %s AND prompt_version = %s
+                                AND privacy_policy_version = %s""", (p.episode_id, model, pv, p.policy)).fetchall()
+        scored = sorted((-feedback.quote_score(quote, it["quote"]), kind != it["kind"], str(item_id), n, item_id)
+                        for item_id, kind, quote, segs in old for n, it in enumerate(items)
+                        if set(segs) & set(it["source_segment_ids"]))
+        kept: dict[int, uuid.UUID] = {}
+        for neg_score, _, _, n, item_id in scored:
+            if -neg_score >= feedback.CARRY_MIN_SCORE and n not in kept and item_id not in kept.values():
+                kept[n] = item_id
         conn.execute("""DELETE FROM im.items WHERE episode_id = %s AND model = %s AND prompt_version = %s
-                        AND privacy_policy_version = %s""", (p.episode_id, model, pv, p.policy))
+                        AND privacy_policy_version = %s AND item_id <> ALL(%s::uuid[])""",
+                     (p.episode_id, model, pv, p.policy, list(kept.values())))
+        ids = []
         for i, it in enumerate(items):
+            if i in kept:
+                ids.append(kept[i])
+                continue
+            ids.append(_item_id(p, model, pv, i))
             # said_by_segment_id: the first cited segment the speaker said, so a later rename reaches the item.
             conn.execute(
                 """INSERT INTO im.items (item_id, episode_id, kind, said_by, quote, gist, themes, confidence,
@@ -291,7 +314,7 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
                      (SELECT u.seg FROM unnest(%s::uuid[]) WITH ORDINALITY AS u(seg, n)
                       JOIN im.source_segments s ON s.segment_id = u.seg
                       WHERE s.speaker_label = %s ORDER BY u.n LIMIT 1))""",
-                (_item_id(p, model, pv, i),
+                (ids[-1],
                  p.episode_id, it["kind"], it["said_by"], it["quote"], it["gist"], it["themes"], it["confidence"],
                  it["source_segment_ids"], egress_id, model, pv, p.policy, SCHEMA_VERSION,
                  STAGE_VERSION, p.sha256, it["source_segment_ids"], it["said_by"]))
@@ -302,6 +325,7 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
                SET input_hash = excluded.input_hash, egress_id = excluded.egress_id, n_items = excluded.n_items,
                    created_at = now()""",
             (p.episode_id, model, pv, p.policy, p.sha256, egress_id, len(items)))
+    return ids
 
 
 def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "medium",
@@ -312,8 +336,7 @@ def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "mediu
              "refused": 0, "failed": 0, "cost_usd": 0.0, "stopped": None}
     for p in todo[:limit] if limit else todo:
         if reused := _reuse(conn, p, model, pv):
-            _save(conn, p, model, pv, *reused)
-            _carry_matches(conn, p, model, pv, reused[1])
+            _carry_matches(conn, _save(conn, p, model, pv, *reused), reused[1])
             stats["reused"] += 1
             stats["items"] += len(reused[1])
             continue

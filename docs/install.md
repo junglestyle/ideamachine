@@ -89,10 +89,13 @@ One REPEATABLE READ transaction:
 
 1. **Import** ([ROADMAP §3.3](ROADMAP.md)). Re-read conversations whose `revision` changed in `index.json`, checking each file
    against its revision (a mismatch waits for the next run). Store new utterance versions in `im.source_segments`,
-   keyed by content, so unchanged speech keeps its ID when Hearsay renumbers. Link replaced versions: by
+   keyed by content (conversation, start, end and text; any other field is an annotation), so unchanged speech
+   keeps its ID when Hearsay renumbers or adds a field. Link replaced versions: by
    `utterance_id` when the transcript is the same, by time overlap otherwise. Then purge everything that overlaps
    a `forgotten.json` span.
-2. **Purge.** Delete every episode, current or retired, that contains a forgotten segment.
+2. **Purge.** Delete everything made from a forgotten segment: every episode (current or retired) that contains
+   one; every label, idea, digest, verdict and observation made from one; Lattice's events on captures of it, even
+   once the capture is gone; and the classifiers trained on those labels.
 3. **Segment.** Re-segment conversations whose membership changed, or whose episodes are stale or missing.
    Episodes are content-addressed (`uuid5(stage_version, input_hash)`), so unchanged episodes aren't touched,
    ones that no longer come out are retired (`current = false`), and new ones are inserted.

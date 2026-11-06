@@ -271,8 +271,9 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
             else:
                 title = answer["title"].strip() or _title(item[5])
                 statement = answer["statement"].strip() or item[5]
-                idea = conn.execute("""INSERT INTO im.ideas (title, statement, origin) VALUES (%s, %s, 'captured')
-                                       RETURNING idea_id""", (title, statement)).fetchone()[0]
+                idea = conn.execute("""INSERT INTO im.ideas (title, statement, origin, segment_ids)
+                                       VALUES (%s, %s, 'captured', %s) RETURNING idea_id""",
+                                    (title, statement, item[6])).fetchone()[0]
                 conn.execute("""INSERT INTO im.idea_evidence (idea_id, item_id, relation, judged_by)
                                 VALUES (%s, %s, 'origin', %s)""", (idea, item_id, version))
                 if decision == "evolves":

@@ -8,10 +8,12 @@ import numpy as np
 import psycopg
 import pytest
 
-from im import extract, lattice, observations
+from im import extract, fixtures, lattice, observations, pipeline
+from im.checks import run_checks
 
-from helpers import run, table
+from helpers import assert_invariants, run, segment_of, table
 from test_extract import FakeClaude
+from test_pipeline import LORA
 from test_triage import HashEmbedder
 
 ARCHIVE = """Current idea archive:
@@ -243,6 +245,63 @@ def test_forgetting_removes_ideas_born_from_it_and_their_stars(seeded, cfg, stre
     run(seeded, cfg, stream)
     assert table(seeded, "SELECT count(*) FROM im.ideas WHERE idea_id = %s", lora) == [(0,)]
     assert table(seeded, "SELECT idea_id FROM pub.feedback_events") == [(archived,)]
+
+
+def _star_the_lora_capture(conn):
+    (item,) = table(conn, "SELECT item_id FROM im.items WHERE quote LIKE '%%LoRa%%'")[0]
+    conn.execute("INSERT INTO pub.feedback_events (kind, item_id, source) VALUES ('item_star', %s, 'test')", (item,))
+    return item
+
+
+def _tap_the_lora_line(conn, cfg, stream):
+    """Hearsay lists a tap beside the LoRa line: its episode stays, but what would be sent changes."""
+    stream.conversations["c-mono"].taps.append(fixtures.iso(3605))
+    stream.write(stream.dir)
+    run(conn, cfg, stream)
+
+
+def test_a_re_read_in_place_keeps_the_captures_it_makes_again(seeded, cfg, stream):
+    lat_setup(seeded, cfg, stream)
+    observations.assign_stage(seeded)
+    starred = _star_the_lora_capture(seeded)
+    before = table(seeded, "SELECT idea_id, title, n_evidence FROM pub.ideas ORDER BY idea_id")
+    _tap_the_lora_line(seeded, cfg, stream)
+    assert extract.run_stage(seeded, FakeClaude(items_for))["read"] == 1
+    observations.assign_stage(seeded)
+    matcher = FakeMatcher()
+    lattice.match_stage(seeded, matcher, HashEmbedder())
+    assert matcher.calls == []   # nothing to match again: the capture, its idea and my star are as they were
+    assert table(seeded, "SELECT idea_id, title, n_evidence FROM pub.ideas ORDER BY idea_id") == before
+    assert table(seeded, "SELECT count(*) FROM im.ideas WHERE title = 'Something new'") == [(1,)]
+    assert table(seeded, "SELECT item_id FROM pub.feedback_events WHERE kind = 'item_star'") == [(starred,)]
+
+
+@pytest.mark.parametrize("lose_the_capture", ["re-read without it", "reset --stage extract"])
+def test_forgetting_reaches_an_idea_and_events_whose_capture_is_gone(seeded, cfg, stream, lose_the_capture):
+    lat_setup(seeded, cfg, stream)
+    _star_the_lora_capture(seeded)
+    if lose_the_capture == "reset --stage extract":
+        pipeline.reset(seeded, "extract")
+    else:
+        _tap_the_lora_line(seeded, cfg, stream)
+        extract.run_stage(seeded, FakeClaude(lambda text: [i for i in items_for(text) if "LoRa" not in i["quote"]]))
+    assert not table(seeded, "SELECT 1 FROM im.items WHERE quote LIKE '%%LoRa%%'")
+    assert table(seeded, "SELECT count(*) FROM pub.feedback_events WHERE kind = 'item_star'") == [(1,)]   # a record
+    stream.forget(3600, 3612)   # the LoRa idea's line
+    stream.write(stream.dir)
+    run(seeded, cfg, stream)
+    assert not table(seeded, "SELECT 1 FROM im.ideas WHERE statement = 'A new thing.'")
+    assert not table(seeded, "SELECT 1 FROM pub.feedback_events WHERE kind = 'item_star'")
+    assert table(seeded, "SELECT count(*) FROM im.ideas WHERE title = 'Broken builds as signal'") == [(1,)]
+    assert_invariants(seeded)
+
+
+def test_the_checks_find_an_idea_made_from_forgotten_speech(seeded, cfg, stream):
+    lat_setup(seeded, cfg, stream)
+    (idea,) = table(seeded, "SELECT idea_id FROM im.ideas WHERE title = 'Something new'")[0]
+    lora = segment_of(seeded, LORA)
+    seeded.execute("INSERT INTO im.source_tombstones (segment_id, forgotten_at) VALUES (%s, now())", (lora,))
+    assert (idea, lora) in run_checks(seeded)["tombstoned"]   # as if forgetting had missed it
 
 
 def test_projection_holds_still_as_ideas_are_added():

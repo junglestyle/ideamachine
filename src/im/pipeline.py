@@ -31,17 +31,24 @@ def _finish_run(conn, run_id: int, stats: dict) -> None:
 
 
 def _purge_tombstoned(conn) -> tuple[set[str], int]:
-    """Delete every episode (current or retired) and every label that contains a forgotten
-    segment (ROADMAP §3.4). Labels are human input, and this is the only thing that deletes them."""
-    labels = conn.execute(
+    """Delete everything that holds a forgotten segment (ROADMAP §3.4): every episode (current or retired), label,
+    idea, digest, verdict, observation and Lattice event made from it, and the classifiers trained on its labels.
+    Labels are human input, and this is the only thing that deletes them."""
+    labels = [r[0] for r in conn.execute(
         """DELETE FROM im.labels l WHERE EXISTS (
-             SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(l.segment_ids))""").rowcount
-    # An idea created from forgotten speech goes, with its feedback events (they cascade). Ideas that merely had
-    # forgotten evidence keep their other evidence; that evidence row goes with its item.
-    conn.execute("""DELETE FROM im.ideas d WHERE d.origin = 'captured' AND EXISTS (
-                      SELECT 1 FROM im.idea_evidence ev JOIN im.items i USING (item_id)
-                      JOIN im.source_tombstones t ON t.segment_id = ANY(i.source_segment_ids)
-                      WHERE ev.idea_id = d.idea_id AND ev.relation = 'origin')""")
+             SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(l.segment_ids))
+           RETURNING label_id""")]
+    # A classifier trained on a forgotten label learned from that speech: it goes, and triage falls back to the
+    # latest one trained without it (or `im train` makes a new one).
+    conn.execute("DELETE FROM im.classifiers WHERE label_ids && %s::bigint[]", (labels,))
+    # An idea created from forgotten speech goes, with its feedback events (they cascade), found by the speech it
+    # holds even once its capture is gone (migration 041). Ideas that merely had forgotten evidence keep their other
+    # evidence; that evidence row goes with its item.
+    conn.execute("""DELETE FROM im.ideas d WHERE EXISTS (
+                      SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(d.segment_ids))""")
+    # Lattice's events on a capture of forgotten speech, whether or not the capture is still there.
+    conn.execute("""DELETE FROM pub.feedback_events f WHERE EXISTS (
+                      SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(f.item_segment_ids))""")
     # A digest may paraphrase forgotten speech anywhere in its text, so the whole digest goes.
     conn.execute("""DELETE FROM im.digests g WHERE EXISTS (
                       SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(g.segment_ids))""")
@@ -60,7 +67,7 @@ def _purge_tombstoned(conn) -> tuple[set[str], int]:
                          JOIN im.source_tombstones t USING (segment_id)
                          WHERE es.episode_id = e.episode_id)
            RETURNING session_id""").fetchall()
-    return {r[0] for r in rows}, labels
+    return {r[0] for r in rows}, len(labels)
 
 
 def _sessions_needing_work(conn, stage_version: str) -> set[str]:
@@ -151,7 +158,7 @@ def reset(conn: psycopg.Connection, stage: str) -> dict:
                      "episodes_deleted": conn.execute("DELETE FROM im.episodes").rowcount}
         elif stage == "triage":
             stats = {"triage_deleted": conn.execute("DELETE FROM im.triage").rowcount}
-        elif stage == "extract":  # routes read items, so they go too. The egress log stays: it's a record.
+        elif stage == "extract":  # routes read items, so they go too. The egress log and Lattice's events stay.
             stats = {"routes_deleted": conn.execute("DELETE FROM im.routes").rowcount,
                      "items_deleted": conn.execute("DELETE FROM im.items").rowcount,
                      "extractions_deleted": conn.execute("DELETE FROM im.extractions").rowcount}
