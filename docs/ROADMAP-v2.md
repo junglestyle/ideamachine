@@ -15,7 +15,7 @@ Each one leaves the system working and Lattice usable until M6.
 | M2 | Observations, clusters, candidates, weight; ideas I keep (canonical or pinned); proposals; edge citations | B5 passes; every cluster weighted; `pub.ideas` returns the same ids; Lattice works unchanged | done 2026-11-01 ([design](design/m2-observations-candidates-ideas.md)) |
 | Synthesis | A stage triggered by weight: consolidates a cluster's statement or bridges several into a candidate, citing observations; arrives as a proposal | Versioned and capped; I keep a fair share of what it proposes | after M2 |
 | M3 | ~~Tune weight and proposals~~ No rating: proposals neutral, newest first | Closed without tuning: no signal predicted what I keep | [0007](decisions/0007-neutral-proposals.md) |
-| M4 | Jev for match decisions and edge typing, behind versioned `judged_by` | B1 and B4 pass; no rise in duplicate ideas | at M4 |
+| M4 | Jev for match decisions and edge typing, behind versioned `judged_by` | B1 and B4 pass; no rise in duplicate ideas. Baseline (2026-11-06): 6 quotes are evidence for two ideas each, all from October, when re-keyed episodes were read again and Opus joined the same words to two ideas or said they evolved one; every capture since 11-02 joins its observation's idea unasked. Ideas can't be merged yet | at M4 |
 | M5 | Lenses; MCP server moves here | Connector works unchanged against the new endpoint; 5 canonical lenses judged useful | at M5 |
 | M6 | Emanation UI; cut over; archive Lattice | Parity checklist from Lattice's tools and views; a week of use without falling back | at M6 |
 | M7 | Local titles | B6 (local titles via Corral) passes | at M7 |
