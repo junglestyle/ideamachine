@@ -38,7 +38,7 @@ def test_jev_replays_the_matchers_decisions_and_is_scored_against_opus(seeded, c
     assert (r["best"]["agree"], r["best"]["same_as_precision"], r["best"]["same_as_recall"]) == (1.0, 1.0, 1.0)
     assert r["auc"]["same_as:mean"] == 1.0 and r["auc"]["evolves:mean"] == 1.0
     # Jev rates the development 0.75 on "develops": a cut above that makes it a new idea, and Opus disagrees.
-    assert r["grid"]["0.5/0.8"]["confusion"]["evolves"] == {"new": 1}
+    assert r["agree"]["same 0.5"].split()[-1] == "0.67"   # at develops 0.8: the development read as new, 2 of 3
 
     assert match_bench.run(seeded, fake_jev(sent), tmp_path, names.Scrubber(b"k"))["answered"] == out["answered"]
     assert len(sent) == out["asked"]   # a rerun sends nothing it has an answer to

@@ -115,8 +115,9 @@ def decide(answers: dict[int, dict], cut_same: float, cut_develops: float) -> tu
 
 
 def score(folder: Path) -> dict:
-    """Agreement with Opus at each pair of cut-offs, the best of them, and how well each wording picks out the
-    candidate Opus joined (AUC), over the decisions Jev answered in full."""
+    """The best pair of cut-offs in full; agreement and same_as precision at every pair, as two small tables (a row
+    per cut-off on "same", a column per cut-off on "develops"); and how well each wording picks out the candidate
+    Opus joined (AUC). Over the decisions Jev answered in full."""
     key = json.loads((folder / "key.json").read_text())
     got = json.loads((folder / "jev-answers.json").read_text())
     done = []
@@ -124,15 +125,16 @@ def score(folder: Path) -> dict:
         answers = {n: got.get(f"{d['egress_id']} {n}") for n in range(1, len(d["candidates"]) + 1)}
         if all(answers.values()):
             done.append((d, answers))
-    grid = {}
-    for cs in CUTS:
-        for cd in CUTS:
-            grid[f"{cs}/{cd}"] = _agreement([(d, decide(a, cs, cd)) for d, a in done])
+    grid = {(cs, cd): _agreement([(d, decide(a, cs, cd)) for d, a in done]) for cs in CUTS for cd in CUTS}
     best = max(grid, key=lambda k: ((grid[k]["same_as_precision"] or 0) >= PRECISION, grid[k]["agree"] or 0))
+    table = lambda field: {"develops": "  ".join(f"{cd:4}" for cd in CUTS)} | {  # noqa: E731
+        f"same {cs}": "  ".join("   -" if grid[cs, cd][field] is None else f"{grid[cs, cd][field]:.2f}" for cd in CUTS)
+        for cs in CUTS}
     return {"benchmark": "B1", "decisions": len(key["decisions"]), "answered": len(done),
             "by_opus": {k: sum(d["decision"] == k for d, _ in done) for k in ("new", "same_as", "evolves")},
             "chosen_unknown": sum(d["chosen"] == "?" for d, _ in done),
-            "best": {"same/develops": best, **grid[best]}, "grid": grid, "auc": _auc(done)}
+            "best": {"same/develops": f"{best[0]}/{best[1]}", **grid[best]},
+            "agree": table("agree"), "same_as_precision": table("same_as_precision"), "auc": _auc(done)}
 
 
 def _agreement(pairs: list[tuple[dict, tuple]]) -> dict:
