@@ -100,6 +100,10 @@ def _run_stages(conn, cfg) -> dict:
             stats["triage_notes"] = notes
         if cfg.extract.enabled:
             stats["extract"] = _extract(conn, cfg)
+        from im import quotes
+
+        # After extraction, before anything reads a new capture's segments (verdicts, observations, matching).
+        stats["quotes"] = quotes.place_stage(conn)
         # After extraction (the new items exist) and before matching and routing (a carried discard counts).
         stats["verdicts_carried"] = feedback.carry_verdicts(conn)
         from im import observations
