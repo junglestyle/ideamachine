@@ -35,7 +35,8 @@ uv run im train                   # fit the logreg baseline on my labels
 uv run im eval --llm              # accuracy and reliability per question, per backend, plus the router's precision
 uv run im review                  # work through what the router sent me (pendant taps and notes to self first)
 uv run im reset --stage triage    # drop triage rows; the next run re-triages
-uv run pytest                     # each test gets a fresh im_test database and stream directory
+make check                        # the whole suite; fails without the IM_* env vars or the models extra
+uv run pytest                     # a quick run: without them the database or logreg tests skip instead
 IM_TEST_MODELS=1 uv run pytest    # also load the real Laya model
 ```
 
@@ -50,7 +51,8 @@ Settings are env vars:
   first, no score; [decision 0007](decisions/0007-neutral-proposals.md)). It reads `pub` and appends feedback as
   Lattice's role, logs in with Lattice's token, and listens on 127.0.0.1:8792.
 - `IM_DEV_ADMIN_URL`: the local dev superuser, used only by tests to create and drop `im_test`. Code refuses it
-  unless it points at localhost.
+  unless every host it (or `PGHOST`) names is localhost, a loopback address or a socket directory. Each test gets a
+  fresh `im_test` database and stream directory, and none of the other settings here.
 
 `IM_CONFIG` can name a TOML file that overrides the defaults in `src/im/config.py` (`[segment]` and `[triage]`).
 Every segmentation value goes into the episodes' `stage_version`, so changing one re-derives episodes on the

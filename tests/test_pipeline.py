@@ -4,6 +4,7 @@ import json
 import os
 
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 from im import db, fixtures, importer, pipeline, show
 from im.config import Config, SegmentConfig
@@ -336,7 +337,44 @@ def test_fixtures_refuse_a_directory_they_didnt_make(tmp_path):
         fixtures.write(tmp_path)
 
 
-def test_dev_writes_refuse_non_local_hosts():
+@pytest.fixture
+def no_pg_env(monkeypatch):
+    for name in ("PGHOST", "PGHOSTADDR", "PGSERVICE"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.parametrize("dsn", [
+    "postgresql://u:p@192.168.50.99:5432/x",
+    "host=nas.example.net dbname=im_dev user=postgres",
+    "postgresql:///im_dev?host=nas.example.net",
+    "host=localhost hostaddr=192.168.50.99 dbname=x",
+    "host=localhost,nas.example.net dbname=x",
+    "service=nas dbname=x",
+])
+def test_dev_writes_refuse_non_local_hosts(no_pg_env, dsn):
     with pytest.raises(SystemExit):
-        db.assert_local("postgresql://u:p@192.168.50.99:5432/x")
-    db.assert_local("postgresql://u:p@127.0.0.1:55432/x")
+        db.assert_local(dsn)
+
+
+def test_dev_writes_refuse_a_remote_pghost_when_the_dsn_names_no_host(no_pg_env, monkeypatch):
+    monkeypatch.setenv("PGHOST", "nas.example.net")
+    with pytest.raises(SystemExit):
+        db.assert_local("postgresql:///im_dev")
+
+
+@pytest.mark.parametrize("dsn", [
+    "postgresql://u:p@127.0.0.1:55432/x",
+    "postgresql://u@[::1]:55432/x",
+    "host=localhost dbname=x",
+    "host=/var/run/postgresql dbname=x",
+    "postgresql:///x?host=/tmp",
+    "postgresql:///x",
+])
+def test_dev_writes_go_to_this_machine(no_pg_env, dsn):
+    db.assert_local(dsn)
+
+
+@pytest.mark.parametrize("dsn", ["postgresql://u:p@127.0.0.1:55432/im_dev",
+                                 "host=127.0.0.1 port=55432 dbname=im_dev user=u password=p"])
+def test_with_dbname_swaps_only_the_database(dsn):
+    assert conninfo_to_dict(db.with_dbname(dsn, "im_test")) == conninfo_to_dict(dsn) | {"dbname": "im_test"}

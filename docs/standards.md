@@ -50,12 +50,17 @@ What the pipeline keeps true, whatever the stage:
   resets, the stream is only read, unknown formats and speakers fail closed, `lattice_app` can only read `pub` and
   append feedback, and the monthly cap stops extraction, scoring and the digest.
 - Tests run on synthetic streams from `im.fixtures` and never read the real one. Each gets a fresh `im_test`
-  database; the code refuses a dev admin URL that isn't localhost.
+  database; the code refuses a dev admin URL that isn't localhost or a local socket, in any DSN form. Each runs
+  without the developer's `IM_*`, `ANTHROPIC_*`, `LATTICE_*`, `CORRAL_*`, OpenRouter and Typesafe variables
+  (`tests/conftest.py`), so a shell that exports the deployment's settings can't send a test to Claude or overwrite
+  Hearsay's vocabulary.
 
 ## Running it
 
-- The tests need the database env vars from `.env.example`; without them the database tests skip. Setup and
-  configuration live in [install.md](install.md), deployment in [deploy.md](deploy.md) and `install/nas.sh`.
+- `make check` is the whole suite or nothing: it fails unless the database env vars from `.env.example` are set and
+  the `models` extra is installed (`uv sync --extra models`), as in CI. Plain `uv run pytest` is for quick runs:
+  without the env vars the database tests skip, and without the extra the logreg tests do. Setup and configuration
+  live in [install.md](install.md), deployment in [deploy.md](deploy.md) and `install/nas.sh`.
 
 ## Docs
 

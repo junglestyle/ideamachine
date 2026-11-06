@@ -3,6 +3,7 @@ Laya itself is exercised only when IM_TEST_MODELS=1 (see test_laya_backend)."""
 
 import hashlib
 import os
+from importlib.util import find_spec
 
 import numpy as np
 import pytest
@@ -13,7 +14,7 @@ from im.triage import Prediction, normalize
 from helpers import episodes_with_text, run, table
 from test_pipeline import BACKUP, SECRET
 
-sklearn = pytest.importorskip("sklearn")
+needs_sklearn = pytest.mark.skipif(find_spec("sklearn") is None, reason="needs the models extra (scikit-learn)")
 
 
 class HashEmbedder:
@@ -109,6 +110,7 @@ def test_resets_and_forgetting(pipe, cfg, stream):
     assert triage_count(pipe) == 0 and table(pipe, "SELECT count(*) FROM im.labels") == [(1,)]
 
 
+@needs_sklearn
 def test_binary_questions_match_sklearn():
     from sklearn.linear_model import LogisticRegression
 
@@ -124,6 +126,7 @@ def test_binary_questions_match_sklearn():
     assert backends.predict_proba(params, X[:2])["project"] == [{"none": 1.0}, {"none": 1.0}]
 
 
+@needs_sklearn
 def test_cross_validation_learns_a_separable_question():
     rng = np.random.default_rng(2)
     X = rng.normal(size=(60, 8))
@@ -141,6 +144,7 @@ def _label_everything(pipe):
                                "project": None, "keep_score": 4 if kind == "monologue" else 2}, None)
 
 
+@needs_sklearn
 def test_train_then_triage_with_logreg(pipe, cfg, stream):
     run(pipe, cfg, stream)
     with pytest.raises(ValueError):
@@ -157,6 +161,7 @@ def test_train_then_triage_with_logreg(pipe, cfg, stream):
     assert table(pipe, "SELECT count(*) FROM im.episode_embeddings") == [(9,)]
 
 
+@needs_sklearn
 def test_eval_reports_every_backend(pipe, cfg, stream):
     run(pipe, cfg, stream)
     _label_everything(pipe)

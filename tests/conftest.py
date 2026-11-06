@@ -1,7 +1,10 @@
-"""Every test gets a fresh `im_test` database in the local dev container and its own stream directory.
+"""Every test gets a fresh `im_test` database in the local dev container, its own stream directory, and none of the
+developer's settings.
 
 Uses IM_DEV_ADMIN_URL (must be localhost) and IM_DATABASE_URL's role and
-password, with the database name swapped to im_test.
+password, with the database name swapped to im_test. Both are read once, here; each test then runs without every
+variable the code reads to find real files and services (Hearsay's vocabulary, the config, the stream, the
+databases, Claude and the other model APIs). A test that needs one sets it.
 """
 
 import os
@@ -16,13 +19,24 @@ from im.fixtures import FixtureStream
 
 TEST_DB = "im_test"
 BOOTSTRAP = Path(__file__).parent.parent / "dev" / "init" / "bootstrap-db.sql.in"
+DSNS = {name: os.environ.get(name) for name in (db.DEV_ADMIN_ENV, db.PIPELINE_ENV)}
+# The ambient settings no test may see. IM_TEST_MODELS is the suite's own switch.
+AMBIENT = ("IM_", "ANTHROPIC_", "LATTICE_", "CORRAL_", "OPENROUTER_", "TYPESAFE_")
+
+
+@pytest.fixture(autouse=True)
+def isolated(monkeypatch):
+    for name in list(os.environ):
+        if name.startswith(AMBIENT) and name != "IM_TEST_MODELS":
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("ANTHROPIC_PROFILE", "im-test-no-such-profile")   # nor a logged-in `ant` profile: no Claude
 
 
 def _dsns():
-    if db.DEV_ADMIN_ENV not in os.environ or db.PIPELINE_ENV not in os.environ:
+    if not all(DSNS.values()):
         pytest.skip("set IM_DEV_ADMIN_URL and IM_DATABASE_URL (see .env.example)")
-    admin = db.dev_admin_dsn()  # asserts localhost
-    pipe = os.environ[db.PIPELINE_ENV]
+    admin, pipe = DSNS[db.DEV_ADMIN_ENV], DSNS[db.PIPELINE_ENV]
+    db.assert_local(admin)
     db.assert_local(pipe)
     return db.with_dbname(admin, TEST_DB), db.with_dbname(pipe, TEST_DB), admin
 

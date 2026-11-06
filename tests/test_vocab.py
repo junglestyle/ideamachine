@@ -1,12 +1,16 @@
 """My vocabulary for Hearsay: rare words from my corrections, my archive and misheard quotes; I approve or remove."""
 
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import psycopg
 import pytest
 
-from im import vocab
+from im import db, vocab
 
 from helpers import table
 from test_review import as_lattice
@@ -83,3 +87,22 @@ def test_candidates_approval_and_the_file(seeded_lattice, admin, tmp_path):
             as_lattice(admin, event, "vocab_add", json.dumps(bad))
     with pytest.raises(psycopg.errors.CheckViolation):
         as_lattice(admin, event, "vocab_remove", json.dumps({"term": "ok", "source": "added"}))
+
+
+def test_the_tests_leave_the_files_the_environment_names_alone(tmp_path):
+    """A developer's shell exports the deployment's IM_* lines: `im run` in a test mustn't write Hearsay's real
+    vocabulary, nor read the real config (a $5 cap here)."""
+    from conftest import _dsns
+
+    _, pipe_test, admin_dev = _dsns()
+    hearsays, config = tmp_path / "vocab.json", tmp_path / "im.toml"
+    hearsays.write_text(json.dumps({"format_version": 1, "terms": [{"term": "Corral", "source": "added"}]}))
+    config.write_text("[extract]\nmonthly_cap_usd = 5.0\n")
+    before = hearsays.read_text()
+    env = os.environ | {db.DEV_ADMIN_ENV: admin_dev, db.PIPELINE_ENV: pipe_test,
+                        "IM_VOCAB_PATH": str(hearsays), "IM_CONFIG": str(config)}
+    out = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_run_status.py",
+                          "tests/test_extract.py::test_im_run_goes_on_without_claude"],
+                         cwd=Path(__file__).parent.parent, env=env, capture_output=True, text=True)
+    assert hearsays.read_text() == before
+    assert out.returncode == 0 and "skipped" not in out.stdout, out.stdout

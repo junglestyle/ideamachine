@@ -247,8 +247,6 @@ def test_im_run_goes_on_without_claude(pipe, cfg, stream, monkeypatch, capsys):
     run(pipe, cfg, stream)
     monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
     monkeypatch.setattr(cli.db, "stream_dir", lambda: stream.dir)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("ANTHROPIC_PROFILE", "im-test-no-such-profile")
     cli.main(["run"])
     out = json.loads(capsys.readouterr().out)
     assert out["extract"]["stopped"].startswith("Claude")
