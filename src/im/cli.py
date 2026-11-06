@@ -132,6 +132,9 @@ def _extract(conn, cfg) -> dict:
     from im import extract
 
     x = cfg.extract
+    if x.prompt not in extract.LIVE:
+        return {"stopped": f"extract.prompt {x.prompt} is for `im trial` only: im.items can't hold its reading and "
+                           "attribution yet"}
     try:
         client = anthropic.Anthropic()
         return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
@@ -271,8 +274,9 @@ def cmd_pending(args) -> None:
 
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
+        prompt = args.prompt or cfg.extract.prompt
         pv = extract.prompt_version(cfg.extract.model, cfg.extract.effort,
-                                    extract.system_prompt(args.prompt or cfg.extract.prompt, cfg.extract.interests))
+                                    extract.system_prompt(prompt, cfg.extract.interests), extract.schema_for(prompt))
         todo = extract._pending(conn, cfg.extract.model, pv)
         done = {r[0] for r in conn.execute(
             "SELECT episode_id FROM im.extractions WHERE model = %s AND prompt_version = %s",
@@ -300,7 +304,7 @@ def cmd_trial(args) -> None:
 
     cfg = config.load()
     x = cfg.extract
-    system = extract.system_prompt(args.prompt, x.interests)
+    system, schema = extract.system_prompt(args.prompt, x.interests), extract.schema_for(args.prompt)
     model, effort = args.model or x.model, args.effort or x.effort
     ref_model, _, ref_effort = (args.against or f"{x.model}:{x.effort}").partition(":")
     ref_effort = ref_effort or x.effort
@@ -311,9 +315,9 @@ def cmd_trial(args) -> None:
         out = {}
         if not args.report:
             out["trial"] = trial.run(conn, llm.client_for(model), system, model, effort, cap, args.limit,
-                                     args.sample, scrubber, args.replicate)
-        out["report"] = trial.report(conn, (trial.version(model, effort, system, args.replicate), model),
-                                     (trial.version(ref_model, ref_effort, system), ref_model), policy)
+                                     args.sample, scrubber, args.replicate, schema)
+        out["report"] = trial.report(conn, (trial.version(model, effort, system, args.replicate, schema), model),
+                                     (trial.version(ref_model, ref_effort, system, schema=schema), ref_model), policy)
     _print(out)
 
 
@@ -412,7 +416,7 @@ def cmd_audit_probe(args) -> None:
 
 
 def cmd_audit_misses(args) -> None:
-    """A blind sheet of the reference's solid captures, missed or found by a cheaper model in a trial; my marks scored."""
+    """A blind sheet of the reference's solid captures, missed or found by a cheaper model in a trial; my marks."""
     from pathlib import Path
 
     from im import egress, extract, miss_audit, names, probe_audit, trial
@@ -425,15 +429,15 @@ def cmd_audit_misses(args) -> None:
         raise SystemExit("sheet needs the trial's prompt and candidate, e.g. v3 --model openai/gpt-6.1-terra")
     cfg = config.load()
     x = cfg.extract
-    system = extract.system_prompt(args.prompt, x.interests)
+    system, schema = extract.system_prompt(args.prompt, x.interests), extract.schema_for(args.prompt)
     effort = args.effort or x.effort
     ref_model, _, ref_effort = (args.against or f"{x.model}:{x.effort}").partition(":")
     ref_effort = ref_effort or x.effort
     policy = names.policy_c() if args.policy == "C" else egress.POLICY_VERSION
     with db.connect(db.pipeline_dsn()) as conn:
-        _print(miss_audit.write(conn, folder, (trial.version(args.model, effort, system), args.model),
-                                (trial.version(ref_model, ref_effort, system), ref_model),
-                                (trial.version(ref_model, ref_effort, system, 2), ref_model), policy,
+        _print(miss_audit.write(conn, folder, (trial.version(args.model, effort, system, schema=schema), args.model),
+                                (trial.version(ref_model, ref_effort, system, schema=schema), ref_model),
+                                (trial.version(ref_model, ref_effort, system, 2, schema), ref_model), policy,
                                 args.seed, args.size))
 
 
@@ -753,8 +757,9 @@ def main(argv=None) -> None:
     ae.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names said")
     ae.set_defaults(func=cmd_audit_edges)
     for name, question, what in (
-            ("audit-analogies", "analogy", "a blind sheet of possible analogies between unrelated ideas, proposed "
-                                           "several ways (sends to Claude and Jev); score my marks"),
+            ("audit-analogies", "analogy", "a blind sheet of possible analogies between unrelated ideas, ranked by "
+                                           "Jev beside random pairs (sends to Jev; --only facets to Claude); score "
+                                           "my marks"),
             ("audit-tension", "tension", "a blind sheet of possible tensions, proposed several ways (sends to "
                                          "Claude); score my marks"),
             ("audit-summaries", "summary", "a blind sheet of extraction trials' summaries: do they say more than "
@@ -772,7 +777,8 @@ def main(argv=None) -> None:
         pa.add_argument("--quotes-only", action="store_true", help="draft: show the model what was said, no summaries")
         pa.add_argument("--probes", action="store_true",
                         help="draft, Jev: also ask the probe questions (jev.PROBES), scored beside the deciding ones")
-        pa.add_argument("--only", help="sheet: draw every pair from one set, e.g. model or jev")
+        pa.add_argument("--only", help="sheet: draw every pair from one set, e.g. model or jev (or facets, no longer "
+                                       "on an analogy sheet by default)")
         pa.add_argument("--pool", type=int, help="analogy sheet: how many unrelated pairs Jev ranks to propose from "
                                                  "(default 3000)")
         pa.add_argument("--size", type=int, help="sheet, with --only: how many pairs (default 30)")

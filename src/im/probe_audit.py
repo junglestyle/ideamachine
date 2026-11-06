@@ -37,14 +37,16 @@ FACET_MODEL, FACET_EFFORT = "claude-opus-5-5", "low"
 PICK_MODEL, PICK_EFFORT = "claude-sonnet-5-5", "medium"
 PICKS = 30
 PER_IDEA = 2          # an idea appears at most this many times in a proposed set, so one idea can't fill it
-SIZES = {"analogy": {"jev": 25, "facets": 10, "random": 5},
+# The sets each sheet can draw (`--only` picks one), and what it draws by default. Facets left the analogy default
+# after two sheets (2 of 25 held, against Jev's 3 of 25 on analogy-2): they cost a Claude request per batch of ideas.
+SETS = {"analogy": ("jev", "facets", "random"), "tension": ("apart", "levels", "model", "near")}
+SIZES = {"analogy": {"jev": 30, "random": 10},
          "tension": {"apart": 10, "levels": 10, "model": 10, "near": 10}}
 # The jev set. Sonnet read every idea and proposed analogies (more than Opus did), but of the up to 30 it proposed,
 # 1 was between unrelated ideas (2026-11-04). Jev can't read every idea at once; it answers about pairs, cheaply,
 # so it reads a sample and ranks it.
 JEV_POOL = 3000       # unrelated pairs Jev is asked about
-TOP = 10              # a ranking's best pairs (a Jev question's, the facets'), which it's counted as proposing
-JEV_DEPTH = 100       # how far down each question's ranking the set draws, in turn
+TOP = 10              # a ranking's best pairs (a Jev wording's, the facets'), which it's counted as proposing
 JEV_WORKERS = 8
 JEV_SAVE = 100        # answers between saves of jev-pool.json
 # Asked to describe a pair, not to find an analogy, so they propose nothing: every pool pair has different
@@ -262,20 +264,26 @@ def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path,
     return got
 
 
+def _wordings(answer: dict[str, float]) -> dict[str, float]:
+    """A pool answer's ways of asking whether there's an analogy: not the axes that only describe a pair, nor what's
+    computed from the answers (jev.COMBOS, and `p`)."""
+    from im import jev
+
+    return {k: v for k, v in answer.items() if k not in AXES and k not in jev.COMBOS["analogy"] and k != "p"}
+
+
 def _jev_proposals(answers: dict[str, dict]) -> tuple[list[dict], dict[str, set]]:
-    """Each question ranks the pool, and the set draws from their rankings in turn, so every question proposes some;
-    and each question's top TOP, as `jev:<question>`, to say which questions proposed a pair. Ties go by pair, so
-    the order the answers came back in can't change the sheet."""
-    names = sorted(k for k in next(iter(answers.values()), {}) if k not in AXES)
-    ranked = {k: sorted(answers, key=lambda pair: (-answers[pair][k], pair)) for k in names}
-    out, seen = [], set()
-    for r in range(min(JEV_DEPTH, len(answers))):
-        for k in names:
-            pair = ranked[k][r]
-            if pair not in seen:
-                seen.add(pair)
-                out.append({"ideas": pair.split(), "why": f"Jev {k} {answers[pair][k]}"})
-    return out, {f"jev:{k}": {tuple(pair.split()) for pair in ranked[k][:TOP]} for k in names}
+    """The pool ranked by the mean of the wordings; and each wording's top TOP, as `jev:<wording>`, to keep scoring
+    them. On analogy-2 (2026-11-06) the mean ranked my analogies above the rest as well as the best single wording
+    did (AUC 0.92 against 0.955, a difference of 2 in 66), and the pairs most wordings put in their top 10 held 2 of
+    5, those in 2 or fewer 1 of 14: no one wording has to be picked. Ties go by pair, so the order the answers came
+    back in can't change the sheet."""
+    mean = {pair: sum(w.values()) / len(w) for pair, a in answers.items() if (w := _wordings(a))}
+    out = [{"ideas": pair.split(), "why": f"Jev mean {mean[pair]:.3f}"}
+           for pair in sorted(mean, key=lambda pair: (-mean[pair], pair))]
+    names = sorted(_wordings(next(iter(answers.values()), {})))
+    top = lambda k: sorted(answers, key=lambda pair: (-answers[pair][k], pair))[:TOP]  # noqa: E731
+    return out, {f"jev:{k}": {tuple(pair.split()) for pair in top(k)} for k in names}
 
 
 def _limited(pairs: list[dict], n: int, taken: set) -> list[dict]:
@@ -309,8 +317,8 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
     mine = [r[0] for r in rows if r[2]]
     pool = edge_audit.candidates(conn) if question == "tension" else {}
     sizes = {only: size or 30} if only else SIZES[question]
-    if only and only not in SIZES[question]:
-        raise SystemExit(f"--only is one of {', '.join(SIZES[question])}")
+    if only and only not in SETS[question]:
+        raise SystemExit(f"--only is one of {', '.join(SETS[question])}")
     wanted = lambda kind: kind in sizes  # noqa: E731
     n_picks = max(PICKS, 2 * sizes.get("model", 0) + len(exclude or ()))   # enough left after the excluded
     proposed: dict[str, list[dict]] = {}

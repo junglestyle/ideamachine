@@ -89,6 +89,15 @@ filter over both.
    specific shared move, not a genre) found 3, all new: 2 of 15 by structure lines, 1 by the model, none of 10 at
    random. The model (Sonnet) proposed only 1 pair between unrelated ideas, so the next sheet has Jev rank 3,000
    unrelated pairs on 20 wordings of the question, each wording proposing its best, to be graded and pared down.
+   The second sheet (analogy-2, 2026-11-06, 40 pairs) found 3, all new, all from Jev: 3 of 25 by Jev, none of 10 by
+   structure lines, none of 5 at random. Over the 25 Jev pairs, most wordings ranked my 3 above the other 22 (AUC
+   0.90-0.955) and so did their mean (0.92); `specific`, `explains`, `same_form` and `lens` didn't (0.65-0.68).
+   Agreement predicted a hit: pairs in 10 or more wordings' top 10 held 2 of 5, those in 2 or fewer 1 of 14. Jev's
+   `surprising` ran the wrong way (0.19). So the next sheet asks `probes2`, without those four, and draws 30 pairs
+   by the mean of the remaining wordings beside 10 at random; facets leave the default (2 of 25 over two sheets, at
+   a Claude request per batch of ideas). Tension isn't where ideas are close: a sheet of only near pairs
+   (tension-near-1, 2026-11-06) held 1 in 30, against 28 in 150 over the four mixed sheets, whose new tensions ran
+   across subjects. Jev's `pulls4` flagged 3 of the 30 at 0.45, the one tension among them.
 9. Do summaries say more than the quotes? The first tension sheet (2026-11-04): the two tensions three models agreed
    on and I didn't were made by the summaries ("comfort beats the stigma" for "they're pretty comfy"), and only
    Sonnet beat chance at all (2 of my 5, precision 0.5), so a tension pass proposes for me to keep, not links on
@@ -96,3 +105,10 @@ filter over both.
    Plan: a faithfulness pass after extraction, a cheap decision model like Jev, asking of each capture whether its
    summary claims anything its quotes don't; an unfaithful summary is rejected and rewritten, not kept. Measure
    first: how often it happens on a sample, checked by me, and whether the extraction prompt alone fixes it.
+10. Does a capture keep what was said apart from what was meant? Not on `v3` (2026-11-06): 11% of the live
+    captures' unstitched quotes and 15% of the pieces of stitched ones aren't in their lines (fillers dropped,
+    mistranscriptions fixed, words put back), 183 gists note a transcription fix, and gists and statements open
+    with labels ("Bit:", "Joke:"), attribution or topic. Prompt `v4` (trials only) asks for the quote exactly as
+    transcribed, a reading, an unlabelled gist and who a relayed thought is from; `im trial` reports each read's
+    share of quotes word for word in their lines. Register (joke, irony) leaves `kind` for a judging pass after
+    extraction.

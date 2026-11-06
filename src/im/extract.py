@@ -147,7 +147,78 @@ said around that time.
 confidence is how sure you are that the quote and gist are what was actually said and meant: lower it for \
 shaky transcription or a reading that depends on guessing the context."""
 
-PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3}
+# v4 (2026-11-06): three layers instead of one gist that held all of them. On the live captures, 11% of unstitched
+# quotes and 15% of the pieces of stitched ones weren't in their lines: the quote had been cleaned (fillers dropped,
+# mistranscriptions fixed, a dropped word put back), so it was already a reading, not what was said. 183 gists noted
+# a transcription fix, and gists and statements opened with labels ("Bit:", "Joke:", "Self-observation:", "Dance
+# tip:"), attribution ("S1's view:", "A nurse frames...") or topic. Now the quote is exactly as transcribed, so it
+# can be checked; the reading is what was meant; the gist is the thought, unlabelled; attribution is a field. `joke`
+# leaves kind: a joke is a register, not a sort of thought, and register is for a judging pass after extraction
+# (Jev, not built yet). For trials only, until im.items keeps the reading and attribution (the run refuses it live).
+SYSTEM_V4 = """You extract observations from transcripts of my everyday speech, recorded by an always-on pendant. \
+Most of what you'll see is small talk, logistics, background noise and transcription errors. Your job is to \
+capture each distinct thought someone expresses, so that when the same thought comes up again, days or months \
+later, it can be recognized. Nothing you capture is judged on its own: what matters is decided later, by whether \
+a thought recurs and whether I keep it.
+
+The test for every item: could someone say this again in a different conversation, weeks later, and it would be \
+the same thought? "The pills are a band-aid" passes. "I'm still overshooting" and "toss it on seven" don't: \
+they're about this moment.
+
+What counts, when it passes that test:
+- ideas, theories, models, hunches; half-formed is fine
+- questions someone is actually wondering about (not logistics: "where are the keys?" doesn't count)
+- aphorisms, compact formulations, jokes, bits, slogans, images
+- opinions, beliefs and preferences about something general; obvious is fine, if someone holds it
+- observations about people, myself, social dynamics or the world that generalize beyond this occasion
+- things I want to build, try, or look into, and principles or techniques someone is teaching
+- tasks and decisions, only when I say I want to remember them
+Anyone's thought counts: mine, a friend's, a stranger's. Say who said it, using the speaker labels exactly as \
+they appear in the transcript ("me", "S1", "unknown"...).
+{interests}
+What doesn't count:
+- Fragments and reactions that are only a thought with the conversation around them ("it's definitely \
+strange", "you were probably locked into that anyway").
+- What's happening right now: narration, venting about a particular event, instructions for the task at hand \
+(counts, positions, "do it like this"), logistics, plans, scheduling.
+- Verdicts on a particular person other than me (their looks, character, sex life, health). If there's a \
+general point in it, capture the general point, without the person.
+- Greetings, small talk and filler.
+- Media: TV, radio, songs, videos, or someone reading aloud, unless someone responds with a thought of their own.
+- The same thought repeated within this transcript (capture it once), and garbled transcription.
+
+How to capture, in three layers:
+- quote: exactly what the transcript says, character for character: one unbroken stretch of the cited lines, \
+with its fillers, repeats and transcription errors left in. Don't fix, trim or tidy it, and don't join pieces with \
+"..." or "/". If the thought runs across several lines or is interrupted, quote its most distinctive stretch, and \
+cite every line the thought runs across.
+- reading: the quote as the speaker meant it. Fix obvious transcription errors, drop fillers, repeats and false \
+starts, and spell out what "it", "that" or "he" refers to when the transcript says. Add nothing the transcript \
+doesn't support.
+- gist: the thought, stated plainly in one line, with whatever context it needs to stand alone for someone who \
+didn't hear the conversation. If the context it needs isn't in the transcript, skip the item. No label or prefix \
+("Joke:", "Bit:", "Hunch:", "Self-observation:", a topic), no note on transcription (that's the reading's job), and \
+no "S1 says" (that's said_by and attributed_to).
+- attributed_to: when the speaker is passing on someone else's thought (a teacher's rule, a friend's line, a \
+nurse's analogy, something they read), whose it is, in a few words ("a nurse", "the dance instructor"); otherwise \
+empty. said_by stays whoever said it here.
+- kind: what sort of thought it is, not its tone. A joke or a bit is filed by what it says, often as an aphorism \
+or an observation. A question someone is wondering about is "question", unless it's an idea put as a question. A \
+principle or technique someone is teaching is "technique".
+- Don't evaluate, fact-check, moralize, soften or balance. Provocative, controversial, exaggerated or false \
+thoughts are captured as said, not endorsed as claims.
+- Don't invent. Every item cites the numbers of the transcript lines it comes from. If the speech is too \
+garbled to be sure what was said, skip it.
+- If I say "note to self", capture what I said there.
+- The context may say I tapped the pendant. A tap usually means I wanted something kept: look closely at what I \
+said around that time.
+- Many transcripts contain no such thoughts. An empty list is then the correct answer.
+
+confidence is how sure you are that the reading and gist are what was actually said and meant: lower it for \
+shaky transcription or a reading that depends on guessing the context."""
+
+PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3, "v4": SYSTEM_V4}
+LIVE = ("v1", "v2", "v3")   # the prompts im.items can hold; a later one is for `im trial` until it can
 
 
 def system_prompt(name: str = "v1", interests: str = "") -> str:
@@ -183,9 +254,44 @@ SCHEMA = {
     "additionalProperties": False,
 }
 
+KINDS_V4 = ["idea", "aphorism", "observation", "question", "technique", "project", "task", "decision"]
+SCHEMA_V4 = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": KINDS_V4},
+                    "said_by": {"type": "string"},
+                    "attributed_to": {"type": "string"},
+                    "quote": {"type": "string"},
+                    "lines": {"type": "array", "items": {"type": "integer"}},
+                    "reading": {"type": "string"},
+                    "gist": {"type": "string"},
+                    "themes": {"type": "array", "items": {"type": "string"}},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["kind", "said_by", "attributed_to", "quote", "lines", "reading", "gist", "themes",
+                             "confidence"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+SCHEMAS = {"v4": SCHEMA_V4}   # a prompt not here answers in SCHEMA
+TEXT = ("quote", "reading", "gist", "attributed_to")   # what a capture says, names unscrubbed back (policy C)
 
-def prompt_version(model: str, effort: str, system: str = SYSTEM) -> str:
-    return hashlib.sha256(json.dumps([system, SCHEMA, model, effort], sort_keys=True).encode()).hexdigest()[:16]
+
+def schema_for(name: str) -> dict:
+    return SCHEMAS.get(name, SCHEMA)
+
+
+def prompt_version(model: str, effort: str, system: str = SYSTEM, schema: dict = SCHEMA) -> str:
+    return hashlib.sha256(json.dumps([system, schema, model, effort], sort_keys=True).encode()).hexdigest()[:16]
 
 
 def _pending(conn, model: str, pv: str) -> list:
@@ -240,8 +346,7 @@ def _items(p: egress.Payload, raw: list[dict]) -> list[dict]:
         lines = sorted({n for n in item["lines"] if 1 <= n <= len(p.segment_ids)})
         if not lines:
             continue
-        out.append(item | {
-            "quote": names.unscrub(item["quote"], p.names), "gist": names.unscrub(item["gist"], p.names),
+        out.append(item | {k: names.unscrub(item[k], p.names) for k in TEXT if k in item} | {
             "themes": [names.unscrub(t, p.names) for t in item.get("themes", [])],
             "said_by": p.speakers.get(item["said_by"], item["said_by"]),
             "source_segment_ids": [p.segment_ids[n - 1] for n in lines],

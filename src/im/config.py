@@ -44,7 +44,7 @@ class ExtractConfig:
     enabled: bool = True
     model: str = "claude-opus-5-5"
     effort: str = "medium"
-    prompt: str = "v1"                   # extract.PROMPTS; a new prompt re-reads every episode, so trial it first
+    prompt: str = "v1"                   # extract.LIVE; a new prompt re-reads every episode, so trial it first
     interests: str = ""                  # my interests, for prompts with a slot for them (v2); keep it out of the repo
     monthly_cap_usd: float = 20.0        # every paid request stops once the month's egress spend reaches this
     max_episodes_per_run: int | None = None
