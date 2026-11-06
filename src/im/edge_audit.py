@@ -378,6 +378,8 @@ def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: st
     from im import egress, llm, names, themes
 
     key = json.loads((folder / "key.json").read_text())
+    if model.startswith("jev"):
+        return _draft_jev(conn, client, folder, key, scrubber, monthly_cap_usd)
     shown = _pairs_as_shown((folder / "sheet.md").read_text())
     policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     out_path = folder / f"draft-{model.replace('/', '_')}-{effort}-labels{LABELSET}{policy_tag(policy)}.json"
@@ -410,6 +412,56 @@ def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: st
         out_path.write_text(json.dumps(got, indent=2))   # as it goes: a rerun picks up where this stopped
     return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "prompt_version": pv,
             "policy": policy, **({"failed": failed} if failed else {}), **({"stopped": stopped} if stopped else {})}
+
+
+EDGE_CUT = 0.5    # Jev's mean of the connected wordings at which a draft says there's an edge; scored at each cut
+KIND_CUT = 0.5    # a kind Jev rates at least this likely is its suggestion; otherwise, connected, it's related
+
+
+def jev_label(p: dict[str, float]) -> str:
+    """B4's label from Jev's answers: none under EDGE_CUT; otherwise same, or the likeliest of supports, elaborates
+    and tension if it's likely enough, or else related."""
+    if p["p"] < EDGE_CUT:
+        return "none"
+    if p.get("same", 0) >= KIND_CUT:
+        return "same"
+    kind = max(("supports", "elaborates", "tension"), key=lambda k: (p.get(k, 0), k))
+    return kind if p.get(kind, 0) >= KIND_CUT else "related"
+
+
+def _draft_jev(conn, client, folder: Path, key: dict, scrubber, monthly_cap_usd: float) -> dict:
+    """Jev marks every pair from structured state (each side's quotes and summary, A and B as the sheet shows them),
+    one request of atomic questions per pair, into draft-<model>-<question set>-<probe set>-labels<n>[-<policy>].json.
+    Each pair keeps every probability beside its label, so connection can be scored at every cut."""
+    from im import egress, jev, llm, probe_audit
+
+    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+    out_path = folder / (f"draft-{client.model}-{jev.QUESTION_SETS['edge']}-{jev.PROBE_SET['edge']}"
+                         f"-labels{LABELSET}{policy_tag(policy)}.json")
+    got = json.loads(out_path.read_text()) if out_path.exists() else {}
+    cost, failed, stopped = 0.0, [], None
+    for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
+        if num in got:
+            continue
+        a, b = p.get("sides") or p["ideas"]
+        state = {"a": side_data(conn, a), "b": side_data(conn, b)}
+        if scrubber:
+            state, _ = probe_audit._scrubbed(state, scrubber)
+        try:
+            ans = probe_audit._ask_jev(conn, client, "edge", state, True, egress.segments_of(conn, p["ideas"]),
+                                       policy, monthly_cap_usd)
+        except llm.Stop as e:
+            stopped = str(e)[:200]
+            break
+        cost += ans.cost_usd
+        if ans.failed:
+            failed.append({"pair": int(num), "error": (ans.error or "")[:300]})
+            continue
+        got[num] = {k: round(v, 3) for k, v in ans.data.items()} | {"label": jev_label(ans.data), "direction": "none",
+                                                                     "analogy": ""}
+        out_path.write_text(json.dumps(got, indent=2))   # as it goes: a rerun picks up where this stopped
+    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 6), "policy": policy,
+            **({"failed": failed} if failed else {}), **({"stopped": stopped} if stopped else {})}
 
 
 def _num(name: str):
@@ -448,6 +500,8 @@ def agreement(mine: dict, theirs: dict) -> dict:
     ratio = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
     my_tensions = {n for n in pairs if mine[n]["label"] == "tension"}
     return {"pairs": len(pairs),
+            **({"connection_by_cut": _connection_by_cut(pairs, mine_linked, theirs)}
+               if pairs and all("p" in theirs[n] for n in pairs) else {}),
             # B4's bar (decision 0009): whether there's an edge. The kind is a suggestion; it's reported below.
             "connection": {"agree": ratio(sum((n in mine_linked) == (n in their_linked) for n in pairs), len(pairs)),
                            "precision": ratio(len(mine_linked & their_linked), len(their_linked)),
@@ -467,3 +521,23 @@ def agreement(mine: dict, theirs: dict) -> dict:
                           "recall": ratio(len(my_analogies & their_analogies), len(my_analogies)),
                           "precision": ratio(len(my_analogies & their_analogies), len(their_analogies))},
             "confusion_mine_to_theirs": confusion}
+
+
+EDGE_CUTS = (0.3, 0.4, 0.5, 0.6, 0.7)
+
+
+def _connection_by_cut(pairs: list, mine_linked: set, theirs: dict) -> dict:
+    """For a draft that kept its probability of an edge (Jev's): agreement, precision and recall on connection at
+    each cut, so the cut can be chosen from my marks; and the chance that a pair I linked scores above one I didn't
+    (AUC, ties half)."""
+    ratio = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
+    out = {}
+    for cut in EDGE_CUTS:
+        yes = {n for n in pairs if theirs[n]["p"] >= cut}
+        out[str(cut)] = {"agree": ratio(sum((n in mine_linked) == (n in yes) for n in pairs), len(pairs)),
+                         "precision": ratio(len(mine_linked & yes), len(yes)),
+                         "recall": ratio(len(mine_linked & yes), len(mine_linked))}
+    linked, unlinked = [n for n in pairs if n in mine_linked], [n for n in pairs if n not in mine_linked]
+    wins = sum((theirs[a]["p"] > theirs[b]["p"]) + 0.5 * (theirs[a]["p"] == theirs[b]["p"])
+               for a in linked for b in unlinked)
+    return out | {"auc": ratio(wins, len(linked) * len(unlinked))}

@@ -19,6 +19,7 @@ uv run im ideas --discards        # what I discarded and why: material for revis
 uv run im trial v3 --model openai/gpt-6.1-sol   # B3: a model on the trial sample, names pseudonymized, vs Opus
 uv run im trial v3 --model claude-opus-5-5 --replicate 2   # Opus against itself: the ceiling for recall
 uv run im audit-misses sheet saved/misses-terra v3 --model openai/gpt-6.1-terra   # its misses among Opus's solid captures, blind beside ones it found; score my marks
+uv run im audit-edges draft saved/b4-3 --model jev-1.14.0   # B4: Jev answers a sheet; score shows connection at every cut
 uv run im bench-match run saved/b1-1 --limit 20   # B1: Opus's logged match decisions, replayed through Jev; `score` compares
 uv run im names warm               # policy C: find names in the trial sample once, before trials in parallel
 uv run im audit-tension draft saved/tension-2 --model jev-1.14.0   # Jev drafts a probe sheet (via OpenRouter); --probes asks more

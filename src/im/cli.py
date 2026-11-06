@@ -361,12 +361,13 @@ def cmd_audit_edges(args) -> None:
     args.folder = folders[0]
     with db.connect(db.pipeline_dsn()) as conn:
         if args.action == "draft":
-            from im import llm, names
+            from im import jev, llm, names
 
             cfg = config.load()
             scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
-            _print(edge_audit.draft(conn, llm.client_for(args.model), Path(args.folder), args.model, args.effort,
-                                    scrubber, cfg.extract.monthly_cap_usd))
+            client = jev.Jev(model=args.model) if args.model.startswith("jev") else llm.client_for(args.model)
+            _print(edge_audit.draft(conn, client, Path(args.folder), args.model, args.effort, scrubber,
+                                    cfg.extract.monthly_cap_usd))
             return
         _print(edge_audit.write(conn, Path(args.folder), args.seed, args.size))
 
@@ -775,7 +776,8 @@ def main(argv=None) -> None:
                     "score takes several, to score them as one")
     ae.add_argument("--seed", type=int, default=4, help="the sample and shuffle's seed")
     ae.add_argument("--size", type=int, default=50, help="how many pairs")
-    ae.add_argument("--model", default="claude-opus-5-5", help="draft: the candidate model")
+    ae.add_argument("--model", default="claude-opus-5-5",
+                    help="draft: the candidate model, e.g. openai/gpt-6.1-terra, or jev-1.14.0 (TypeSafe's Jev)")
     ae.add_argument("--effort", default="low", help="draft: the candidate's effort")
     ae.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names said")
     ae.set_defaults(func=cmd_audit_edges)

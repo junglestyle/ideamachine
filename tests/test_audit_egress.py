@@ -95,6 +95,19 @@ def test_a_b4_draft_sends_names_pseudonymized_and_maps_its_analogies_back(named_
     assert "Bob moves" in analogies and not any(BOB in a for a in analogies)
 
 
+def test_a_jev_b4_draft_sends_names_pseudonymized(named_clusters, tmp_path):  # noqa: F811
+    conn = named_clusters
+    edge_audit.write(conn, tmp_path)
+    fill(tmp_path, lambda p: ("rel", ""))
+    since, (client, sent) = last_egress(conn), fake_jev()
+    out = edge_audit.draft(conn, client, tmp_path, "jev-1.14.0", scrubber=scrubber())
+    assert out["policy"] == scrubber().policy
+    assert_pseudonymized([json.dumps(b["state"]) for b in sent])
+    pairs = [p for _, p in sorted(json.loads((tmp_path / "key.json").read_text())["pairs"].items(),
+                                  key=lambda kv: int(kv[0]))]
+    assert_logged(conn, since, [(json.dumps(b), p["ideas"]) for b, p in zip(sent, pairs, strict=True)])
+
+
 def test_a_tension_sheet_and_its_draft_send_names_pseudonymized(named_clusters, tmp_path):  # noqa: F811
     conn = named_clusters
     since, proposer = last_egress(conn), FakeChat()

@@ -35,7 +35,7 @@ CUT = {"tension": 0.45}
 # correlate 0.7 to 0.9, and their mean held 0.79 to 0.81 on both while ranking tensions new to me as well as known
 # ones (pulls_v2 alone favoured known ones, 0.84 against 0.77). The forms asked before (contradiction, change of
 # mind, trade-off, the strongest counting: 0.71 to 0.74) stay as probes. A changed set gets a new name here, which names its drafts.
-QUESTION_SETS = {"tension": "pulls4"}
+QUESTION_SETS = {"tension": "pulls4", "edge": "connected3"}
 QUESTIONS = {
     "tension": {
         "competing_pulls": ("Do `a` and `b` pull a person in directions that would have to be balanced?", None),
@@ -70,6 +70,17 @@ QUESTIONS = {
                       "false": "a says the same as b, or something unrelated to it"}),
         "develops_v2": ("Is `a` built on `b`, going further than `b` does?", None),
     },
+    # B4 (edge_audit): is there an edge between `a` and `b`? Only that is graded (decision 0009), so three wordings
+    # decide by their mean: the sheet's own definition, the test I mark by, and the line against a broad shared area.
+    "edge": {
+        "connected": ("Are `a` and `b` connected: does one support, fill in or pull against the other, or are they "
+                      "about the same subject?",
+                      {"true": "Knowing one bears on the other, or they share a subject",
+                       "false": "No real connection: sharing a broad area (relationships, emotions, work) isn't one"}),
+        "connected_v2": ("Would someone thinking about `a` want to see `b` beside it?", None),
+        "connected_v3": ("Is there a real connection between `a` and `b`, beyond a broad shared area such as "
+                         "relationships, emotions or work?", None),
+    },
 }
 
 
@@ -77,7 +88,7 @@ QUESTIONS = {
 # wordings are scored against my marks without changing what's being compared. PROBE_SET names the draft.
 # Tension's probes2 (2026-11-04) also asked whether the sides differ in structure, only in emphasis, or are an
 # exception, and whether both are mine: all near chance on both sheets, so dropped.
-PROBE_SET = {"tension": "probes4", "analogy": "probes2"}
+PROBE_SET = {"tension": "probes4", "analogy": "probes2", "edge": "kinds1"}
 BOTH = {"true": "Someone could hold both without strain", "false": "Holding one means giving up some of the other"}
 PROBES = {
     "tension": {
@@ -137,6 +148,16 @@ PROBES = {
                               "technology and relationships?", None),
         "surprising": ("Would someone who knows both `a` and `b` be surprised to see them linked?", None),
     },
+    # The kind of an edge, a suggestion shown on it and never graded (0009): the sheet's definitions, one each.
+    "edge": {
+        "supports": ("Is one of `a` and `b` a reason to believe the other: evidence or an argument for it?", None),
+        "elaborates": ("Does one of `a` and `b` fill in the other: a case or example of it, how it works, an "
+                       "application, a generalization, or something built on it?", None),
+        "tension": ("Do `a` and `b` pull against each other: a contradiction, a change of mind, a trade-off, or two "
+                    "pulls that would have to be balanced?", None),
+        "same": ("Do `a` and `b` say the same thing, so one is the other said again?", None),
+        "same_subject": ("Are `a` and `b` about the same subject?", None),
+    },
 }
 # Combinations of deciding and probe answers, computed here and scored like any question.
 COMBOS = {
@@ -159,10 +180,11 @@ def _mean(p: dict[str, float], names) -> float:
 
 
 def combine(question: str, p: dict[str, float]) -> float:
-    """One probability from the atomic ones: a tension is the mean of its wordings; an analogy needs different
-    subjects and the same structure (the less likely); a summary fails if it adds or misstates, and a capture links to
-    an idea if it's the same or develops it (the more likely). The matcher decides from the atomic ones."""
-    if question == "tension":
+    """One probability from the atomic ones: a tension, or an edge, is the mean of its wordings; an analogy needs
+    different subjects and the same structure (the less likely); a summary fails if it adds or misstates, and a
+    capture links to an idea if it's the same or develops it (the more likely). The matcher decides from the atomic
+    ones."""
+    if question in ("tension", "edge"):
         return _mean(p, p)
     return min(p.values()) if question == "analogy" else max(p.values())
 
