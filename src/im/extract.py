@@ -2,8 +2,8 @@
 
 Each current episode goes out once per model / prompt / privacy policy, and again only if what would be
 sent changed. A payload already read on another episode isn't sent again: its items are reused. Claude returns items anchored to transcript line numbers; they're mapped back to segment
-IDs and to who said them locally. Every request is logged in im.egress_log, and a monthly budget stops the
-stage before it's exceeded.
+IDs and to who said them locally. Every request is logged in im.egress_log, and the monthly cap stops the stage
+once the month's spend reaches it (egress.send).
 """
 
 import hashlib

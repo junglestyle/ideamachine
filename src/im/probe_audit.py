@@ -124,46 +124,57 @@ def _summary(conn, idea_id: str) -> str:
 
 
 def _ask(conn, client, model: str, effort: str, system: str, schema: dict, text: str, ideas: list[str],
-         monthly_cap_usd: float) -> dict | None:
+         monthly_cap_usd: float, scrubber=None) -> tuple[dict | None, dict]:
     """One request, logged in the egress log with the segments of the clusters it shows: its answer, or None when
-    it was refused. A request that failed stops the sheet before it's written, so a rerun can ask again rather than
-    find a smaller sheet in the folder."""
+    it was refused; and the map back from the names it pseudonymized, with a scrubber (policy C). A request that
+    failed stops the sheet before it's written, so a rerun can ask again rather than find a smaller sheet in the
+    folder."""
+    back: dict = {}
+    if scrubber:
+        (text,), back, _ = scrubber.scrub([text])
     a = egress.ask(conn, client, model, effort, system, schema, text, segment_ids=egress.segments_of(conn, ideas),
-                   prompt_version=themes.version(system, schema, model, effort), monthly_cap_usd=monthly_cap_usd)
+                   prompt_version=themes.version(system, schema, model, effort),
+                   policy=scrubber.policy if scrubber else egress.POLICY_VERSION, monthly_cap_usd=monthly_cap_usd)
     if a.failed:
         raise SystemExit(f"{model} failed ({a.error}); no sheet written, run it again")
-    return a.data
+    return a.data, back
 
 
-def facets(conn, client, ids: list[str], folder: Path, monthly_cap_usd: float = 20.0) -> dict[str, list[str]]:
+def facets(conn, client, ids: list[str], folder: Path, monthly_cap_usd: float = 20.0,
+           scrubber=None) -> dict[str, list[str]]:
     """Each idea's structures, kept in facets.json as they come, so a rerun picks up where one stopped."""
+    from im import names
+
     path = folder / "facets.json"
     out = json.loads(path.read_text()) if path.exists() else {}
     todo = [i for i in ids if i not in out]
     for start in range(0, len(todo), FACET_BATCH):
         batch = todo[start:start + FACET_BATCH]
         text = "Ideas:\n" + "\n".join(f"{n}. {_summary(conn, i)}" for n, i in enumerate(batch, 1))
-        answer = _ask(conn, client, FACET_MODEL, FACET_EFFORT, FACET_SYSTEM, FACET_SCHEMA, text, batch,
-                      monthly_cap_usd)
+        answer, back = _ask(conn, client, FACET_MODEL, FACET_EFFORT, FACET_SYSTEM, FACET_SCHEMA, text, batch,
+                            monthly_cap_usd, scrubber)
         for row in (answer or {}).get("ideas", []):
             if 1 <= row["idea"] <= len(batch) and row["structures"]:
-                out[batch[row["idea"] - 1]] = row["structures"][:FACETS]
+                out[batch[row["idea"] - 1]] = [names.unscrub(s, back) for s in row["structures"][:FACETS]]
         path.write_text(json.dumps(out, indent=2))
     return out
 
 
-def picks(conn, client, question: str, ids: list[str], n: int = PICKS, monthly_cap_usd: float = 20.0) -> list[dict]:
+def picks(conn, client, question: str, ids: list[str], n: int = PICKS, monthly_cap_usd: float = 20.0,
+          scrubber=None) -> list[dict]:
     """A model's proposed pairs, reading every idea at once: [{"ideas": [a, b], "why": ...}], a < b."""
+    from im import names
+
     text = "Ideas:\n" + "\n".join(f"{k}. {_summary(conn, i)}" for k, i in enumerate(ids, 1))
-    answer = _ask(conn, client, PICK_MODEL, PICK_EFFORT, PICK_SYSTEM[question].format(n=n), PICK_SCHEMA, text,
-                  ids, monthly_cap_usd) or {"pairs": []}
+    answer, back = _ask(conn, client, PICK_MODEL, PICK_EFFORT, PICK_SYSTEM[question].format(n=n), PICK_SCHEMA, text,
+                        ids, monthly_cap_usd, scrubber)
     out, seen = [], set()
-    for p in answer["pairs"]:
+    for p in (answer or {"pairs": []})["pairs"]:
         if 1 <= p["a"] <= len(ids) and 1 <= p["b"] <= len(ids) and p["a"] != p["b"]:
             pair = tuple(sorted((ids[p["a"] - 1], ids[p["b"] - 1])))
             if pair not in seen:
                 seen.add(pair)
-                out.append({"ideas": list(pair), "why": p["why"]})
+                out.append({"ideas": list(pair), "why": names.unscrub(p["why"], back)})
     return out
 
 
@@ -291,7 +302,8 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
           size: int | None = None, exclude: set | None = None, jev=None, scrubber=None,
           pool_size: int = JEV_POOL, monthly_cap_usd: float = 20.0) -> tuple[str, dict]:
     """`only` draws every pair from one set (e.g. `model`, the one that found tensions), `size` of them; `exclude`
-    leaves out pairs already asked about. `jev` (a jev.Jev) and `scrubber` are for the analogy sheet's jev set."""
+    leaves out pairs already asked about. `jev` (a jev.Jev) is for the analogy sheet's jev set; with a `scrubber`
+    (policy C), every request the sheet makes, to Claude or Jev, goes out with names said pseudonymized."""
     rng = random.Random(seed)
     rows = edge_audit._clusters(conn)
     mine = [r[0] for r in rows if r[2]]
@@ -307,7 +319,8 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
         apart = unrelated(rows)
         far = {tuple(p["ideas"]) for p in apart}
         if wanted("facets"):
-            proposed["facets"] = _facet_pairs(embedder, facets(conn, client, mine, folder, monthly_cap_usd), far)
+            proposed["facets"] = _facet_pairs(embedder, facets(conn, client, mine, folder, monthly_cap_usd, scrubber),
+                                              far)
         if wanted("jev"):
             if jev is None:
                 raise SystemExit("the jev set needs Jev (OPENROUTER_API_KEY)")
@@ -322,7 +335,7 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
             if wanted(kind):
                 proposed[kind] = rng.sample(pool[kind], len(pool[kind]))
         if wanted("model"):
-            proposed["model"] = picks(conn, client, "tension", mine, n_picks, monthly_cap_usd)
+            proposed["model"] = picks(conn, client, "tension", mine, n_picks, monthly_cap_usd, scrubber)
     taken, picked = set(exclude or ()), []
     for kind, n in sizes.items():
         picked += [p | {"set": kind} for p in _limited(proposed[kind], n, taken)]

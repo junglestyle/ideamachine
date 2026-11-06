@@ -12,6 +12,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from psycopg.conninfo import make_conninfo
 
 from im import db, migrate
 from im.config import Config
@@ -63,6 +64,12 @@ def pipe(dbs):
 def admin(dbs):
     """A superuser connection to the test database (e.g. to SET ROLE lattice_app)."""
     return dbs[1]
+
+
+@pytest.fixture
+def lattice_dsn(dbs):
+    """A DSN for the test database that connects as lattice_app, as Lattice and the neutral view do."""
+    return make_conninfo(_dsns()[0], options="-c role=lattice_app")
 
 
 @pytest.fixture

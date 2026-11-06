@@ -2,11 +2,12 @@
 
 import json
 import os
+from dataclasses import replace
 
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 
-from im import db, fixtures, importer, pipeline, show
+from im import db, egress, fixtures, importer, pipeline, show
 from im.config import Config, SegmentConfig
 from im.fixtures import _alice, _me
 from im.importer import StreamError
@@ -255,6 +256,37 @@ def test_unknown_format_version_fails_and_writes_nothing(pipe, cfg, stream):
     with pytest.raises(StreamError):
         run(pipe, cfg, stream)
     assert table(pipe, "SELECT count(*) FROM im.source_segments") == [(0,)]
+
+
+# Hearsay's speaker kinds (its docs/stream.md, "Speakers"), and whether each is me. `person` isn't written any more,
+# but format 1 still allows it.
+HEARSAY_KINDS = {"owner": True, "anonymous": False, "stranger": False, "unknown": None, "person": False}
+
+
+def test_every_speaker_kind_hearsay_writes_is_read(pipe, cfg, stream):
+    speakers = [fixtures.ME, fixtures.anon("anon A"), fixtures.Speaker("stranger", label="stranger A", basis="named"),
+                fixtures.UNKNOWN, fixtures.person("Dana")]
+    stream.conversations["c-kinds"] = fixtures.Conversation(
+        [fixtures.Turn(20000 + 10 * n, 20005 + 10 * n, f"Turn {n}.", s) for n, s in enumerate(speakers)])
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    assert dict(table(pipe, "SELECT speaker_kind, is_self FROM im.source_segments WHERE conversation_id = 'c-kinds'")) \
+        == HEARSAY_KINDS
+    (episode,) = [e for (e,) in table(pipe, """SELECT DISTINCT es.episode_id FROM im.episode_segments es
+                                              JOIN im.source_segments s USING (segment_id)
+                                              WHERE s.conversation_id = 'c-kinds'""")]
+    sent = egress.build(pipe, episode).text
+    assert "stranger A" not in sent and "Dana" not in sent and "S3: Turn 4." in sent   # pseudonymized like anyone
+
+
+def test_a_speaker_kind_hearsay_doesnt_write_fails_the_run_and_writes_nothing(pipe, cfg, stream):
+    turns = stream.conversations["c-tv"].turns
+    turns[0] = replace(turns[0], speaker=fixtures.Speaker("robot", label="robot A"))
+    stream.write(stream.dir)
+    with pytest.raises(StreamError):
+        run(pipe, cfg, stream)
+    assert table(pipe, "SELECT count(*) FROM im.source_segments") == [(0,)]
+
 
 
 def _unchanged(conn):

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from im import jev, names, probe_audit
+from im import jev, probe_audit
 
 from test_edge_audit import lattice_with_clusters  # noqa: F401 (fixture)
 from test_lattice import seeded  # noqa: F401 (fixture)
@@ -49,17 +49,16 @@ def test_an_analogy_needs_both_and_the_middle_is_unsure():
     assert p["p"] == 0.5 and jev.answer("analogy", 0.5) == "unsure" and jev.answer("analogy", 0.2) == "no"
 
 
-def test_jev_drafts_a_sheet_from_structured_state_with_names_pseudonymized(lattice_with_clusters, tmp_path):  # noqa: F811
+def test_jev_drafts_a_sheet_from_structured_state(lattice_with_clusters, tmp_path):  # noqa: F811
+    # Names said under policy C: test_audit_egress, on a lattice whose clusters name someone.
     probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", tmp_path)
     key = json.loads((tmp_path / "key.json").read_text())
     fill(tmp_path, lambda p: "no")
     client, sent = fake({q: 0.95 for q in jev.QUESTIONS["tension"]})
-    scrubber = names.Scrubber(b"k", known=["Bob", "Alice"])
-    d = probe_audit.draft(lattice_with_clusters, client, tmp_path, "jev-1.14.0", scrubber=scrubber)
+    d = probe_audit.draft(lattice_with_clusters, client, tmp_path, "jev-1.14.0")
     assert d["draft"].endswith("draft-jev-1.14.0-pulls4.json") and d["pairs"] == len(key["pairs"]) == len(sent)
     state = sent[0]["state"]
     assert set(state) == {"a", "b"} and "summary" in state["a"] and isinstance(state["a"]["said"], list)
-    assert "Bob" not in json.dumps([b["state"] for b in sent]) and "Alice" not in json.dumps([b["state"] for b in sent])
     got = json.loads((tmp_path / "draft-jev-1.14.0-pulls4.json").read_text())
     assert all(a["answer"] == "yes" and a["p"] == 0.95 for a in got.values())
     r = probe_audit.score(tmp_path)["drafts"]["jev-1.14.0-pulls4"]

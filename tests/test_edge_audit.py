@@ -2,6 +2,7 @@
 
 import json
 import re
+from dataclasses import replace
 
 import pytest
 
@@ -10,11 +11,28 @@ from im import edge_audit, egress, observations
 from helpers import table
 from test_lattice import lat_setup
 
+NAMED = "Did you see the build broke again, Bob?"   # a captured line that names someone
+
 
 @pytest.fixture
 def lattice_with_clusters(seeded, cfg, stream):
     lat_setup(seeded, cfg, stream)   # three archive ideas, plus captured clusters, one evolving an archive idea
     observations.assign_stage(seeded)
+    return seeded
+
+
+@pytest.fixture
+def named_clusters(seeded, cfg, stream):
+    """lattice_with_clusters, where what was said and Claude's summary of it name Bob, who Hearsay knows as a
+    speaker: the build line is NAMED, and the summary of its cluster says his name too."""
+    turns = stream.conversations["c-conv"].turns
+    turns[0] = replace(turns[0], text=NAMED)
+    stream.write(stream.dir)
+    lat_setup(seeded, cfg, stream)
+    observations.assign_stage(seeded)
+    (build,) = table(seeded, "SELECT idea_id FROM im.ideas WHERE title = 'Broken builds as signal'")[0]
+    seeded.execute("INSERT INTO pub.feedback_events (kind, idea_id, payload) VALUES ('idea_correct', %s, %s)",
+                   (build, json.dumps({"statement": "A broken build is a signal about the system, Bob says."})))
     return seeded
 
 

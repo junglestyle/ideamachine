@@ -1,5 +1,9 @@
 """The neutral view (decision 0007): every cluster past the gates, newest first, no score, no verdict filter."""
 
+import http.client
+import threading
+from http.server import ThreadingHTTPServer
+
 import pytest
 
 from im import web
@@ -7,6 +11,8 @@ from im import web
 from helpers import table
 from test_lattice import seeded  # noqa: F401
 from test_weight import idea, matched  # noqa: F401
+
+TOKEN = "a-long-enough-test-token"
 
 
 def as_app(admin, fn, *args):
@@ -54,6 +60,49 @@ def test_only_a_cookie_signed_with_the_token_logs_in(monkeypatch):
     monkeypatch.setenv("LATTICE_TOKEN", "short")
     with pytest.raises(SystemExit):
         web.logged_in(f"{web.COOKIE}=x")
+
+
+@pytest.fixture
+def served(matched, lattice_dsn, monkeypatch):  # noqa: F811
+    """The view, served on a loopback port as `im web` serves it: its port."""
+    monkeypatch.setenv("LATTICE_TOKEN", TOKEN)
+    monkeypatch.setattr(web.Handler, "dsn", lattice_dsn)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    yield server.server_address[1]
+    server.shutdown()
+    thread.join()
+    server.server_close()
+
+
+def request(port, method, path, form=None, cookie=None):
+    """(status, headers, body) of one request to the view."""
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request(method, path, body=form, headers={"Content-Type": "application/x-www-form-urlencoded"}
+              | ({"Cookie": cookie} if cookie else {}))
+    r = c.getresponse()
+    return r.status, dict(r.getheaders()), r.read().decode()
+
+
+def test_without_the_token_the_view_shows_nothing_and_takes_nothing(served, matched):  # noqa: F811
+    new = str(idea(matched, "Something new"))
+    events = lambda: table(matched, "SELECT count(*) FROM pub.feedback_events")  # noqa: E731
+    before = events()
+    for path in ("/", f"/idea/{new}", "/sky"):
+        status, headers, body = request(served, "GET", path)
+        assert (status, headers.get("Location")) == (303, "/login") and "Something new" not in body
+    assert request(served, "POST", f"/idea/{new}", "action=dismiss")[0] == 403
+    status, headers, _ = request(served, "POST", "/login", "token=another-long-enough-token")
+    assert status == 403 and "Set-Cookie" not in headers
+    assert events() == before
+
+    status, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")   # with it, both
+    cookie = headers["Set-Cookie"].split(";")[0]
+    assert status == 303 and "Something new" in request(served, "GET", "/", cookie=cookie)[2]
+    assert request(served, "POST", f"/idea/{new}", "action=dismiss", cookie)[0] == 303
+    assert events() == [(before[0][0] + 1,)]
+
 
 
 def test_the_app_icons_ship_and_need_no_login():

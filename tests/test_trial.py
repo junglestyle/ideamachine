@@ -111,8 +111,13 @@ def test_under_policy_c_names_said_go_out_pseudonymized_and_come_back(pipe, cfg,
     (items,) = [i for (i,) in table(pipe, "SELECT items FROM im.prompt_trials WHERE privacy_policy_version = %s",
                                     scrubber.policy) if i]
     assert items[0]["quote"] == "Did you see the build broke again, Bob?"
-    logged = table(pipe, "SELECT payload FROM im.egress_log WHERE privacy_policy_version = %s", scrubber.policy)
-    assert logged and not any("Bob" in p for (p,) in logged)
+    # One row per request: exactly what was sent, and the episode's segments, line by line.
+    logged = table(pipe, """SELECT g.payload, g.segment_ids, (SELECT array_agg(segment_id ORDER BY ord)
+                                                              FROM im.episode_segments WHERE episode_id = g.episode_id)
+                            FROM im.egress_log g WHERE privacy_policy_version = %s ORDER BY egress_id""",
+                   scrubber.policy)
+    assert [p for p, _, _ in logged] == [c["messages"][0]["content"] for c in claude.calls]
+    assert all(sent_ids == lines for _, sent_ids, lines in logged) and not any("Bob" in p for p, _, _ in logged)
 
     # The same model and prompt under policy B is another trial, read again.
     assert trial.run(pipe, claude, v3)["read"] == table(pipe, "SELECT count(*) FROM im.episodes WHERE current")[0][0]

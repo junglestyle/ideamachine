@@ -398,12 +398,14 @@ def cmd_audit_probe(args) -> None:
         from im.backends import SentenceEmbedder
 
         embedder = SentenceEmbedder(cfg.lattice.embedding_model) if args.question == "analogy" else None
-        jev_client = scrubber = None
+        from im import names
+
+        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
+        jev_client = None
         if args.question == "analogy" and args.only in (None, "jev"):
-            from im import jev, names
+            from im import jev
 
             jev_client = jev.Jev()
-            scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
         _print(probe_audit.write(conn, anthropic.Anthropic(), embedder, args.question, folder, args.seed, args.only,
                                  args.size, [Path(f) for f in args.exclude], jev_client, scrubber,
                                  args.pool or probe_audit.JEV_POOL, cfg.extract.monthly_cap_usd))
@@ -415,13 +417,15 @@ def cmd_analogy_spike(args) -> None:
 
     import anthropic
 
-    from im import analogy_spike
+    from im import analogy_spike, names
     from im.backends import SentenceEmbedder
 
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
+        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
         out = analogy_spike.run(conn, anthropic.Anthropic(), SentenceEmbedder(cfg.lattice.embedding_model),
-                                Path(args.folder), args.others, monthly_cap_usd=cfg.extract.monthly_cap_usd)
+                                Path(args.folder), args.others, monthly_cap_usd=cfg.extract.monthly_cap_usd,
+                                scrubber=scrubber)
     _print({k: v for k, v in out.items() if k != "pairs_detail"} | {"pairs": [
         {k: r[k] for k in ("pair", "rank_by_structure", "rank_by_topic", "note", "structure_a", "structure_b")}
         for r in out["pairs_detail"]]})
@@ -690,7 +694,8 @@ def main(argv=None) -> None:
                     help="a further independent read by the same model (2, 3...): the reference against its own "
                          "replicate is the ceiling for every candidate's recall")
     tr.add_argument("--effort", help="the candidate's effort (default: the configured one)")
-    tr.add_argument("--monthly-cap-usd", type=float, help="stop before the month's spend passes this (default: config)")
+    tr.add_argument("--monthly-cap-usd", type=float, help="send nothing once the month's spend reaches this "
+                    "(default: config)")
     tr.set_defaults(func=cmd_trial)
     tu = sub.add_parser("tune", help="preview weight and proposal settings, e.g. recurrence_minutes=45 (writes nothing)")
     tu.add_argument("knobs", nargs="*", metavar="knob=value")
@@ -733,7 +738,7 @@ def main(argv=None) -> None:
                         help="draft: the model answering, e.g. z-ai/glm-5.3, or jev-1.14.0 (TypeSafe's Jev)")
         pa.add_argument("--effort", default="low", help="draft: its effort")
         pa.add_argument("--policy", choices=["B", "C"], default="C",
-                        help="draft, and the analogy sheet's Jev set: C (default) pseudonymizes names")
+                        help="draft and sheet (every request either makes): C (default) pseudonymizes names said")
         pa.add_argument("--quotes-only", action="store_true", help="draft: show the model what was said, no summaries")
         pa.add_argument("--probes", action="store_true",
                         help="draft, Jev: also ask the probe questions (jev.PROBES), scored beside the deciding ones")
@@ -746,6 +751,7 @@ def main(argv=None) -> None:
     sp = sub.add_parser("analogy-spike", help="can structure find my analogy pairs where topic can't? (sends to Claude)")
     sp.add_argument("folder", help="a marked B4 sheet's folder, e.g. /saved/b4-1")
     sp.add_argument("--others", type=int, default=300, help="other clusters to rank the partners among")
+    sp.add_argument("--policy", choices=["B", "C"], default="C", help="C (default) pseudonymizes names said")
     sp.set_defaults(func=cmd_analogy_spike)
     so = sub.add_parser("seed-observations",
                         help="what I said into the ChatGPT Idea Machine, from its export, as archive observations")

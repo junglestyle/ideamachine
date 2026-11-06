@@ -78,6 +78,18 @@ def test_my_marks_win_at_once_either_way(seeded_lattice, admin):
     assert ("theme", str(jokes)) not in shown(admin)   # the theme is gone; its old mark stays as history
 
 
+def test_my_latest_mark_is_what_demo_mode_hides(seeded_lattice, admin):
+    pipe = seeded_lattice
+    coffee = table(pipe, "SELECT idea_id FROM pub.ideas WHERE statement LIKE '%%coffee%%'")[0][0]
+    jokes = themes.find(pipe, "jokes")
+    mark = "INSERT INTO pub.feedback_events (kind, idea_id, theme_id, payload) VALUES (%s, %s, %s, %s)"
+    for sensitive in (True, False, True, False):   # I change my mind, and back, and again
+        as_lattice(admin, mark, "idea_sensitive", coffee, None, json.dumps({"sensitive": sensitive}))
+        as_lattice(admin, mark, "theme_sensitive", None, jokes, json.dumps({"sensitive": not sensitive}))
+        assert shown(admin) == {("idea", str(coffee)): (sensitive, [], "owner"),
+                                ("theme", str(jokes)): (not sensitive, [], "owner")}
+
+
 def test_quotes_are_read_too(seeded_lattice, admin):
     pipe = seeded_lattice
     claude = FakeTagger(word="lora")   # only the LoRa idea's quote says "LoRa"; its title doesn't

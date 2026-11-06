@@ -232,6 +232,60 @@ def test_lattice_app_reads_pub_and_only_appends_feedback(seeded, admin):
     assert table(seeded, "SELECT starred FROM pub.ideas WHERE idea_id = %s", idea) == [(True,)]
 
 
+def test_my_latest_star_or_unstar_is_what_lattice_shows(seeded, admin):
+    (idea,) = table(seeded, "SELECT idea_id FROM pub.ideas ORDER BY idea_id LIMIT 1")[0]
+    for kind, starred in [("star", True), ("unstar", False), ("star", True)]:
+        with admin.transaction():
+            admin.execute("SET LOCAL ROLE lattice_app")
+            admin.execute("INSERT INTO pub.feedback_events (kind, idea_id) VALUES (%s, %s)", (kind, idea))
+        assert table(seeded, "SELECT starred FROM pub.ideas WHERE idea_id = %s", idea) == [(starred,)]
+
+
+def lattice_app_can(admin) -> dict:
+    """Everything lattice_app may do, from the catalog: on the relations, columns, sequences, functions and schemas
+    the database has beyond Postgres's own, and the roles it could become."""
+    q = lambda sql: set(admin.execute(sql).fetchall())  # noqa: E731
+    return {
+        "relations": q("""SELECT n.nspname, c.relname, p FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace,
+                            unnest('{SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER}'::text[]) p
+                          WHERE n.nspname IN ('im', 'pub', 'public') AND c.relkind IN ('r', 'v', 'm', 'p', 'f')
+                            AND has_table_privilege('lattice_app', c.oid, p)"""),
+        "columns": q("""SELECT n.nspname, c.relname, a.attname, p FROM pg_attribute a
+                        JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace,
+                          unnest('{SELECT,INSERT,UPDATE,REFERENCES}'::text[]) p
+                        WHERE n.nspname IN ('im', 'pub', 'public') AND a.attnum > 0 AND NOT a.attisdropped
+                          AND has_column_privilege('lattice_app', c.oid, a.attnum, p)
+                          AND NOT has_table_privilege('lattice_app', c.oid, p)"""),
+        "sequences": q("""SELECT n.nspname, c.relname, p FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace,
+                            unnest('{USAGE,SELECT,UPDATE}'::text[]) p
+                          WHERE n.nspname IN ('im', 'pub', 'public') AND c.relkind = 'S'
+                            AND has_sequence_privilege('lattice_app', c.oid, p)"""),
+        # What it can call: EXECUTE, in a schema it can use. Public holds pgvector's functions, not ours.
+        "functions": q("""SELECT n.nspname, p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                          WHERE n.nspname IN ('im', 'pub') AND has_function_privilege('lattice_app', p.oid, 'EXECUTE')
+                            AND has_schema_privilege('lattice_app', n.oid, 'USAGE')"""),
+        "schemas": q("""SELECT n.nspname, p FROM pg_namespace n, unnest('{USAGE,CREATE}'::text[]) p
+                        WHERE n.nspname IN ('im', 'pub') AND has_schema_privilege('lattice_app', n.oid, p)"""),
+        "roles": q("""SELECT r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
+                      WHERE m.member = 'lattice_app'::regrole"""),
+    }
+
+
+def test_lattice_app_can_read_pub_append_feedback_and_call_its_functions_and_nothing_else(seeded, admin):
+    pub = {r for (r,) in admin.execute("""SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                                          WHERE n.nspname = 'pub' AND c.relkind IN ('r', 'v', 'm')""")}
+    assert lattice_app_can(admin) == {
+        "relations": {("pub", r, "SELECT") for r in pub} | {("pub", "feedback_events", "INSERT")},
+        "columns": set(), "sequences": set(),
+        "functions": {("pub", "card_neighbours"), ("pub", "embedding_model"), ("pub", "ideas_near")},
+        "schemas": {("pub", "USAGE")}, "roles": set()}
+    # They run as their owner (SECURITY DEFINER), reading im: only the roles granted them may call them, not PUBLIC.
+    assert admin.execute("""SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                            WHERE n.nspname = 'pub' AND p.prosecdef
+                              AND has_function_privilege('public', p.oid, 'EXECUTE')""").fetchall() == []
+
+
+
 def test_forgetting_removes_ideas_born_from_it_and_their_stars(seeded, cfg, stream):
     run(seeded, cfg, stream)
     extract.run_stage(seeded, FakeClaude(items_for))
@@ -376,13 +430,18 @@ def test_my_links_show_at_once_and_unlinking_removes_them(seeded, admin):
         return lattice_does("SELECT a, b, weight, method FROM pub.connections WHERE kind = 'mine' ORDER BY a, b"
                             ).fetchall()
 
+    def on_cards():   # the neutral view's edges: the same, links to clusters Lattice hides included
+        return lattice_does("SELECT a, b FROM pub.card_links WHERE kind = 'mine' ORDER BY a, b").fetchall()
+
     link = "INSERT INTO pub.feedback_events (kind, idea_id, other_idea_id) VALUES (%s, %s, %s)"
     lattice_does(link, "link", b, a)
     lattice_does(link, "link", a, b)   # the same pair, either way round
     lattice_does(link, "link", a, c)
-    assert mine() == [(a, b, 1.0, "feedback"), (a, c, 1.0, "feedback")]
+    assert mine() == [(a, b, 1.0, "feedback"), (a, c, 1.0, "feedback")] and on_cards() == [(a, b), (a, c)]
     lattice_does(link, "unlink", c, a)
-    assert mine() == [(a, b, 1.0, "feedback")]
+    assert mine() == [(a, b, 1.0, "feedback")] and on_cards() == [(a, b)]
+    lattice_does(link, "link", c, a)   # linked again: my latest decides
+    assert on_cards() == [(a, b), (a, c)]
     for args in [("link", a, a), ("unlink", a, None)]:
         with pytest.raises(psycopg.errors.CheckViolation):
             lattice_does(link, *args)

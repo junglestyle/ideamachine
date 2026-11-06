@@ -7,11 +7,13 @@ Policy B (`POLICY_VERSION`):
 - Names *spoken* in the text are not scrubbed (that needs entity extraction, ROADMAP Phase 3).
 
 Policy C (decision 0008) is policy B with names said pseudonymized too (`im.names`). It's what a payload is built
-under when a `Scrubber` is passed; trials only, until every stage that sends what was said uses it.
+under when a `Scrubber` is passed: trials, and the audits' sheets, drafts and spike, until every live stage that sends
+what was said uses it.
 - Nothing from the projects registry goes out.
-- Every request goes through `send` (a chat model's through `ask`): it's sent only under the monthly cap, and
-  logged in im.egress_log with the segment IDs it carried and what it cost before its answer is read, so an answer
-  that can't be read is still logged and counted, and fails as one item.
+- Every request goes through `send` (a chat model's through `ask`): it's sent only while this calendar month's spend
+  is below the monthly cap, so the request that reaches the cap can pass it, and none goes after. It's logged in
+  im.egress_log with the segment IDs it carried and what it cost before its answer is read, so an answer that can't
+  be read is still logged and counted, and fails as one item.
 """
 
 import hashlib
