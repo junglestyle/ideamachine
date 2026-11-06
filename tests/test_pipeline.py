@@ -198,6 +198,34 @@ def test_forgotten_speech_that_reappears_is_purged_again(pipe, cfg, stream):
     assert derived_state(pipe) == first
 
 
+def test_forgetting_takes_what_overlaps_and_not_what_only_touches_it(pipe, cfg, stream):
+    # Hearsay's overlap is exclusive: speech that ends as the stretch starts, or starts as it ends, stays.
+    run(pipe, cfg, stream)
+    before = _unchanged(pipe)
+    stream.forget(10805, 10806)   # between "Let's review the budget." (10800-10805) and the hosting turn (10806-)
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    assert _unchanged(pipe) == before
+    assert table(pipe, "SELECT count(*) FROM im.source_tombstones") == [(0,)]
+
+
+def test_forgetting_reaches_every_conversation_the_speech_was_in(pipe, cfg, stream):
+    # A split moves the backup line to a new conversation. Its version in the old one is still held, and goes too.
+    run(pipe, cfg, stream)
+    stream.split_conversation("c-mono", 9, "c-mono-b")
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    assert table(pipe, "SELECT conversation_id FROM im.source_segments WHERE text = %s ORDER BY 1", BACKUP) == \
+        [("c-mono",), ("c-mono-b",)]
+    stream.forget(3800, 3814)
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    assert not table(pipe, "SELECT 1 FROM im.source_segments WHERE text = %s", BACKUP)
+    assert table(pipe, "SELECT count(*) FROM im.source_tombstones") == [(2,)]
+    assert_invariants(pipe)
+
+
+
 def test_config_change_is_a_version_change(pipe, cfg, stream):
     run(pipe, cfg, stream)
     n = len(current_episodes(pipe))
