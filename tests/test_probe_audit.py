@@ -4,6 +4,7 @@ import hashlib
 import itertools
 import json
 import re
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -41,13 +42,15 @@ class FakeProposer:
                                                                                          output_tokens=90))
 
 
-def fake_jev(fail_after: int | None = None):
+def fake_jev(fail_after: int | None = None, takes: float = 0.0):
     """Jev answering each question with a probability that differs by pair and question, the same every time; and
-    every body it was sent. With `fail_after`, the requests after that many are rate-limited."""
+    every body it was sent. With `fail_after`, the requests after that many are rate-limited; each answer takes
+    `takes` seconds."""
     sent = []
 
     def post(body):
         sent.append(body)
+        time.sleep(takes)
         if fail_after is not None and len(sent) > fail_after:
             raise llm.Unavailable("Jev via openrouter, HTTP 429")
         state = json.dumps(body["state"], sort_keys=True)
@@ -106,9 +109,13 @@ def test_an_analogy_sheet_draws_unrelated_pairs_blind_and_scores_each_way(lattic
         assert (c["pairs"], c["held"]) == (len(theirs), sum(p["set"] != "random" for p in theirs))
 
 
+def every_pair(conn):
+    ids = sorted(r[0] for r in probe_audit.edge_audit._clusters(conn) if r[2])
+    return [{"ideas": [a, b]} for a, b in itertools.combinations(ids, 2)]
+
+
 def test_jevs_pool_picks_up_where_a_stopped_run_left_off(lattice_with_clusters, tmp_path):  # noqa: F811
-    ids = sorted(r[0] for r in probe_audit.edge_audit._clusters(lattice_with_clusters) if r[2])
-    pairs = [{"ideas": [a, b]} for a, b in itertools.combinations(ids, 2)]
+    pairs = every_pair(lattice_with_clusters)
     assert len(pairs) > 5
     stopped, sent = fake_jev(fail_after=5)
     with pytest.raises(llm.Unavailable):
@@ -119,6 +126,36 @@ def test_jevs_pool_picks_up_where_a_stopped_run_left_off(lattice_with_clusters, 
     again, resent = fake_jev()
     got = probe_audit.jev_pool(lattice_with_clusters, again, None, pairs, tmp_path)
     assert len(got) == len(pairs) and len(resent) == len(pairs) - len(kept)
+
+
+def test_a_pool_stopped_by_anything_sends_nothing_more_and_keeps_only_what_it_logged(
+        lattice_with_clusters, tmp_path, monkeypatch):  # noqa: F811
+    pairs = every_pair(lattice_with_clusters)
+    real, calls = probe_audit._log_jev, []
+
+    def log_then_interrupt(*args):
+        calls.append(1)
+        if len(calls) >= 3:
+            raise KeyboardInterrupt   # Ctrl-C, or the database going away, mid-pool
+        real(*args)
+    monkeypatch.setattr(probe_audit, "_log_jev", log_then_interrupt)
+    monkeypatch.setattr(probe_audit, "JEV_WORKERS", 1)
+    client, sent = fake_jev(takes=0.05)   # slower than logging, so the rest are still queued when it stops
+    with pytest.raises(KeyboardInterrupt):
+        probe_audit.jev_pool(lattice_with_clusters, client, None, pairs, tmp_path)
+    kept = json.loads((tmp_path / "jev-pool.json").read_text())
+    logged = lattice_with_clusters.execute("SELECT count(*) FROM im.egress_log WHERE model = 'jev-1.14.0'").fetchone()[0]
+    assert len(sent) <= 4 < len(pairs)   # the queue was dropped: at most the one in flight went too
+    assert len(kept) == logged == 2
+
+
+def test_tied_scores_propose_the_same_pairs_whatever_order_the_answers_came_back_in():
+    answers = {f"{a} {b}": {"same_move": 0.5, "same_form": 0.5 if a < "m" else 0.4}
+               for a, b in [("a", "z"), ("q", "r"), ("c", "d"), ("x", "y")]}
+    backwards = dict(reversed(answers.items()))
+    assert probe_audit._jev_proposals(answers) == probe_audit._jev_proposals(backwards)
+    swapped = {pair: dict(reversed(qs.items())) for pair, qs in answers.items()}   # Jev's answers in another order
+    assert probe_audit._jev_proposals(answers) == probe_audit._jev_proposals(swapped)
 
 
 def test_a_tension_sheet_scores_yes_no_and_says_when_a_mark_isnt_one(lattice_with_clusters, tmp_path):  # noqa: F811

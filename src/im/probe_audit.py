@@ -204,7 +204,9 @@ def _facet_pairs(embedder, structures: dict[str, list[str]], far: set[tuple]) ->
 
 def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path) -> dict[str, dict]:
     """Jev's answer to every analogy question about each pair, "a b" -> {question: p}, JEV_WORKERS requests at a
-    time. Kept in jev-pool.json as they come, so a rerun picks up where one stopped; every answer is logged."""
+    time. Kept in jev-pool.json as they come, so a rerun picks up where one stopped. Anything that stops it (a failed
+    request, Ctrl-C, the database) sends nothing more: the queue is dropped, and the answers to requests already in
+    flight are logged and kept like the rest. Only a logged answer is kept."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     path = folder / "jev-pool.json"
@@ -216,35 +218,39 @@ def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path) -> dict[st
     for p in todo:
         state = {"a": sides[p["ideas"][0]], "b": sides[p["ideas"][1]]}
         states.append((p, _scrubbed(state, scrubber)[0] if scrubber else state))
-    error = None
-    with ThreadPoolExecutor(JEV_WORKERS) as workers:
-        futures = {workers.submit(client.ask, "analogy", state, True): p for p, state in states}
+    kept = set()
+
+    def keep(f):
+        probs, meta = f.result()
+        _log_jev(conn, client, futures[f], meta, policy)
+        got[" ".join(futures[f]["ideas"])] = {k: round(v, 3) for k, v in probs.items()}
+        kept.add(f)
+
+    workers = ThreadPoolExecutor(JEV_WORKERS)
+    futures = {workers.submit(client.ask, "analogy", state, True): p for p, state in states}
+    try:
         for n, f in enumerate(as_completed(futures), 1):
-            if f.cancelled():
-                continue
-            try:
-                probs, meta = f.result()
-            except Exception as e:   # stop asking, but keep and log what was already answered
-                if error is None:
-                    error = e
-                    for other in futures:
-                        other.cancel()
-                continue
-            _log_jev(conn, client, "analogy", futures[f], meta, policy)
-            got[" ".join(futures[f]["ideas"])] = {k: round(v, 3) for k, v in probs.items()}
+            keep(f)
             if n % JEV_SAVE == 0:
                 path.write_text(json.dumps(got))
-    path.write_text(json.dumps(got))
-    if error:
-        raise error
+    finally:
+        workers.shutdown(wait=False, cancel_futures=True)   # nothing queued is sent
+        try:   # what was already sent: wait for it, and log and keep what it answered
+            for f in futures:
+                if f not in kept and not f.cancelled() and f.exception() is None:
+                    keep(f)
+        finally:
+            workers.shutdown(wait=True)
+            path.write_text(json.dumps(got))
     return got
 
 
 def _jev_proposals(answers: dict[str, dict]) -> tuple[list[dict], dict[str, set]]:
     """Each question ranks the pool, and the set draws from their rankings in turn, so every question proposes some;
-    and each question's top JEV_TOP, as `jev:<question>`, to say which questions proposed a pair."""
-    names = [k for k in next(iter(answers.values()), {}) if k not in AXES]
-    ranked = {k: sorted(answers, key=lambda pair: -answers[pair][k]) for k in names}
+    and each question's top JEV_TOP, as `jev:<question>`, to say which questions proposed a pair. Ties go by pair, so
+    the order the answers came back in can't change the sheet."""
+    names = sorted(k for k in next(iter(answers.values()), {}) if k not in AXES)
+    ranked = {k: sorted(answers, key=lambda pair: (-answers[pair][k], pair)) for k in names}
     out, seen = [], set()
     for r in range(min(JEV_DEPTH, len(answers))):
         for k in names:
@@ -253,7 +259,6 @@ def _jev_proposals(answers: dict[str, dict]) -> tuple[list[dict], dict[str, set]
                 seen.add(pair)
                 out.append({"ideas": pair.split(), "why": f"Jev {k} {answers[pair][k]}"})
     return out, {f"jev:{k}": {tuple(pair.split()) for pair in ranked[k][:JEV_TOP]} for k in names}
-
 
 
 def _limited(pairs: list[dict], n: int, taken: set) -> list[dict]:
@@ -417,18 +422,18 @@ def _scrubbed(state, scrubber):
     return walk(state, lambda t: next(it)), back
 
 
-def _log_jev(conn, client, question: str, p: dict, meta: dict, policy: str) -> None:
-    """One Jev request in the egress log, with the segments of what it showed."""
-    from im import jev
-
+def _log_jev(conn, client, p: dict, meta: dict, policy: str) -> None:
+    """One Jev request in the egress log, with the segments of what it showed, versioned by the questions it asked
+    (the deciding ones, and the probes when they went too)."""
     segs = p.get("segments") or [s for (s,) in conn.execute(
         """SELECT DISTINCT unnest(i.source_segment_ids) FROM im.idea_evidence ev JOIN im.items i USING (item_id)
            WHERE ev.idea_id = ANY(%s::uuid[])""", (p["ideas"],))]
+    asked = json.dumps(json.loads(meta["payload"])["questions"], sort_keys=True)
     conn.execute(
         """INSERT INTO im.egress_log (episode_id, segment_ids, model, prompt_version, privacy_policy_version,
              payload, payload_sha256, request_id, stop_reason, served_by, input_tokens, output_tokens, cost_usd)
            VALUES (NULL, %s, %s, %s, %s, %s, %s, NULL, 'end_turn', %s, %s, %s, %s)""",
-        (segs, client.model, themes.version(json.dumps(jev.QUESTIONS[question]), {}, client.model, ""), policy,
+        (segs, client.model, themes.version(asked, {}, client.model, ""), policy,
          meta["payload"], edge_audit._sha(meta["payload"]), meta["served_by"], meta["input_tokens"],
          meta["output_tokens"], meta["cost_usd"]))
 
@@ -450,7 +455,7 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
         if scrubber:
             state, _ = _scrubbed(state, scrubber)
         probs, meta = client.ask(question, state, probes)
-        _log_jev(conn, client, question, p, meta, policy)
+        _log_jev(conn, client, p, meta, policy)
         cost += meta["cost_usd"]
         got[num] = {"answer": jev.answer(question, probs["p"]), "why": "",
                     **{k: round(v, 3) for k, v in probs.items()}}
