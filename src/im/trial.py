@@ -21,12 +21,14 @@ recall means something only next to it.
 """
 
 import json
+import re
 
 from im import egress, extract, llm
 from im.feedback import CARRY_MIN_SCORE, quote_score
 
 SAMPLE = 150
 EXAMPLES = 15
+KEEP = ("kind", "said_by", "attributed_to", "quote", "reading", "gist", "confidence")   # what a trial keeps
 
 
 def sample(conn, n: int = SAMPLE) -> list:
@@ -37,9 +39,10 @@ def sample(conn, n: int = SAMPLE) -> list:
 
 def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str = "medium",
         monthly_cap_usd: float = 20.0, limit: int | None = None, n: int = SAMPLE, scrubber=None,
-        replicate: int = 1) -> dict:
-    """Send the sampled episodes this model hasn't read yet under this prompt and policy (or whose payload changed)."""
-    pv = version(model, effort, system, replicate)
+        replicate: int = 1, schema: dict = extract.SCHEMA) -> dict:
+    """Send the sampled episodes this model hasn't read yet under this prompt and policy (or whose payload changed).
+    `schema` is the prompt's (extract.schema_for)."""
+    pv = version(model, effort, system, replicate, schema)
     policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     done = {r[0]: r[1] for r in conn.execute(
         """SELECT episode_id, payload_sha256 FROM im.prompt_trials
@@ -50,7 +53,7 @@ def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str =
              "cost_usd": 0.0, "stopped": None}
     for p in todo[:limit] if limit else todo:
         try:
-            a = egress.ask(conn, client, model, effort, system, extract.SCHEMA, p.text, segment_ids=p.segment_ids,
+            a = egress.ask(conn, client, model, effort, system, schema, p.text, segment_ids=p.segment_ids,
                            prompt_version=pv, monthly_cap_usd=monthly_cap_usd, policy=p.policy,
                            episode_id=p.episode_id, read=lambda answer: extract._items(p, answer["items"]))
         except llm.Stop as e:
@@ -61,8 +64,7 @@ def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str =
             stats["failed"] += 1
             continue
         egress_id, items = a.egress_id, a.data or []
-        keep = ("kind", "said_by", "quote", "gist", "confidence")
-        rows = [{k: it[k] for k in keep} | {"source_segment_ids": [str(s) for s in it["source_segment_ids"]]}
+        rows = [{k: it[k] for k in KEEP if k in it} | {"source_segment_ids": [str(s) for s in it["source_segment_ids"]]}
                 for it in items]
         conn.execute(
             """INSERT INTO im.prompt_trials (episode_id, prompt_version, model, privacy_policy_version, payload_sha256,
@@ -76,9 +78,9 @@ def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str =
     return stats
 
 
-def version(model: str, effort: str, system: str, replicate: int = 1) -> str:
+def version(model: str, effort: str, system: str, replicate: int = 1, schema: dict = extract.SCHEMA) -> str:
     """The prompt version a trial is filed under; a replicate's is marked `~n`."""
-    pv = extract.prompt_version(model, effort, system)
+    pv = extract.prompt_version(model, effort, system, schema)
     return pv if replicate == 1 else f"{pv}~{replicate}"
 
 
@@ -182,5 +184,24 @@ def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy:
         "recall_by_reach": by_reach(conn, found_by_reach),
         "cost_usd": round(cost(cand), 4), "reference_cost_usd": round(cost(ref), 4),
         "cost_vs_reference": rate(cost(cand), cost(ref)),
+        "verbatim_quotes": {"candidate": verbatim(conn, [cand[e][1] for e in both]),
+                            "reference": verbatim(conn, [ref[e][1] for e in both])},
         "missed": missed[:EXAMPLES], "extra_examples": extra[:EXAMPLES]}
+
+
+def _words(text: str) -> str:
+    return " ".join(re.findall(r"\w+", text.lower()))
+
+
+def verbatim(conn, reads: list[list[dict]]) -> float | None:
+    """The share of captures whose quote is word for word in the lines they cite, case and punctuation aside: v4
+    asks for the quote exactly as transcribed, where earlier prompts let it be tidied (or stitched with "...")."""
+    items = [it for r in reads for it in r]
+    if not items:
+        return None
+    text = dict(conn.execute("SELECT segment_id::text, text FROM im.source_segments WHERE segment_id = ANY(%s::uuid[])",
+                             ([s for it in items for s in it["source_segment_ids"]],)).fetchall())
+    hits = sum(f" {_words(it['quote'])} " in f" {_words(' '.join(text.get(s, '') for s in it['source_segment_ids']))} "
+               for it in items)
+    return round(hits / len(items), 3)
 

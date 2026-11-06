@@ -57,9 +57,11 @@ def build(conn, candidate, reference, replicate, policy: str, seed: int = 13,
     rng = random.Random(seed)
     missed, found = captures(conn, candidate, reference, replicate, policy)
     if not missed:
-        raise SystemExit(f"{candidate[1]} missed none of {reference[1]}'s solid captures on the episodes all three read")
+        raise SystemExit(f"{candidate[1]} missed none of {reference[1]}'s solid captures on the episodes all three "
+                         "read")
     n = min(size or len(missed), len(missed), len(found))
-    picked = [c | {"set": "missed"} for c in rng.sample(missed, n)] + [c | {"set": "found"} for c in rng.sample(found, n)]
+    picked = [c | {"set": "missed"} for c in rng.sample(missed, n)] + \
+        [c | {"set": "found"} for c in rng.sample(found, n)]
     rng.shuffle(picked)
     lines = [HEADER]
     for num, c in enumerate(picked, 1):

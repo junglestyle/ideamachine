@@ -4,7 +4,7 @@ the lattice, scored against a reference model."""
 from dataclasses import replace
 from types import SimpleNamespace
 
-from im import egress, extract, names, trial
+from im import cli, egress, extract, names, trial
 
 from helpers import run, table
 from test_carry import DATABASE, capture
@@ -121,6 +121,42 @@ def test_under_policy_c_names_said_go_out_pseudonymized_and_come_back(pipe, cfg,
 
     # The same model and prompt under policy B is another trial, read again.
     assert trial.run(pipe, claude, v3)["read"] == table(pipe, "SELECT count(*) FROM im.episodes WHERE current")[0][0]
+
+
+def test_v4_keeps_the_quote_as_said_apart_from_its_reading_and_attribution(pipe, cfg, stream):
+    turns = stream.conversations["c-conv"].turns
+    turns[0] = replace(turns[0], text="Did you see the build broke again, Bob?")
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    v4, schema = extract.system_prompt("v4"), extract.schema_for("v4")
+    scrubber = names.Scrubber(b"k", egress.known_names(pipe))
+    bob = names.token("Bob", b"k")
+
+    def respond(text):   # the line as said, and the same line tidied: only the first is word for word
+        out = []
+        for line in text.splitlines():
+            if line.startswith("[") and "build broke" in line:
+                n, said = int(line[1:].split("]")[0]), line.split(": ", 1)[1]
+                common = {"kind": "observation", "said_by": "S1", "lines": [n], "reading": f"{bob}, the build broke "
+                          "again.", "gist": "The build keeps breaking.", "themes": [], "confidence": 0.9}
+                out += [common | {"quote": said, "attributed_to": ""},
+                        common | {"quote": "Did you see that the build broke", "attributed_to": f"{bob}'s lead"}]
+        return out
+
+    claude = FakeClaude(respond)
+    trial.run(pipe, claude, v4, scrubber=scrubber, schema=schema)
+    assert all(c["output_config"]["format"]["schema"] == extract.SCHEMA_V4 for c in claude.calls)
+    (items,) = [i for (i,) in table(pipe, "SELECT items FROM im.prompt_trials") if i]
+    assert [(it["reading"], it["attributed_to"]) for it in items] == \
+        [("Bob, the build broke again.", ""), ("Bob, the build broke again.", "Bob's lead")]   # names come back
+    opus = (trial.version("claude-opus-5-5", "medium", v4, schema=schema), "claude-opus-5-5")
+    assert trial.report(pipe, opus, opus, scrubber.policy)["verbatim_quotes"] == {"candidate": 0.5, "reference": 0.5}
+
+    # The live run can't keep a reading or an attribution yet, so it doesn't read under v4.
+    sent = table(pipe, "SELECT count(*) FROM im.egress_log")
+    stats = cli._extract(pipe, replace(cfg, extract=replace(cfg.extract, prompt="v4")))
+    assert stats["stopped"].startswith("extract.prompt v4 is for `im trial` only")
+    assert table(pipe, "SELECT count(*) FROM im.egress_log") == sent
 
 
 def test_recall_is_split_by_how_far_each_captures_idea_reaches(seeded_lattice):
