@@ -186,6 +186,8 @@ def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy:
         "cost_vs_reference": rate(cost(cand), cost(ref)),
         "verbatim_quotes": {"candidate": verbatim(conn, [cand[e][1] for e in both]),
                             "reference": verbatim(conn, [ref[e][1] for e in both])},
+        "quotes_not_in_lines": {"candidate": not_in_lines(conn, {e: cand[e][1] for e in both}),
+                                "reference": not_in_lines(conn, {e: ref[e][1] for e in both})},
         "missed": missed[:EXAMPLES], "extra_examples": extra[:EXAMPLES]}
 
 
@@ -204,4 +206,18 @@ def verbatim(conn, reads: list[list[dict]]) -> float | None:
     hits = sum(f" {_words(it['quote'])} " in f" {_words(' '.join(text.get(s, '') for s in it['source_segment_ids']))} "
                for it in items)
     return round(hits / len(items), 3)
+
+
+def not_in_lines(conn, reads: dict) -> float | None:
+    """The share of captures whose quote isn't on its lines even once its citation grows by a line either way
+    (im.quotes, as the run places live captures): made up, or cited further off. {episode: items}."""
+    from im import quotes
+
+    lines = quotes.windows(conn, list(reads))
+    caps = [(str(e), it) for e, items in reads.items() for it in items]
+    if not caps:
+        return None
+    off = sum(quotes.place(it["quote"], quotes.near(lines.get(e, []), it["source_segment_ids"]),
+                           it["source_segment_ids"])[2] < quotes.FLAG for e, it in caps)
+    return round(off / len(caps), 3)
 

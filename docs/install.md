@@ -106,6 +106,13 @@ Then, outside that transaction:
 - **Triage.** Each configured backend (none by default; see [decisions/0004](decisions/0004-claude-extraction.md)) answers the triage questions for
   current episodes whose rendered input it hasn't answered yet, newest first, committing in small batches. If
   Ollama is down or the GPU is busy, the run notes it and goes on.
+- **Quotes** (`src/im/quotes.py`). Each new capture's quote is lined up with the lines it cites and the line
+  either side, and the capture then cites every line its words are on: a model's citation can stop a line short or
+  point a line off. Citations only grow, and the capture's observation, its idea, my verdicts on it, Lattice's
+  events on it and the matcher's request that sent it grow with it, so forgetting any line it quotes reaches all of
+  them. A line label copied into the quote ("[23] me: ") is dropped. `im.items.quote_in_lines` keeps the share of
+  the quote's words found; under 0.6 the quote isn't from its lines. The first run after migration 044 does this
+  for every existing capture.
 - **Lattice.** Each new capture is matched against the nearest existing ideas (local embeddings), and Claude
   decides new / same as / evolves. Related-idea edges are rebuilt. Lattice, the separate presentation app, reads
   the result through schema `pub` ([ROADMAP §3.5](ROADMAP.md)).
