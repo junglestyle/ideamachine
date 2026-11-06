@@ -58,6 +58,18 @@ QUESTIONS = {
                   "false": "Everything it says is in the lines, perhaps more briefly"}),
         "misstates": ("Does `summary` contradict or misstate what `lines` say?", None),
     },
+    # B1 (match_bench): is a new capture `a` the same idea as an existing one `b`, or does it develop it? Two
+    # wordings of each, from the matcher's own definitions (lattice.MATCH_SYSTEM), decided in code.
+    "match": {
+        "same": ("Are `a` and `b` the same idea: restated, repeated or near-paraphrased?",
+                 {"true": "They make the same point, whatever the wording",
+                  "false": "They make different points, even about the same subject"}),
+        "same_v2": ("Is `a` another way of saying `b`?", None),
+        "develops": ("Does `a` develop, refine, extend or apply `b` into a distinct idea of its own?",
+                     {"true": "a builds on b and goes somewhere b doesn't",
+                      "false": "a says the same as b, or something unrelated to it"}),
+        "develops_v2": ("Is `a` built on `b`, going further than `b` does?", None),
+    },
 }
 
 
@@ -148,7 +160,8 @@ def _mean(p: dict[str, float], names) -> float:
 
 def combine(question: str, p: dict[str, float]) -> float:
     """One probability from the atomic ones: a tension is the mean of its wordings; an analogy needs different
-    subjects and the same structure (the less likely); a summary fails if it adds or misstates (the more likely)."""
+    subjects and the same structure (the less likely); a summary fails if it adds or misstates, and a capture links to
+    an idea if it's the same or develops it (the more likely). The matcher decides from the atomic ones."""
     if question == "tension":
         return _mean(p, p)
     return min(p.values()) if question == "analogy" else max(p.values())

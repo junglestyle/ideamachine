@@ -445,6 +445,25 @@ def cmd_audit_misses(args) -> None:
                                 args.seed, args.size))
 
 
+def cmd_bench_match(args) -> None:
+    """B1: Opus's logged match decisions replayed through Jev, then scored against Opus."""
+    from pathlib import Path
+
+    from im import match_bench
+
+    folder = Path(args.folder)
+    if args.action == "score":
+        _print(match_bench.score(folder))
+        return
+    from im import jev, names
+
+    cfg = config.load()
+    cap = cfg.extract.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
+    with db.connect(db.pipeline_dsn()) as conn:
+        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
+        _print(match_bench.run(conn, jev.Jev(), folder, scrubber, args.limit, cap))
+
+
 def cmd_analogy_spike(args) -> None:
     """Rank each `analogy:` pair's partner by structure and by topic (sends to Claude; writes into the folder)."""
     from pathlib import Path
@@ -801,6 +820,15 @@ def main(argv=None) -> None:
     am.add_argument("--seed", type=int, default=13, help="sheet: the sample and shuffle's seed")
     am.add_argument("--size", type=int, help="sheet: how many misses (default: all), beside as many found")
     am.set_defaults(func=cmd_audit_misses)
+    bm = sub.add_parser("bench-match", help="B1: replay Opus's logged match decisions through Jev (sends to Jev), "
+                        "then score its agreement with Opus")
+    bm.add_argument("action", choices=["run", "score"])
+    bm.add_argument("folder", help="where Jev's answers go (it quotes people: keep it in saved/), e.g. /saved/b1-1")
+    bm.add_argument("--limit", type=int, help="run: only the first N decisions")
+    bm.add_argument("--policy", choices=["B", "C"], default="C", help="run: C (default) pseudonymizes names said")
+    bm.add_argument("--monthly-cap-usd", type=float, help="run: send nothing once the month's spend reaches this "
+                    "(default: config)")
+    bm.set_defaults(func=cmd_bench_match)
     sp = sub.add_parser("analogy-spike", help="can structure find my analogy pairs where topic can't? (sends to Claude)")
     sp.add_argument("folder", help="a marked B4 sheet's folder, e.g. /saved/b4-1")
     sp.add_argument("--others", type=int, default=300, help="other clusters to rank the partners among")
