@@ -214,23 +214,39 @@ def _facet_pairs(embedder, structures: dict[str, list[str]], far: set[tuple]) ->
 
 def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path,
              monthly_cap_usd: float = 20.0) -> dict[str, dict]:
-    """Jev's answer to every analogy question about each pair, "a b" -> {question: p}, JEV_WORKERS requests at a
-    time, each logged by its worker as it's answered. Kept in jev-pool.json as they come, so a rerun picks up where
-    one stopped. Anything that stops it (the cap, a request Jev can't answer now, Ctrl-C, the database) sends nothing
-    more: the queue is dropped, and the answers to requests already in flight are kept like the rest. Only a logged
-    answer is kept. An answer that can't be read stops the sheet once the pool is done, so a rerun asks those pairs
-    again rather than drawing from a smaller pool."""
+    """Jev's answer to every analogy question about each pair, "a b" -> {question: p}, kept in jev-pool.json as they
+    come (ask_all)."""
+    sides: dict = {}
+
+    def side(i):
+        if i not in sides:
+            sides[i] = edge_audit.side_data(conn, i)
+        return sides[i]
+
+    def state(p):
+        s = {"a": side(p["ideas"][0]), "b": side(p["ideas"][1])}
+        return _scrubbed(s, scrubber)[0] if scrubber else s
+
+    jobs = {" ".join(p["ideas"]): (lambda p=p: state(p),
+                                   lambda p=p: p.get("segments") or egress.segments_of(conn, p["ideas"]))
+            for p in pairs}
+    return ask_all(conn, client, "analogy", jobs, folder / "jev-pool.json",
+                   scrubber.policy if scrubber else egress.POLICY_VERSION, monthly_cap_usd)
+
+
+def ask_all(conn, client, question: str, jobs: dict, path: Path, policy: str, monthly_cap_usd: float,
+            probes: bool = True) -> dict[str, dict]:
+    """Jev's answer to `question` (and its probes) for every job, key -> {name: p}, JEV_WORKERS requests at a time,
+    each logged by its worker as it's answered. `jobs` is key -> (the state, its segment ids), each a function, so
+    a key already answered costs nothing to skip. Kept in `path` as they come, so a rerun picks up where one stopped.
+    Anything that stops it (the cap, a request Jev can't answer now, Ctrl-C, the database) sends nothing more: the
+    queue is dropped, and the answers to requests already in flight are kept like the rest. Only a logged answer is
+    kept. An answer that can't be read stops it once the rest are in, so a rerun asks that key again rather than
+    going on without it."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    path = folder / "jev-pool.json"
     got = json.loads(path.read_text()) if path.exists() else {}
-    todo = [p for p in pairs if " ".join(p["ideas"]) not in got]
-    sides = {i: edge_audit.side_data(conn, i) for p in todo for i in p["ideas"]}
-    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
-    states = []
-    for p in todo:
-        state = {"a": sides[p["ideas"][0]], "b": sides[p["ideas"][1]]}
-        states.append((p, _scrubbed(state, scrubber)[0] if scrubber else state))
+    todo = [(key, state(), segs()) for key, (state, segs) in jobs.items() if key not in got]
     kept, failed = set(), []
 
     def keep(f):
@@ -238,12 +254,12 @@ def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path,
         if a.failed:
             failed.append(a.error)
         else:
-            got[" ".join(futures[f]["ideas"])] = {k: round(v, 3) for k, v in a.data.items()}
+            got[futures[f]] = {k: round(v, 3) for k, v in a.data.items()}
         kept.add(f)
 
     workers = ThreadPoolExecutor(JEV_WORKERS)
-    futures = {workers.submit(_ask_jev, conn, client, "analogy", state, True, p, policy, monthly_cap_usd): p
-               for p, state in states}
+    futures = {workers.submit(_ask_jev, conn, client, question, state, probes, segs, policy, monthly_cap_usd): key
+               for key, state, segs in todo}
     try:
         for n, f in enumerate(as_completed(futures), 1):
             keep(f)
@@ -259,8 +275,8 @@ def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path,
             workers.shutdown(wait=True)
             path.write_text(json.dumps(got))
     if failed:
-        raise SystemExit(f"{len(failed)} of Jev's answers couldn't be read (first: {failed[0]}); no sheet written, "
-                         "run it again to ask those pairs")
+        raise SystemExit(f"{len(failed)} of Jev's answers couldn't be read (first: {failed[0]}); run it again to ask "
+                         "those again")
     return got
 
 
@@ -452,7 +468,7 @@ def _scrubbed(state, scrubber):
     return walk(state, lambda t: next(it)), back
 
 
-def _ask_jev(conn, client, question: str, state: dict, probes: bool, p: dict, policy: str,
+def _ask_jev(conn, client, question: str, state: dict, probes: bool, segment_ids, policy: str,
              monthly_cap_usd: float) -> egress.Answer:
     """One Jev request by egress.send, logged with the segments of what it showed and versioned by the questions it
     asked (the deciding ones, and the probes when they went too); its data is the probabilities (jev.read)."""
@@ -461,9 +477,8 @@ def _ask_jev(conn, client, question: str, state: dict, probes: bool, p: dict, po
     body = client.body(question, state, probes)
     asked = json.dumps(body["questions"], sort_keys=True)
     return egress.send(conn, lambda: client.complete(body), model=client.model, payload=json.dumps(body),
-                       segment_ids=p.get("segments") or egress.segments_of(conn, p["ideas"]),
-                       prompt_version=themes.version(asked, {}, client.model, ""), policy=policy,
-                       monthly_cap_usd=monthly_cap_usd, read=lambda r: jev.read(question, r, probes))
+                       segment_ids=segment_ids, prompt_version=themes.version(asked, {}, client.model, ""),
+                       policy=policy, monthly_cap_usd=monthly_cap_usd, read=lambda r: jev.read(question, r, probes))
 
 
 def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: bool, probes: bool,
@@ -486,7 +501,8 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
         if scrubber:
             state, _ = _scrubbed(state, scrubber)
         try:
-            a = _ask_jev(conn, client, question, state, probes, p, policy, monthly_cap_usd)
+            a = _ask_jev(conn, client, question, state, probes,
+                         p.get("segments") or egress.segments_of(conn, p["ideas"]), policy, monthly_cap_usd)
         except llm.Stop as e:
             stopped = str(e)[:200]
             break
