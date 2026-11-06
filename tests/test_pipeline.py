@@ -26,6 +26,8 @@ HOSTING = "The hosting line doubled. I think we should move off the managed data
 ONE_MORE = "One more thing about the"
 BACKUP = "Another thought: the backup job should verify restores weekly."
 SECRET = "Private detail that must be forgotten."
+# What stream-v3 hashed into a segment's id: who spoke and how sure Hearsay was, as well as the speech.
+V3_IDENTITY = ("conversation_id", "start", "end", "text", "speaker", "speaker_confidence", "text_confidence")
 
 
 def test_fixtures_segment_as_expected(pipe, cfg, stream):
@@ -89,7 +91,7 @@ def test_naming_a_voice_changes_its_label_and_nothing_else(pipe, cfg, stream):
 def test_an_older_importers_segments_are_rekeyed_in_place_of_a_migration(pipe, cfg, stream, monkeypatch):
     with monkeypatch.context() as m:   # import as stream-v3 did: who spoke is part of a segment's identity
         m.setattr(importer, "STAGE_VERSION", "import/stream-v3")
-        m.setattr(importer, "NOT_IDENTITY", {"utterance_id", "affect", "delivery"})
+        m.setattr(importer, "IDENTITY", V3_IDENTITY)
         run(pipe, cfg, stream)
     old = table(pipe, "SELECT segment_id, text FROM im.current_segments ORDER BY text")
     stats = run(pipe, cfg, stream)
@@ -288,6 +290,21 @@ def test_delivery_is_kept_and_a_remeasurement_rederives_nothing(pipe, cfg, strea
     stream.write(stream.dir)
     with pytest.raises(StreamError):
         run(pipe, cfg, stream)
+
+
+def test_a_field_hearsay_adds_keeps_every_segment_and_episode(pipe, cfg, stream, monkeypatch):
+    # Hearsay's contract: a new field doesn't bump format_version. It's an annotation, not part of the speech.
+    run(pipe, cfg, stream)
+    before = _unchanged(pipe)
+    plain = fixtures.FixtureStream.utterances
+    monkeypatch.setattr(fixtures.FixtureStream, "utterances",
+                        lambda self, cid: [u | {"language": "en"} for u in plain(self, cid)])
+    stream.write(stream.dir)
+    stats = run(pipe, cfg, stream)
+    assert stats["segments_new"] == stats["segments_left"] == 0
+    assert stats["episodes_retired"] == stats["episodes_created"] == 0
+    assert _unchanged(pipe) == before
+    assert_invariants(pipe)
 
 
 def test_places_follow_the_index_and_bad_ones_fail(pipe, cfg, stream):

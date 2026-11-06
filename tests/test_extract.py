@@ -12,7 +12,7 @@ from im import egress, extract, feedback, importer, router
 
 from helpers import assert_invariants, episodes_with_text, run, table
 from test_label import script
-from test_pipeline import COFFEE, CORRECTIONS, SECRET
+from test_pipeline import COFFEE, CORRECTIONS, SECRET, V3_IDENTITY
 from test_triage import fixtures_iso
 
 class FakeClaude:
@@ -127,7 +127,7 @@ def test_merging_voices_reads_that_episode_again(pipe, cfg, stream):
 def test_reuse_after_a_rekey_sends_nothing(pipe, cfg, stream, monkeypatch):
     with monkeypatch.context() as m:
         m.setattr(importer, "STAGE_VERSION", "import/stream-v3")
-        m.setattr(importer, "NOT_IDENTITY", {"utterance_id", "affect", "delivery"})
+        m.setattr(importer, "IDENTITY", V3_IDENTITY)
         run(pipe, cfg, stream)
         claude = FakeClaude(coffee_item)
         extract.run_stage(pipe, claude)
@@ -145,7 +145,7 @@ def test_reuse_keeps_each_duplicate_captures_own_verdict(pipe, cfg, stream, monk
     twice = lambda text: coffee_item(text) * 2  # noqa: E731
     with monkeypatch.context() as m:
         m.setattr(importer, "STAGE_VERSION", "import/stream-v3")
-        m.setattr(importer, "NOT_IDENTITY", {"utterance_id", "affect", "delivery"})
+        m.setattr(importer, "IDENTITY", V3_IDENTITY)
         run(pipe, cfg, stream)
         extract.run_stage(pipe, FakeClaude(twice))
     a, b = (r[0] for r in table(pipe, "SELECT item_id FROM im.items ORDER BY item_id"))
