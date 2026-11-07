@@ -98,7 +98,7 @@ def test_writing_adds_them_once_and_edges_cite_them(planned):
     assert ao.write(conn, ao.plan(conn, EXPORT))["added"] == 0
     assert mine(conn) == [("chatgpt#1", "me", "2026-07-28"), ("chatgpt#1", "me", "2026-08-19"),
                           ("chatgpt#2", "me", "2026-08-19")]
-    ((cited,),) = table(conn, "SELECT cited_observation_ids FROM im.idea_links WHERE kind = 'archive'")
+    ((cited,),) = table(conn, "SELECT cited_observation_ids FROM im.connections WHERE method = 'chatgpt-archive'")
     assert len(cited) == 3   # the archive's #2-to-#1 link now cites what I said behind both
     assert_invariants(conn)
 

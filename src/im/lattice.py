@@ -110,11 +110,13 @@ def seed_archive(conn, path: Path, name: str = "chatgpt") -> dict:
             added += row is not None
             ids[e["n"]] = row[0] if row else conn.execute(
                 "SELECT idea_id FROM im.ideas WHERE archive_ref = %s", (ref,)).fetchone()[0]
-        for e in entries:
+        for e in entries:   # cross-references stand in as connections until a model decides the pair (0010)
             for n in {int(x) for x in re.findall(r"#(\d+)", e["notes"])} - {e["n"]}:
                 if n in ids:
-                    conn.execute("""INSERT INTO im.idea_links (a, b, kind, method) VALUES (%s, %s, 'archive', %s)
-                                    ON CONFLICT DO NOTHING""", (ids[e["n"]], ids[n], f"{name}-archive"))
+                    a, b = sorted((ids[e["n"]], ids[n]))
+                    conn.execute("""INSERT INTO im.connections (a, b, method) VALUES (%s, %s, %s)
+                                    ON CONFLICT (a, b) DO UPDATE SET method = excluded.method, confidence = NULL
+                                    WHERE im.connections.method LIKE 'embedding:%%'""", (a, b, f"{name}-archive"))
         for c in clusters:
             ref = f"{name}:{c['letter']}"
             theme = conn.execute(
@@ -277,7 +279,7 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
                 conn.execute("""INSERT INTO im.idea_evidence (idea_id, item_id, relation, judged_by)
                                 VALUES (%s, %s, 'origin', %s)""", (idea, item_id, version))
                 if decision == "evolves":
-                    conn.execute("""INSERT INTO im.idea_links (a, b, kind, method) VALUES (%s, %s, 'evolves', %s)
+                    conn.execute("""INSERT INTO im.lineage (from_id, to_id, kind, method) VALUES (%s, %s, 'evolves', %s)
                                     ON CONFLICT DO NOTHING""", (idea, target, version))
                 info[idea] = (title, statement, None)
                 vec = embedder.embed([idea_text(title, statement)])[0]
@@ -296,27 +298,34 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
 
 
 def relate(conn, embedder) -> int:
-    """Rebuild the derived `related` edges: each idea's nearest neighbours above RELATED_MIN. They're cited as
-    they're rebuilt, whichever path called this (an idle run rebuilds them too), along with any new evolves edge."""
+    """Rebuild the embedding neighbours that stand in as connections until a model decides a pair (0010): each idea's
+    nearest neighbours above RELATED_MIN. Only connections an embedding made are dropped or rewritten, so the archive's
+    and a model's stay. They're cited as they're rebuilt, whichever path called this (an idle run rebuilds them too),
+    along with any new lineage. Returns how many neighbour pairs there are."""
     ids, M = _idea_matrix(conn, embedder)
     method = f"embedding:{embedder.model_version};k={RELATED_K};min={RELATED_MIN}"
-    with conn.transaction():
-        conn.execute("DELETE FROM im.idea_links WHERE kind = 'related'")
-        if len(ids) < 2:
-            return 0
+    pairs = {}
+    if len(ids) >= 2:
         S = M @ M.T
         np.fill_diagonal(S, -1)
-        edges = set()
         for i in range(len(ids)):
             for j in np.argsort(-S[i])[:RELATED_K]:
-                if S[i, j] >= RELATED_MIN:
-                    edges.add((min(i, j), max(i, j), float(S[i, j])))
+                if j != i and S[i, j] >= RELATED_MIN:
+                    pairs[tuple(sorted((ids[i], ids[j])))] = round(float(S[i, j]), 4)
+    a, b = [p[0] for p in pairs], [p[1] for p in pairs]
+    with conn.transaction():
+        conn.execute("""DELETE FROM im.connections c WHERE c.method LIKE 'embedding:%%'
+                          AND NOT EXISTS (SELECT 1 FROM unnest(%s::uuid[], %s::uuid[]) n(a, b)
+                                          WHERE n.a = c.a AND n.b = c.b)""", (a, b))
         with conn.cursor() as cur:
-            cur.executemany("""INSERT INTO im.idea_links (a, b, kind, weight, confidence, method)
-                               VALUES (%s, %s, 'related', %s, %s, %s) ON CONFLICT DO NOTHING""",
-                            [(ids[i], ids[j], round(w, 4), round(w, 4), method) for i, j, w in edges])
+            cur.executemany("""INSERT INTO im.connections (a, b, method, confidence) VALUES (%s, %s, %s, %s)
+                               ON CONFLICT (a, b) DO UPDATE SET method = excluded.method, confidence = excluded.confidence
+                               WHERE im.connections.method LIKE 'embedding:%%'
+                                 AND (im.connections.method, im.connections.confidence)
+                                     IS DISTINCT FROM (excluded.method, excluded.confidence)""",
+                            [(x, y, method, w) for (x, y), w in pairs.items()])
         citations.cite(conn)
-    return len(edges)
+    return len(pairs)
 
 
 

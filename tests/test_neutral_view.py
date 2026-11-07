@@ -181,7 +181,7 @@ def test_a_lens_lights_its_seed_and_what_it_reaches(matched, admin):  # noqa: F8
 
 
 class Nearby:
-    """What the lens reads: my links, and the seed's nearest cards by meaning with their similarity."""
+    """What the lens reads: connections and lineage with their weight, and the seed's nearest cards by meaning."""
 
     def __init__(self, links, near):
         self.links, self.near = links, near
@@ -194,4 +194,4 @@ def test_a_seed_nothing_is_like_lights_only_itself():
     from im import lens
 
     assert lens.relevance(Nearby([], [("b", -0.2), ("c", 0.0)]), "a") == {"a": 1.0}
-    assert lens.relevance(Nearby([("b", "c")], [("b", 0.0)]), "a") == {"a": 1.0}   # linked, but not to the seed
+    assert lens.relevance(Nearby([("b", "c", 1.0)], [("b", 0.0)]), "a") == {"a": 1.0}   # linked, but not to the seed

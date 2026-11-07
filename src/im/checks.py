@@ -33,9 +33,12 @@ FROM im.ideas d JOIN im.source_tombstones t ON t.segment_id = ANY(d.segment_ids)
 """
 
 # Every edge cites what exists (migration 035): no observation that's gone, and nothing missing when an end has one.
+# Edges are connections and lineage (migration 045).
 UNCITED = f"""
-WITH origin AS ({ORIGIN_OBSERVATIONS})
-SELECT l.a, l.b, l.kind FROM im.idea_links l
+WITH origin AS ({ORIGIN_OBSERVATIONS}),
+edges AS (SELECT a, b, 'connection' AS kind, cited_observation_ids FROM im.connections
+          UNION ALL SELECT from_id, to_id, kind, cited_observation_ids FROM im.lineage)
+SELECT l.a, l.b, l.kind FROM edges l
 WHERE EXISTS (SELECT 1 FROM unnest(l.cited_observation_ids) c
               WHERE NOT EXISTS (SELECT 1 FROM im.observations o WHERE o.observation_id = c))
    OR (cardinality(l.cited_observation_ids) = 0 AND EXISTS (SELECT 1 FROM origin WHERE origin.idea_id IN (l.a, l.b)))

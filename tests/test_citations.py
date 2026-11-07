@@ -9,8 +9,16 @@ from test_extract import FakeClaude
 from test_lattice import FakeMatcher, items_for, seeded  # noqa: F401
 from test_triage import HashEmbedder
 
+# Every edge with what the old table called its kind: a connection is the archive's or an embedding neighbour's.
+EDGES = """SELECT a, b, CASE WHEN method LIKE '%%-archive' THEN 'archive' ELSE 'related' END AS kind,
+                  cited_observation_ids FROM im.connections
+           UNION ALL SELECT from_id, to_id, kind, cited_observation_ids FROM im.lineage"""
+
+
 def edges(conn, kinds):
-    return dict(table(conn, "SELECT kind, cited_observation_ids FROM im.idea_links WHERE kind = ANY(%s)", list(kinds)))
+    return dict(table(conn, f"SELECT kind, cited_observation_ids FROM ({EDGES}) e WHERE kind = ANY(%s)", list(kinds)))
+
+
 BUILD_OBSERVATION = """SELECT i.observation_id FROM im.items i WHERE i.quote LIKE '%%build broke%%'"""
 
 
@@ -46,15 +54,15 @@ def test_forgetting_takes_the_edges_made_from_it(seeded, cfg, stream):
     stream.forget(0, 6)   # the build line: its idea goes, and the evolves edge with it
     stream.write(stream.dir)
     run(seeded, cfg, stream)
-    assert table(seeded, "SELECT count(*) FROM im.idea_links WHERE kind = 'evolves'") == [(0,)]
-    assert table(seeded, "SELECT count(*) FROM im.idea_links WHERE kind = 'archive'") == [(1,)]
+    assert table(seeded, "SELECT count(*) FROM im.lineage WHERE kind = 'evolves'") == [(0,)]
+    assert table(seeded, "SELECT count(*) FROM im.connections WHERE method = 'chatgpt-archive'") == [(1,)]
     assert_invariants(seeded)
 
 
 def test_a_citation_to_an_observation_thats_gone_is_dropped(seeded, cfg, stream):
     matched(seeded, cfg, stream)
     (build,) = table(seeded, BUILD_OBSERVATION)[0]
-    seeded.execute("UPDATE im.idea_links SET cited_observation_ids = %s WHERE kind = 'evolves'",
+    seeded.execute("UPDATE im.lineage SET cited_observation_ids = %s WHERE kind = 'evolves'",
                    ([build, uuid.uuid4()],))
     assert citations.uncite_missing(seeded) == 1
     assert edges(seeded, ["evolves"]) == {"evolves": [build]}
@@ -64,8 +72,8 @@ def test_an_idle_run_keeps_its_citations(seeded, cfg, stream, monkeypatch):
     """A run with nothing new to match still rebuilds the related edges, and must cite them (seen on the NAS)."""
     monkeypatch.setattr(lattice, "RELATED_MIN", -1.0)   # every idea gets its nearest neighbours
     matched(seeded, cfg, stream)
-    before = table(seeded, "SELECT a, b, kind, cited_observation_ids FROM im.idea_links ORDER BY 1, 2, 3")
+    before = table(seeded, f"SELECT * FROM ({EDGES}) e ORDER BY 1, 2, 3")
     assert any(kind == "related" and cited for _, _, kind, cited in before)
     assert lattice.match_stage(seeded, FakeMatcher(), HashEmbedder())["pending"] == 0
-    assert table(seeded, "SELECT a, b, kind, cited_observation_ids FROM im.idea_links ORDER BY 1, 2, 3") == before
+    assert table(seeded, f"SELECT * FROM ({EDGES}) e ORDER BY 1, 2, 3") == before
     assert_invariants(seeded)

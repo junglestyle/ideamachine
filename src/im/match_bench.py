@@ -63,7 +63,7 @@ def decisions(conn) -> list[dict]:
     out = []
     for egress_id, decision, idea, from_idea, payload, segs in conn.execute(
             """SELECT g.egress_id, m.decision, m.idea_id::text,
-                      (SELECT l.b::text FROM im.idea_links l WHERE l.a = m.idea_id AND l.kind = 'evolves' LIMIT 1),
+                      (SELECT l.to_id::text FROM im.lineage l WHERE l.from_id = m.idea_id AND l.kind = 'evolves' LIMIT 1),
                       g.payload, g.segment_ids::text[]
                FROM im.item_matches m JOIN im.egress_log g USING (egress_id)
                WHERE m.judged_by LIKE 'match-%%' AND m.decision IN ('new', 'same_as', 'evolves')
