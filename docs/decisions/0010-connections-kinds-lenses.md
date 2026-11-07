@@ -26,8 +26,8 @@ list of kinds, and what triggers synthesis ([0007](0007-neutral-proposals.md)); 
 
 **A connection is an edge, pure and simple.** Two distinct points are related: they belong in the same tight
 neighbourhood, beyond sharing a subject. One per pair, symmetric, with its confidence, cited observations and
-`method` (model and question version). Until Jev decides them (M4), embedding neighbours stand in, named by their
-`method`.
+`method` (model and question version). Until a model decides them (M4: Terra, which passed B4), embedding neighbours
+stand in, named by their `method`.
 
 **Connections promote.** What V1 asked me to do by hand (keep/discard, comparisons, the rubric, all thrown out by
 0007) is what connections do instead: a neighbourhood of connected observations is what triggers a synthesis, the

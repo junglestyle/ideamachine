@@ -110,19 +110,20 @@ candidates come to me as proposals (up to 10 a week), and I keep each as canonic
 arrive the same way, triggered by a neighbourhood of connections
 ([0010](decisions/0010-connections-kinds-lenses.md)). `im tune` previews any change to the knobs at no cost.
 
-## 5. Edge typing (Jev)
+## 5. Edge typing
 
-A cheap, fast decision model ("Jev") types and weights edges: structured input (the pair, fixed choices, weighting
-instructions), a choice out.
+A model decides edges from structured input (the pair as each side was said and summarized), a choice out. Terra
+(`openai/gpt-6.1-terra`, low effort) decides, having passed B4 (2026-11-07); Jev, the cheap, fast decision model, failed
+it on edges that only belong together, and may come back as a cheaper decider or a filter in front of one.
 
 - Embeddings nominate pairs: top-k neighbours plus shared evidence.
-- Jev decides whether there's an edge: connected or `none`. Connected means the two belong in the same tight
+- The model decides whether there's an edge: connected or `none`. Connected means the two belong in the same tight
   neighbourhood, not that they share a subject, which is a lens's job ([0010](decisions/0010-connections-kinds-lenses.md)).
-  `none` is a real answer, and a confidence floor keeps weak edges out of the graph. It also suggests kinds, shown
-  on the edge and never deciding whether it exists ([0009](decisions/0009-edges-connection-graded-kind-suggested.md)).
+  `none` is a real answer. It also suggests kinds, shown on the edge and never deciding whether it exists
+  ([0009](decisions/0009-edges-connection-graded-kind-suggested.md)).
 - Tension (two ideas pulling against each other, contradiction included) and analogy (the same structure in
   different subjects) are passes of their own over pairs, each with its own model.
 - Every edge records `method` and model version, so it can be rerun and diffed.
-- Jev's weights feed lenses and cluster weight, one per connection; a kind adds a versioned fraction, 0 until
-  measured. Jev does not make ideas.
-- The bottleneck is labels: about 200 operator-labelled pairs (B4) before its weights are trusted.
+- A connection weighs 1 in lenses and cluster weight; a kind adds a versioned fraction, 0 until measured. Deciding
+  edges makes no ideas.
+- B4's 200 marked pairs are what any decider is scored against (`im audit-edges score`) before it replaces Terra.
