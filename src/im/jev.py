@@ -35,7 +35,7 @@ CUT = {"tension": 0.45}
 # correlate 0.7 to 0.9, and their mean held 0.79 to 0.81 on both while ranking tensions new to me as well as known
 # ones (pulls_v2 alone favoured known ones, 0.84 against 0.77). The forms asked before (contradiction, change of
 # mind, trade-off, the strongest counting: 0.71 to 0.74) stay as probes. A changed set gets a new name here, which names its drafts.
-QUESTION_SETS = {"tension": "pulls4", "edge": "connected3"}
+QUESTION_SETS = {"tension": "pulls4", "edge": "tight3"}
 QUESTIONS = {
     "tension": {
         "competing_pulls": ("Do `a` and `b` pull a person in directions that would have to be balanced?", None),
@@ -71,15 +71,19 @@ QUESTIONS = {
         "develops_v2": ("Is `a` built on `b`, going further than `b` does?", None),
     },
     # B4 (edge_audit): is there an edge between `a` and `b`? Only that is graded (decision 0009), so three wordings
-    # decide by their mean: the sheet's own definition, the test I mark by, and the line against a broad shared area.
+    # decide by their mean. An edge says two points belong in the same tight neighbourhood; a shared subject is a
+    # lens's, not an edge (0010). connected3 counted a shared subject and asked whether I'd want `b` beside `a`
+    # (AUC 0.926, the weakest); on 129 pairs no cut of it reached both of B4's bars.
     "edge": {
-        "connected": ("Are `a` and `b` connected: does one support, fill in or pull against the other, or are they "
-                      "about the same subject?",
-                      {"true": "Knowing one bears on the other, or they share a subject",
-                       "false": "No real connection: sharing a broad area (relationships, emotions, work) isn't one"}),
-        "connected_v2": ("Would someone thinking about `a` want to see `b` beside it?", None),
-        "connected_v3": ("Is there a real connection between `a` and `b`, beyond a broad shared area such as "
-                         "relationships, emotions or work?", None),
+        "belongs": ("Do `a` and `b` belong in the same tight neighbourhood of ideas: does one support, fill in, "
+                    "echo or pull against the other?",
+                    {"true": "Knowing one bears on how you read the other",
+                     "false": "No real connection, or only a shared subject or broad area (relationships, emotions, "
+                              "work)"}),
+        "same_cluster": ("Would `a` and `b` belong in the same small cluster of ideas, not just under the same broad "
+                         "subject?", None),
+        "beyond_subject": ("Is there a real connection between `a` and `b`, beyond being about the same subject or a "
+                           "broad area such as relationships, emotions or work?", None),
     },
 }
 

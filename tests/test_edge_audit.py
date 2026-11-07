@@ -112,7 +112,8 @@ class FakeTyper:
                 for i in range(1, n + 1)]})
         else:
             text = self._json.dumps({"label": self.label, "direction": "none",
-                                     "analogy": "same move" if len(self.calls) == 1 else ""})
+                                     "analogy": "same move" if len(self.calls) == 1 else "",
+                                     "why": f"{self.label}, because"})
         return ns(content=[ns(type="text", text=text)], stop_reason="end_turn", model="claude-opus-5-5",
                   _request_id="r", usage=ns(input_tokens=500, output_tokens=40))
 
@@ -156,13 +157,42 @@ def test_a_draft_sees_the_sheet_without_my_marks_and_score_compares(lattice_with
     assert table(lattice_with_clusters, "SELECT count(*) FROM im.egress_log WHERE prompt_version = %s",
                  out["prompt_version"]) == [(4,)]
     assert edge_audit.draft(lattice_with_clusters, claude, tmp_path)["pairs"] == 4 and len(claude.calls) == 4
-    d = edge_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low-labels2-B1"]
+    d = edge_audit.score(tmp_path)["drafts"][f"claude-opus-5-5-low-labels{edge_audit.LABELSET}-B1"]
     assert d["agree"] == 1.0 and d["analogies"]["both"] == [1]
     # The same model under another policy is another draft: none of policy B's answers stand in for it.
     other = edge_audit.draft(lattice_with_clusters, claude, tmp_path, scrubber=names.Scrubber(b"k"))
     assert other["pairs"] == 4 and len(claude.calls) == 8 and other["draft"] != out["draft"]
-    assert set(edge_audit.score(tmp_path)["drafts"]) == {"claude-opus-5-5-low-labels2-B1",
-                                                         "claude-opus-5-5-low-labels2"}
+    assert set(edge_audit.score(tmp_path)["drafts"]) == {f"claude-opus-5-5-low-labels{edge_audit.LABELSET}-B1",
+                                                         f"claude-opus-5-5-low-labels{edge_audit.LABELSET}"}
+
+
+def test_review_shows_only_where_a_model_disagrees_with_me_and_my_answers_become_marks(lattice_with_clusters,
+                                                                                     tmp_path):
+    edge_audit.write(lattice_with_clusters, tmp_path, size=4)
+    key = json.loads((tmp_path / "key.json").read_text())["pairs"]
+    one, two, three, four = sorted(key, key=int)
+    mine = {tuple(key[n]["ideas"]): m for n, m in ((one, "rel"), (two, "ela A>B"), (three, "rel"), (four, "none"))}
+    fill(tmp_path, lambda p: (mine[tuple(p["ideas"])], ""))
+    edge_audit.draft(lattice_with_clusters, FakeTyper("none"), tmp_path)   # no edge anywhere, and says why
+    jev_says = {four: {"label": "related", "p": 0.9}}   # Jev gives no case, so it never asks me to review
+    (tmp_path / f"draft-jev-labels{edge_audit.LABELSET}.json").write_text(json.dumps(jev_says))
+
+    assert edge_audit.review([tmp_path])[tmp_path.name]["to_review"] == 3   # my three edges; my none agrees
+    text = (tmp_path / "review.md").read_text()
+    assert set(edge_audit._sections(text)) == {one, two, three} and "none, because" in text
+    for num, answer in ((one, "agree"), (two, "keep"), (three, "sup")):
+        text = re.sub(rf"(## {num}\n(?:.*\n)*?)answer: ", rf"\1answer: {answer}", text, count=1)
+    (tmp_path / "review.md").write_text(text)
+
+    r = edge_audit.review([tmp_path])[tmp_path.name]
+    assert (r["changed"], r["kept"], r["to_review"]) == (2, 1, 0)
+    got = edge_audit.marks((tmp_path / "sheet.md").read_text())
+    assert [got[n]["label"] for n in (one, two, three, four)] == ["none", "elaborates", "supports", "none"]
+    assert got[two]["direction"] == "A>B"   # keeping my mark keeps all of it
+    assert [got[n]["note"] for n in (one, two, three)] == ["reviewed: was related", "reviewed: kept",
+                                                           "reviewed: was related"]
+    again = edge_audit.review([tmp_path])[tmp_path.name]   # answered once: nothing is applied or asked twice
+    assert (again["changed"], again["kept"], again["to_review"]) == (0, 0, 0)
 
 
 def test_jev_drafts_a_sheet_from_each_side_as_shown_and_connection_is_scored_at_every_cut(lattice_with_clusters,
@@ -182,7 +212,8 @@ def test_jev_drafts_a_sheet_from_each_side_as_shown_and_connection_is_scored_at_
     draft = json.loads(Path(out["draft"]).read_text())
     assert all(d["label"] == edge_audit.jev_label(d) for d in draft.values())
 
-    d = edge_audit.score(tmp_path)["drafts"]["jev-1.14.0-connected3-kinds1-labels2-B1"]
+    d = edge_audit.score(tmp_path)["drafts"][f"jev-1.14.0-{jev.QUESTION_SETS['edge']}-{jev.PROBE_SET['edge']}"
+                                             f"-labels{edge_audit.LABELSET}-B1"]
     by_cut = d["connection_by_cut"]
     assert by_cut[str(edge_audit.EDGE_CUT)]["agree"] == d["connection"]["agree"]   # its labels are its cut
     mine = {n for n in key if tuple(key[n]["ideas"]) in linked}
