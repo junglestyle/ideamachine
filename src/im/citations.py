@@ -1,4 +1,4 @@
-"""Edge citations (M2, migration 035): every edge cites the observations it rests on.
+"""Edge citations (M2, migration 035): every connection and every lineage link cites the observations it rests on.
 
 An edge cites the origin observations of its two ends: what each idea's statement was made from. Cite what exists:
 an end with no observation adds none, so an edge between two such ideas cites nothing, and its `method` says
@@ -17,24 +17,34 @@ UNION ALL
 SELECT o.idea_id, o.observation_id FROM im.observations o WHERE o.source <> 'speech'"""
 
 
+# The two cited tables (migration 045): each with its key and its two ends.
+EDGES = (("im.connections", ("a", "b")), ("im.lineage", ("from_id", "to_id", "kind")))
+
+
 def cite(conn) -> int:
     """Every edge cites the origin observations of its two ends (migration 035). An end without one (the archive,
     an idea I added) adds nothing. Recomputed each run, after observations and matching; returns the edges changed."""
-    return conn.execute(f"""
-        WITH origin AS ({ORIGIN_OBSERVATIONS}),
-        cited AS (
-          SELECT l.a, l.b, l.kind,
-                 ARRAY(SELECT DISTINCT o.observation_id FROM origin o WHERE o.idea_id IN (l.a, l.b) ORDER BY 1) AS ids
-          FROM im.idea_links l)
-        UPDATE im.idea_links l SET cited_observation_ids = c.ids FROM cited c
-        WHERE (l.a, l.b, l.kind) = (c.a, c.b, c.kind) AND l.cited_observation_ids <> c.ids""").rowcount
+    changed = 0
+    for table, key in EDGES:
+        ends, cols = f"({key[0]}, {key[1]})", ", ".join(key)
+        changed += conn.execute(f"""
+            WITH origin AS ({ORIGIN_OBSERVATIONS}),
+            cited AS (
+              SELECT {cols},
+                     ARRAY(SELECT DISTINCT o.observation_id FROM origin o WHERE o.idea_id IN {ends} ORDER BY 1) AS ids
+              FROM {table})
+            UPDATE {table} l SET cited_observation_ids = c.ids FROM cited c
+            WHERE ({", ".join(f"l.{k}" for k in key)}) = ({", ".join(f"c.{k}" for k in key)})
+              AND l.cited_observation_ids <> c.ids""").rowcount
+    return changed
 
 
 def uncite_missing(conn) -> int:
     """Drop cited observation ids that no longer exist (forgotten, or left with no capture) from edges."""
-    return conn.execute("""
-        UPDATE im.idea_links l SET cited_observation_ids = ARRAY(
+    return sum(conn.execute(f"""
+        UPDATE {table} l SET cited_observation_ids = ARRAY(
           SELECT c FROM unnest(l.cited_observation_ids) c
           WHERE EXISTS (SELECT 1 FROM im.observations o WHERE o.observation_id = c) ORDER BY 1)
         WHERE EXISTS (SELECT 1 FROM unnest(l.cited_observation_ids) c
                       WHERE NOT EXISTS (SELECT 1 FROM im.observations o WHERE o.observation_id = c))""").rowcount
+               for table, _ in EDGES)

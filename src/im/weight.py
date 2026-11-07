@@ -22,12 +22,13 @@ from im.config import WeightConfig
 def _signals(conn) -> dict:
     """Per cluster: my observations (conversation, when said), the others' count, canonical links, canonical.
 
+    Canonical links are connections shown (migration 045), mine included, one per pair; lineage doesn't count.
     Only current captures count (im.idea_observations), placed by their own segments: a superseded read's segments can carry a
     conversation id from before a re-key, which would count one conversation twice."""
     out = {r[0]: {"mine": [], "others": 0, "canonical_links": r[2], "canonical": r[1] == "canonical"}
            for r in conn.execute(
                """SELECT k.idea_id, k.kept_as,
-                         (SELECT count(*) FROM im.idea_links l JOIN im.idea_kept o
+                         (SELECT count(*) FROM im.shown_connections l JOIN im.idea_kept o
                             ON o.idea_id = CASE WHEN l.a = k.idea_id THEN l.b ELSE l.a END
                           WHERE (l.a = k.idea_id OR l.b = k.idea_id) AND o.kept_as = 'canonical')
                   FROM im.idea_kept k""")}

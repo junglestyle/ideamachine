@@ -98,7 +98,7 @@ Proposed shapes. Each is settled in its milestone's design doc, and every new ta
 | Cluster | Today's `im.ideas` row, ids kept. Maturity `observation`, `candidate` or `idea`; an idea is kept as `canonical` or `pinned`; `merged`, `rejected` stay | M2 |
 | Weight | `im.weights`: cluster, formula version, weight, the signals it read, when | M2 |
 | Proposals | `im.proposals`: cluster, weight, formula version, when, outcome (canonical, pinned, dismissed) | M2 |
-| Edges | One connection per pair (`cited_observation_ids`, `confidence`, `method` with the model version, so a rerun can be diffed); kinds (`supports`, `tension`, `elaborates`, `sympathy`, more later) are optional rows on a connection, with their own direction and method; lineage (`evolves`, `synthesizes`) is kept apart from both ([0010](decisions/0010-connections-kinds-lenses.md)) | M2, M4 |
+| Edges | One connection per pair (`cited_observation_ids`, `confidence`, `method` with the model version, so a rerun can be diffed); kinds (`supports`, `tension`, `elaborates`, `sympathy`, more later) are optional rows on a connection, with their own direction and method; lineage (`evolves`, `synthesizes`) is kept apart from both ([0010](decisions/0010-connections-kinds-lenses.md); built in migration 045, [design](design/connections-storage.md)) | M2, M4 |
 | Lenses | A lens: seed and definition, pinned or archived, its results by graph version; themes migrate into it | M5 |
 
 ## 4. Proposals

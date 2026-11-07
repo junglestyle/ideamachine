@@ -106,9 +106,14 @@ def card(conn, idea_id: str) -> str | None:
     r = rows[0]
     quotes = _rows(conn, """SELECT speaker, quote, said_at FROM pub.card_evidence WHERE idea_id = %s
                             ORDER BY said_at, item_id""", (idea_id,))
-    links = _rows(conn, """SELECT l.kind, c.idea_id, c.title FROM pub.card_links l
+    links = _rows(conn, """SELECT l.kind, l.kinds, c.idea_id, c.title FROM pub.card_links l
                            JOIN pub.cards c ON c.idea_id = CASE WHEN l.a = %s THEN l.b ELSE l.a END
                            WHERE %s IN (l.a, l.b) ORDER BY l.kind, c.title""", (idea_id, idea_id))
+    lineage = _rows(conn, """SELECT CASE WHEN l.from_id = %s THEN l.kind WHEN l.kind = 'evolves' THEN 'evolved by'
+                                         ELSE 'synthesized in' END AS kind,
+                                    c.idea_id, c.title FROM pub.card_lineage l
+                             JOIN pub.cards c ON c.idea_id = CASE WHEN l.from_id = %s THEN l.to_id ELSE l.from_id END
+                             WHERE %s IN (l.from_id, l.to_id) ORDER BY 1, c.title""", (idea_id, idea_id, idea_id))
     near = _rows(conn, """SELECT c.idea_id, c.title, n.similarity FROM pub.card_neighbours(%s) n
                           JOIN pub.cards c USING (idea_id) ORDER BY n.similarity DESC""", (idea_id,))
     buttons = "".join(f'<button name="action" value="{a}">{a}</button>' for a in ACTIONS)
@@ -120,9 +125,12 @@ def card(conn, idea_id: str) -> str | None:
     body.append("<h2>Said</h2><ol>" + "".join(
         f"<li><blockquote>{_e(q['quote'])}</blockquote><small>{_e(SPEAKERS.get(q['speaker'], q['speaker']))} · "
         f"{_when(q['said_at'])}</small></li>" for q in quotes) + "</ol>" if quotes else "")
-    body.append("<h2>Edges</h2><ul>" + "".join(
-        f'<li>{_e(x["kind"])}: <a href="/idea/{x["idea_id"]}">{_e(x["title"])}</a></li>' for x in links)
-        + "</ul>" if links else "")
+    body.append("<h2>Connections</h2><ul>" + "".join(
+        f'<li>{_e(", ".join([x["kind"], *x["kinds"]]))}: <a href="/idea/{x["idea_id"]}">{_e(x["title"])}</a></li>'
+        for x in links) + "</ul>" if links else "")
+    body.append("<h2>Lineage</h2><ul>" + "".join(
+        f'<li>{_e(x["kind"])}: <a href="/idea/{x["idea_id"]}">{_e(x["title"])}</a></li>' for x in lineage)
+        + "</ul>" if lineage else "")
     body.append("<h2>Near by meaning</h2><ul>" + "".join(
         f'<li><a href="/idea/{x["idea_id"]}">{_e(x["title"])}</a> <small>{x["similarity"]:.2f}</small></li>'
         for x in near) + "</ul>" if near else "")
@@ -147,7 +155,8 @@ def sky(conn, seed: str | None = None) -> str | None:
               SIZES[r["maturity"]] + (r["kept_as"] == "canonical"), r["conversations"],
               max((now - r["last_seen"]).days, 0) if r["last_seen"] else 365, r["title"], _facts(r)] for r in rows]
     links = sorted({tuple(sorted((index[a], index[b]))) for a, b in conn.execute(
-        "SELECT a::text, b::text FROM pub.card_links") if a in index and b in index and a != b})
+        """SELECT a::text, b::text FROM pub.card_links UNION ALL SELECT from_id::text, to_id::text FROM pub.card_lineage""")
+        if a in index and b in index and a != b})
     rel = {k: v for k, v in lens.relevance(conn, seed).items() if k in index} if seed else None
     data = json.dumps({"stars": stars, "links": links, "rel": rel, "seed": seed}, separators=(",", ":"))
     title = rows[index[seed]]["title"] if seed else "Sky"

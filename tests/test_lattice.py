@@ -108,7 +108,7 @@ def test_parse_and_seed(seeded, tmp_path):
     again = lattice.seed_archive(seeded, tmp_path / "archive.md")
     assert again["added"] == 0
     assert table(seeded, "SELECT count(*) FROM pub.ideas") == [(3,)]
-    assert table(seeded, "SELECT count(*) FROM pub.connections WHERE kind = 'archive'") == [(1,)]
+    assert table(seeded, "SELECT count(*) FROM pub.connections WHERE method = 'chatgpt-archive'") == [(1,)]
     assert table(seeded, "SELECT name, pinned, n_ideas FROM pub.themes ORDER BY name") == \
         [("Jokes", True, 1), ("Models and signals", True, 2)]
 
@@ -445,3 +445,35 @@ def test_my_links_show_at_once_and_unlinking_removes_them(seeded, admin):
     for args in [("link", a, a), ("unlink", a, None)]:
         with pytest.raises(psycopg.errors.CheckViolation):
             lattice_does(link, *args)
+
+
+def test_a_pair_is_one_connection_and_an_unlink_holds_until_a_later_method(seeded):
+    (a, b), = table(seeded, "SELECT a, b FROM im.connections WHERE method = 'chatgpt-archive'")
+
+    def shown():
+        return table(seeded, "SELECT kind, method FROM pub.card_links WHERE a = %s AND b = %s", a, b)
+
+    def links():
+        return table(seeded, "SELECT links FROM pub.cards WHERE idea_id = %s", a)
+
+    assert shown() == [("related", "chatgpt-archive")] and links() == [(1,)]
+    event = "INSERT INTO pub.feedback_events (kind, idea_id, other_idea_id) VALUES (%s, %s, %s)"
+    seeded.execute(event, ("link", b, a))
+    assert shown() == [("mine", "feedback")] and links() == [(1,)]   # mine and the archive's: one connection
+    seeded.execute(event, ("unlink", a, b))
+    assert shown() == [] and links() == [(0,)]   # the archive's method was known when I unlinked
+    seeded.execute("UPDATE im.connections SET method = 'terra;edge-v1' WHERE a = %s AND b = %s", (a, b))
+    assert shown() == [("related", "terra;edge-v1")]   # a method first used after the unlink connects it again
+
+
+def test_embedding_neighbours_never_replace_another_methods_connection(seeded, monkeypatch):
+    monkeypatch.setattr(lattice, "RELATED_MIN", -1.0)   # every pair of the three is a neighbour
+    lattice.relate(seeded, HashEmbedder())
+    methods = dict(((a, b), m) for a, b, m in table(seeded, "SELECT a, b, method FROM im.connections"))
+    assert len(methods) == 3 and sorted(m.split(":")[0] for m in methods.values()) == \
+        ["chatgpt-archive", "embedding", "embedding"]   # one per pair; the archive's stays the archive's
+    decided = next(p for p, m in methods.items() if m.startswith("embedding"))
+    seeded.execute("UPDATE im.connections SET method = 'terra;edge-v1' WHERE (a, b) = (%s, %s)", decided)
+    monkeypatch.setattr(lattice, "RELATED_MIN", 2.0)   # no neighbours at all now
+    lattice.relate(seeded, HashEmbedder())
+    assert sorted(table(seeded, "SELECT method FROM im.connections")) == [("chatgpt-archive",), ("terra;edge-v1",)]

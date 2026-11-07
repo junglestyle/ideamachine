@@ -122,7 +122,7 @@ def candidates(conn) -> dict[str, list[dict]]:
     near = neighbours(NEAR_K, mine)
     index = {x: n for n, x in enumerate(ids)}
     evolves = [pair(index[a], index[b]) for a, b in conn.execute(
-        "SELECT a::text, b::text FROM im.idea_links WHERE kind = 'evolves' ORDER BY a, b")
+        "SELECT from_id::text, to_id::text FROM im.lineage WHERE kind = 'evolves' ORDER BY 1, 2")
         if a in index and b in index and rows[index[a]][2] and rows[index[b]][2]]
     wide = neighbours(WIDE_K, mine)
     gap = {(i, j): abs((rows[i][3] - rows[j][3]).days) for i, j in wide if rows[i][3] and rows[j][3]}
