@@ -372,7 +372,7 @@ def cmd_audit_edges(args) -> None:
             _print(edge_audit.draft(conn, client, Path(args.folder), args.model, args.effort, scrubber,
                                     cfg.extract.monthly_cap_usd))
             return
-        _print(edge_audit.write(conn, Path(args.folder), args.seed, args.size))
+        _print(edge_audit.write(conn, Path(args.folder), args.seed, args.size, [Path(f) for f in args.exclude]))
 
 
 def cmd_audit_probe(args) -> None:
@@ -780,6 +780,7 @@ def main(argv=None) -> None:
                     "score and review take several, as one")
     ae.add_argument("--seed", type=int, default=4, help="the sample and shuffle's seed")
     ae.add_argument("--size", type=int, default=50, help="how many pairs")
+    ae.add_argument("--exclude", nargs="*", default=[], help="sheet: leave out pairs on these earlier sheets")
     ae.add_argument("--model", default="claude-opus-5-5",
                     help="draft: the candidate model, e.g. openai/gpt-6.1-terra, or jev-1.14.0 (TypeSafe's Jev)")
     ae.add_argument("--effort", default="low", help="draft: the candidate's effort")

@@ -171,11 +171,12 @@ def _side(conn, idea_id: str) -> list[str]:
     return lines
 
 
-def build(conn, seed: int = 4, size: int = SIZE) -> tuple[str, dict]:
-    """The sheet's text and its key."""
+def build(conn, seed: int = 4, size: int = SIZE, exclude: set | None = None) -> tuple[str, dict]:
+    """The sheet's text and its key. `exclude` leaves out pairs already on earlier sheets: marking one again is wasted,
+    since pooled sheets count a pair once."""
     rng = random.Random(seed)
     pool = candidates(conn)
-    taken, picked = set(), []
+    taken, picked = set(exclude or ()), []
 
     def take(pairs: list[dict], n: int, kind: str) -> None:
         for p in pairs:
@@ -204,18 +205,22 @@ def build(conn, seed: int = 4, size: int = SIZE) -> tuple[str, dict]:
             lines += [f"{side}. {first.strip()}", *[f"   {x}" if x.startswith(">") else x for x in rest], ""]
         lines += ["mark: ", "note: ", ""]
     key = {"benchmark": "B4", "seed": seed, "size": size, "near_k": NEAR_K, "wide_k": WIDE_K,
+           "excluded": len(exclude or ()),
            "available": {k: len(v) for k, v in pool.items()},
            "pairs": {str(n): p for n, p in enumerate(picked, 1)}}
     return "\n".join(lines), key
 
 
-def write(conn, out: Path, seed: int = 4, size: int = SIZE) -> dict:
-    """Write sheet.md and key.json into `out`. It won't write over a sheet: marks would be lost."""
+def write(conn, out: Path, seed: int = 4, size: int = SIZE, exclude_folders: list[Path] = ()) -> dict:
+    """Write sheet.md and key.json into `out`, without the pairs on the sheets in `exclude_folders`. It won't write
+    over a sheet: marks would be lost."""
+    from im import probe_audit
+
     out.mkdir(parents=True, exist_ok=True)
     sheet, key = out / "sheet.md", out / "key.json"
     if sheet.exists() or key.exists():
         raise SystemExit(f"{out} already has a sheet; score it, or pick another folder")
-    text, k = build(conn, seed, size)
+    text, k = build(conn, seed, size, probe_audit.earlier(list(exclude_folders)))
     sheet.write_text(text)
     key.write_text(json.dumps(k, indent=2))
     sets = [p["set"] for p in k["pairs"].values()]

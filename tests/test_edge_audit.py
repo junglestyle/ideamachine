@@ -261,6 +261,15 @@ def test_sheets_pool_into_one_benchmark_counting_a_shared_pair_once(lattice_with
     assert d["pairs"] == len(first) and d["agree"] == 1.0
 
 
+def test_a_sheet_can_leave_out_the_pairs_on_earlier_sheets(lattice_with_clusters, tmp_path):
+    one, two = tmp_path / "one", tmp_path / "two"
+    edge_audit.write(lattice_with_clusters, one, seed=1, size=4)
+    out = edge_audit.write(lattice_with_clusters, two, seed=1, size=4, exclude_folders=[one])
+    pairs = [{tuple(p["ideas"]) for p in json.loads((f / "key.json").read_text())["pairs"].values()}
+             for f in (one, two)]
+    assert out["pairs"] == 4 and not pairs[0] & pairs[1]   # the same seed, yet nothing I'd mark twice
+
+
 def test_a_pair_the_model_cant_answer_is_skipped_and_asked_again_next_time(lattice_with_clusters, tmp_path):
     from im import llm
 
