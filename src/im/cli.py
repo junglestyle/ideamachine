@@ -357,7 +357,7 @@ def cmd_audit_edges(args) -> None:
         _print(edge_audit.score(folders[0]) if len(folders) == 1 else edge_audit.pooled(folders))
         return
     if args.action == "review":
-        _print(edge_audit.review(folders))
+        _print(edge_audit.review(folders, args.all))
         return
     if len(folders) > 1:
         raise SystemExit("only score and review take several folders")
@@ -781,6 +781,8 @@ def main(argv=None) -> None:
     ae.add_argument("--seed", type=int, default=4, help="the sample and shuffle's seed")
     ae.add_argument("--size", type=int, default=50, help="how many pairs")
     ae.add_argument("--exclude", nargs="*", default=[], help="sheet: leave out pairs on these earlier sheets")
+    ae.add_argument("--all", action="store_true", help="review: list the models' marks I haven't reviewed too, to "
+                    "spot-check (a blank answer leaves a mark)")
     ae.add_argument("--model", default="claude-opus-5-5",
                     help="draft: the candidate model, e.g. openai/gpt-6.1-terra, or jev-1.14.0 (TypeSafe's Jev)")
     ae.add_argument("--effort", default="low", help="draft: the candidate's effort")

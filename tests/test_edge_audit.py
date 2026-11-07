@@ -223,6 +223,16 @@ def test_an_unmarked_pair_takes_the_models_mark_where_they_agree_and_comes_to_me
     assert got[three]["note"] == "reviewed: was unmarked"
     assert edge_audit.pooled([tmp_path])["by_models"] == 2   # the score says how many marks aren't mine
 
+    spot = edge_audit.review([tmp_path], every=True)[tmp_path.name]   # the models' marks, to spot-check
+    assert (spot["to_review"], spot["spot_check"]) == (0, 2)
+    text = (tmp_path / "review.md").read_text()
+    assert set(edge_audit._sections(text)) == {one, two} and "opus says elaborates" in text
+    (tmp_path / "review.md").write_text(re.sub(rf"(## {one}\n(?:.*\n)*?)answer: ", r"\1answer: rel", text, count=1))
+    after = edge_audit.review([tmp_path], every=True)[tmp_path.name]
+    assert (after["changed"], after["spot_check"]) == (1, 1)   # a blank answer leaves two as the models marked it
+    got = edge_audit.marks((tmp_path / "sheet.md").read_text())
+    assert [got[n]["label"] for n in (one, two)] == ["related", "related"]
+    assert edge_audit.pooled([tmp_path])["by_models"] == 1   # one is mine now
 
 
 def test_jev_drafts_a_sheet_from_each_side_as_shown_and_connection_is_scored_at_every_cut(lattice_with_clusters,
