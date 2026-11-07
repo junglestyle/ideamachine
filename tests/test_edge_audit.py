@@ -195,6 +195,46 @@ def test_review_shows_only_where_a_model_disagrees_with_me_and_my_answers_become
     assert (again["changed"], again["kept"], again["to_review"]) == (0, 0, 0)
 
 
+def test_an_unmarked_pair_takes_the_models_mark_where_they_agree_and_comes_to_me_where_they_dont(
+        lattice_with_clusters, tmp_path):
+    edge_audit.write(lattice_with_clusters, tmp_path, size=4)
+    one, two, three, four = sorted(json.loads((tmp_path / "key.json").read_text())["pairs"], key=int)
+    said = {"opus": {one: "none", two: "elaborates", three: "none", four: "related"},
+            "terra": {one: "none", two: "supports", three: "tension", four: "none"}}
+    for model, labels in said.items():
+        (tmp_path / f"draft-{model}-low-labels{edge_audit.LABELSET}.json").write_text(
+            json.dumps({n: {"label": label, "why": f"{model} says {label}"} for n, label in labels.items()}))
+    (tmp_path / f"draft-jev-labels{edge_audit.LABELSET}.json").write_text(json.dumps({three: {"label": "none"}}))
+
+    r = edge_audit.review([tmp_path])[tmp_path.name]
+    assert (r["drafted"], r["to_review"]) == (2, 2)   # Jev, with no case, doesn't settle three
+    got = edge_audit.marks((tmp_path / "sheet.md").read_text())
+    assert [got[n]["label"] for n in (one, two)] == ["none", "related"]   # two kinds of edge: an edge, no kind
+    text = (tmp_path / "review.md").read_text()
+    assert set(edge_audit._sections(text)) == {three, four} and "terra says tension" in text
+    for num, answer in ((three, "agree"), (four, "none")):
+        text = re.sub(rf"(## {num}\n(?:.*\n)*?)answer: ", rf"\1answer: {answer}", text, count=1)
+    (tmp_path / "review.md").write_text(text)
+
+    again = edge_audit.review([tmp_path])[tmp_path.name]
+    assert (again["changed"], again["drafted"], again["to_review"]) == (2, 0, 0)
+    got = edge_audit.marks((tmp_path / "sheet.md").read_text())
+    assert [got[n]["label"] for n in (three, four)] == ["tension", "none"]
+    assert got[three]["note"] == "reviewed: was unmarked"
+    assert edge_audit.pooled([tmp_path])["by_models"] == 2   # the score says how many marks aren't mine
+
+    spot = edge_audit.review([tmp_path], every=True)[tmp_path.name]   # the models' marks, to spot-check
+    assert (spot["to_review"], spot["spot_check"]) == (0, 2)
+    text = (tmp_path / "review.md").read_text()
+    assert set(edge_audit._sections(text)) == {one, two} and "opus says elaborates" in text
+    (tmp_path / "review.md").write_text(re.sub(rf"(## {one}\n(?:.*\n)*?)answer: ", r"\1answer: rel", text, count=1))
+    after = edge_audit.review([tmp_path], every=True)[tmp_path.name]
+    assert (after["changed"], after["spot_check"]) == (1, 1)   # a blank answer leaves two as the models marked it
+    got = edge_audit.marks((tmp_path / "sheet.md").read_text())
+    assert [got[n]["label"] for n in (one, two)] == ["related", "related"]
+    assert edge_audit.pooled([tmp_path])["by_models"] == 1   # one is mine now
+
+
 def test_jev_drafts_a_sheet_from_each_side_as_shown_and_connection_is_scored_at_every_cut(lattice_with_clusters,
                                                                                          tmp_path):
     from test_probe_audit import fake_jev   # test_probe_audit imports this module's fixtures
