@@ -56,6 +56,8 @@ without touching the records, comes from the write rule above.
 - Direction is per kind. `supports`, `elaborates` and `evolves` point from `a` to `b`. `related` and `tension` are
   symmetric and stored once, with `a < b`. (On 2026-11-04, after B4's first sheet, `elaborates` replaced `extends`
   and `tension` replaced `contradicts`.)
+- _Amended by [0010](0010-connections-kinds-lenses.md) (2026-11-06):_ an edge is one connection per pair; kinds are
+  optional rows on it, each with its own direction, so a second kind never reads as a second edge.
 - Graph-wide results (community, PageRank) are columns written per run and keyed by a graph version, the way map
   positions are today. Between runs they are stale.
 
@@ -63,8 +65,9 @@ without touching the records, comes from the write rule above.
 
 - Traversal is Python. A stage or request loads the edge list into memory (NetworkX; 10,000 edges is a few
   megabytes) and works there. SQL holds only fixed-depth reads in `pub` views, such as an idea's direct neighbours.
-- A lens is computed in Python (personalized PageRank from the seed) and cached in `im.lens_cache` by seed and graph
-  version (M5). Emanation shows lens projections, not live traversal.
+- A lens is computed in Python (personalized PageRank from the seed), and kept by seed and graph version (M5): pinned,
+  or archived with what it cost ([0010](0010-connections-kinds-lenses.md)). Emanation shows lens projections, not
+  live traversal.
 - There's no ad-hoc graph query language. A question like "how is X connected to Y" becomes a function, then an MCP
   tool if it earns one.
 - Every graph write shares a transaction with the provenance it cites, and forgetting

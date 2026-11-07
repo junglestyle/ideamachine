@@ -65,3 +65,7 @@ somewhere else in each, and a lens padded with unrelated ideas to fill its size.
 
 The cost: a seed's relevant clusters can sit apart on the map, because positions follow meaning, not the graph
 around the seed. The camera frames them; a temporary local layout is the fallback if that isn't enough.
+
+_Amended by [0010](0010-connections-kinds-lenses.md) (2026-11-06):_ the one stable map is no longer a requirement.
+Emanation is the fluid view and a lens may lay out its results afresh; Lattice v2, pinned lenses laid out by hand,
+is the stable one.

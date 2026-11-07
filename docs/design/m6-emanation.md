@@ -12,13 +12,14 @@ to show rather than all six at once.
 
 For M6:
 
-1. **A stable global sky as the home view.** Stars are clusters, placed by semantic neighbourhood. The layout updates
-   incrementally: existing stars stay roughly where they were, and new ones land near their neighbours. If the whole
-   sky rearranges after a run, I lose my sense of where things are.
-2. **Lenses as zoom, not separate pages.** Themes → clusters → candidates → observations → the original utterances,
-   all in the same space. A lens focuses the sky from a seed instead of replacing it.
-3. **Bridge proposals as faint dashed links.** The "negative space": connections the evidence suggests that I haven't
-   made. These are hypotheses, never edges, until I keep them.
+1. **A sky as the home view.** Stars are clusters, placed by semantic neighbourhood. ~~The layout updates
+   incrementally and stays put.~~ Not required since [0010](../decisions/0010-connections-kinds-lenses.md): Emanation
+   is the fluid view, and Lattice v2 (pinned lenses laid out by hand) is the stable one.
+2. **Lenses as zoom, not separate pages.** Subjects → clusters → candidates → observations → the original
+   utterances. A lens focuses the sky from a seed instead of replacing it, and may lay its results out afresh.
+3. **Proposed connections as faint dashed links.** The "negative space": connections the evidence suggests that I
+   haven't made. These are hypotheses, never edges, until I keep them. Not to be confused with a bridge idea, which
+   is an existing idea that touches two or more lenses (as Lattice v1's bridges touch two themes).
 
 **2D, not 3D** (2026-11-04). Depth hides neighbours and makes you orbit to find them; motion (replay, new evidence
 arriving, the camera flying to a lens) earns more than a third axis of meaning. A faster renderer (WebGL) doesn't
@@ -32,7 +33,7 @@ need 3D positions, and changing the pipeline's stable positions to 3D later woul
 | Brightness | Recurrence (distinct conversations), decaying with time | A fact |
 | Size | Lifecycle, and canonical vs pinned | My decision |
 | Colour | Semantic neighbourhood | Descriptive |
-| Links | Typed edges; type and cited observations on inspection | Evidence-backed |
+| Links | Connections; their kinds and cited observations on inspection | Evidence-backed |
 
 **No significance channel.** [Decision 0007](../decisions/0007-neutral-proposals.md) closed M3 because no signal
 predicted what I keep, so weight orders nothing. Encoding weight as brightness or size would put that ranking back
@@ -41,19 +42,22 @@ in visually.
 ## The negative-space map is synthesis, drawn
 
 It doesn't need a new subsystem. The spec already has the parts: embeddings nominate pairs, Jev answers `none` as
-a real answer ([SPEC §5](../SPEC.md#5-edge-typing-jev)), and the synthesis stage bridges clusters into a candidate
-that arrives as a proposal. The dashed links are:
+a real answer ([SPEC §5](../SPEC.md#5-edge-typing-jev)), and the synthesis stage writes an idea from a neighbourhood
+of connected clusters, which arrives as a proposal (whether that beats proposing its best existing point is an A/B
+test, [0010](../decisions/0010-connections-kinds-lenses.md)). The dashed links are:
 
-- bridge proposals I haven't decided on yet, and
+- connections proposed and not yet decided, and
 - possibly pairs that are close by embedding where Jev answered `none` or fell below the confidence floor.
 
-Clicking one shows the cited utterances on both sides. Keeping it goes through the normal proposal flow.
+Clicking one shows the cited utterances on both sides. Keeping a proposed connection makes it a connection; keeping
+a synthesis makes it an idea, linked to what it was made from.
 
 ## Conflicts with decisions already made
 
 - ~~[Decision 0005](../decisions/0005-presentation-inside-idea-machine.md) drops global positions for lens
   layouts.~~ Resolved by amending 0005 (2026-11-02): positions stay in the pipeline, a lens returns relevance, and the
   home sky is the lens with no seed.
+  Amended again by [0010](../decisions/0010-connections-kinds-lenses.md) (2026-11-06): the one map need not stay put.
 
 ## First sky (`im web`, `/sky`)
 

@@ -23,7 +23,8 @@ after `extends` became `elaborates` and `contradicts` became `tension`).
 - **The graph uses whether there's an edge.** Jev answers connected or `none`; lenses, the sky and weight read only
   that. B4's bar: agreement ≥ 0.90 on connection, and ≥ 0.90 of a model's edges ones I'd make.
 - **The kind is a suggestion** (`supports`, `elaborates`, `related`), shown on the edge, never deciding whether it
-  exists, and not graded.
+  exists, and not graded. _Amended by [0010](0010-connections-kinds-lenses.md) (2026-11-06): `related` is what an
+  edge is, not a kind; kinds are optional, several may apply, and the vocabulary grows._
 - **Tension and analogy are passes of their own**, each asking one question of pairs, with the model that answers
   it best. Their bars come when there are enough marked examples.
 - `im audit-edges score` reports connection first, then tension and analogy, then the kinds as diagnostics, and
