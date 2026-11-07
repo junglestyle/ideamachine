@@ -1,6 +1,7 @@
 """Jev, TypeSafe's System One decision model: typed questions about structured state, answered with calibrated
 probabilities (docs.typesafe.ai). Not a chat model: the state is named fields, each question is one atomic
-judgment (a Noul answers the probability of yes), and the decision is made here, in code.
+judgment (a Noul answers the probability of yes), and the decision is made here, in code. Only Nouls are asked so
+far; where a `choice` would fit is ROADMAP-v2's open question 11.
 
 Its first job here is drafting the probe sheets (tension, analogy, summary faithfulness), so it can be scored
 against my marks beside the chat models. Every question's wording is in this module. A judgment is asked as
