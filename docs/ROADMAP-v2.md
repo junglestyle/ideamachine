@@ -13,7 +13,7 @@ Each one leaves the system working and Lattice usable until M6.
 | v1.1 | Stop re-spending on unchanged payloads | A naming change sends nothing to Claude and re-matches nothing ([#10](https://github.com/junglestyle/ideamachine/pull/10)) | done |
 | M1 | Stable segment identity | Naming produces no new segments or episodes, and no requests unless the pseudonymized payload changed; extractions per current episode ≤ 1.05; every verdict reachable, every item cites current segments, `pub.ideas` unchanged | [design](design/m1-segment-identity.md) |
 | M2 | Observations, clusters, candidates, weight; ideas I keep (canonical or pinned); proposals; edge citations | B5 passes; every cluster weighted; `pub.ideas` returns the same ids; Lattice works unchanged | done 2026-11-01 ([design](design/m2-observations-candidates-ideas.md)) |
-| Synthesis | A stage triggered by weight: consolidates a cluster's statement or bridges several into a candidate, citing observations; arrives as a proposal | Versioned and capped; I keep a fair share of what it proposes | after M2 |
+| Synthesis | A stage triggered by a neighbourhood of connections ([0010](decisions/0010-connections-kinds-lenses.md)): consolidates a cluster's statement or writes one idea for several connected clusters, citing observations and linked to them (`synthesizes`); arrives as a proposal. A/B against proposing the neighbourhood's best existing point | Versioned and capped; I keep a fair share of what it proposes | after M2 |
 | M3 | ~~Tune weight and proposals~~ No rating: proposals neutral, newest first | Closed without tuning: no signal predicted what I keep | [0007](decisions/0007-neutral-proposals.md) |
 | M4 | Jev for match decisions and edge typing, behind versioned `judged_by` | B1 and B4 pass; no rise in duplicate ideas. Baseline (2026-11-06): 6 quotes are evidence for two ideas each, all from October, when re-keyed episodes were read again and Opus joined the same words to two ideas or said they evolved one; every capture since 11-02 joins its observation's idea unasked. Ideas can't be merged yet | at M4 |
 | M5 | Lenses; MCP server moves here | Connector works unchanged against the new endpoint; 5 canonical lenses judged useful | at M5 |
@@ -31,7 +31,7 @@ Each runs on data that already exists and records model and prompt versions.
 | B1 | Match: `new` vs `same_as`/`evolves`, against 1,131 logged Opus decisions after dedupe. `im bench-match` (2026-11-06) replays the logged requests through Jev, asking of each candidate whether the capture is the same idea or develops it, and scores agreement over a grid of cut-offs | ≥ 90% agreement; `same_as` precision ≥ 0.95 on the operator-validated subset (the real bar: agreement with Opus only shows a cost swap is safe) |
 | B2 | ~~Keep/discard prior~~ retired 2026-10-28: no keep/discard | — |
 | B3 | Extraction model swap (`im trial`). Done 2026-10-28: Opus stays (Sonnet 82% recall at 42% cost; Haiku lost the blind slug check). Rerun 2026-11 on `v3` under policy C across providers, recall against Opus's captures on a fixed sample rather than my verdicts ([0008](decisions/0008-other-providers-and-names.md)). On 147 episodes (2026-11-04, read 2026-11-06), Opus's second read made 90% of its captures again; of those solid captures Sol found 85%, Terra 85% at 21% of Opus's cost, Sonnet 77%, GLM-5.3-flash 74%, GLM-5.3 69%, Haiku 66%. 64–81% of each model's misses are solid captures, and at most 2 per model are of an idea said in more than one conversation. On `v4` (150 episodes, 2026-11-06): Opus's second read made 88% again, and its quotes were word for word in their lines every time (55% on v3), at 24% more per episode. DeepSeek V4.1 Flash found 86% of the solid captures (81% of all) at 8% of Opus's cost, making 338 captures to Opus's 276, its inexact quotes a copied line label or a line off, which `im.quotes` places; Terra fell to 79% (14%); V4 Pro was stopped at 20 episodes (90%, at 31%). Opus stays for now; Flash is the candidate. Whether its misses are worth having: `im audit-misses` | Recall ≥ Sonnet's, then candidate's slugs preferred or tied ≥ 60% of 30 blind pairs |
-| B4 | Edge typing, 200 labelled pairs (`im audit-edges`), marked by me, blind. The pilot (2026-11-02, 20 pairs, model-marked so not counted) kept all five answers, folded `evolves` into `extends`, and found no `contradicts` or `supports` among nearest neighbours, so sheets also draw ideas said far apart and claims beside concrete observations. The first sheet (2026-11-04, 50 pairs, ten models drafting) found no contradictions but two tensions, and every model reading my `extends` as `related`: labels 2 rename `extends` to `elaborates` (a later version stays `evolves`) and replace `contradicts` with `tension`, which includes it. Terra and Opus agreed with me most (80%); the next 150 pairs decide After it, decision [0009](decisions/0009-edges-connection-graded-kind-suggested.md): the top models agree with me 94–96% on whether there's an edge and far less on which kind, so the edge is graded and the kind only suggested; tension and analogy get passes of their own. Jev drafts a sheet too (`--model jev-1.14.0`, 2026-11-06): an edge by the mean of three wordings of "connected?", scored at every cut, the kind a suggestion from one question each | Connection: agreement ≥ 0.90, and ≥ 0.90 of a model's edges ones I'd make (precision). Tension and analogy reported, bars once there are enough of them |
+| B4 | Edge typing, 200 labelled pairs (`im audit-edges`), marked by me, blind. The pilot (2026-11-02, 20 pairs, model-marked so not counted) kept all five answers, folded `evolves` into `extends`, and found no `contradicts` or `supports` among nearest neighbours, so sheets also draw ideas said far apart and claims beside concrete observations. The first sheet (2026-11-04, 50 pairs, ten models drafting) found no contradictions but two tensions, and every model reading my `extends` as `related`: labels 2 rename `extends` to `elaborates` (a later version stays `evolves`) and replace `contradicts` with `tension`, which includes it. Terra and Opus agreed with me most (80%); the next 150 pairs decide After it, decision [0009](decisions/0009-edges-connection-graded-kind-suggested.md): the top models agree with me 94–96% on whether there's an edge and far less on which kind, so the edge is graded and the kind only suggested; tension and analogy get passes of their own. Jev drafts a sheet too (`--model jev-1.14.0`, 2026-11-06): an edge by the mean of three wordings of "connected?", scored at every cut, the kind a suggestion from one question each. Over the three sheets (129 pairs) no cut of any wording, or of their means, reached both bars: the best agreement was 0.89 (precision 0.88), and precision 0.93 came at recall 0.77. The sheet's `related` and Jev's first wording count a shared subject as an edge; decision [0010](decisions/0010-connections-kinds-lenses.md) makes an edge mean the same tight neighbourhood, so both change, and my `related` marks are re-read, before Jev is tuned | Connection: agreement ≥ 0.90, and ≥ 0.90 of a model's edges ones I'd make (precision). Tension and analogy reported, bars once there are enough of them |
 | B5 | Dedupe migration, operator audit of 50 groups and 50 near misses (`im audit-dedupe`). First sheet 2026-11-01, stopped at 26 merged: 2 false merges, both chained through a quote stitched with "..."; an item now joins only if it matches every capture. **Passed 2026-11-01** on a fresh sheet: 1 false merge in 50; 5 false splits in 50 near misses, so 0.4 stays | ≤ 2 false merges in 50 |
 | B6 | Local titles | Local preferred or tied ≥ 60% in 50 blind pairs |
 
@@ -43,18 +43,19 @@ model (B3; Opus stayed in 2026-10).
 
 ## 4. Views and filters (planned 2026-11-04)
 
-Two families of views, both inside Idea Machine ([0005](decisions/0005-presentation-inside-idea-machine.md)), and a
-filter over both.
+Two families of views, both inside Idea Machine ([0005](decisions/0005-presentation-inside-idea-machine.md)), both
+drawn through lenses ([0010](decisions/0010-connections-kinds-lenses.md)), and a filter over both.
 
-- **Emanation: cluster-based cloud views, for association and promotion.** The sky is the first: one stable map,
-  lenses that light it, proposals promoted from it. Others follow the encodings in the
-  [M6 notes](design/m6-emanation.md). Navigation is slow today: panning redraws every star with a fresh radial
+- **Emanation: cluster-based cloud views, for association and promotion.** The fluid one: it need not stay put
+  between runs. The sky is the first: lenses that light it, proposals promoted from it. Others follow the encodings
+  in the [M6 notes](design/m6-emanation.md). Navigation is slow today: panning redraws every star with a fresh radial
   gradient each frame (draw each kind of star once and stamp it instead), and a lens reloads the whole page (load
   the map once and fetch only a lens's relevance). Measure the server's time for `/sky` before changing it.
-- **Lattice v2: pinned views, for organization.** Where I place ideas by hand, as opposed to where meaning puts
-  them. Not the V1 Lattice repo, which is still archived at M6. First two:
-  - a conceptual or thematic lattice (a grid) to pin ideas into;
-  - the Qabalistic Tree of Life, pinning ideas by correspondence (to the sephirot and the paths between them).
+- **Lattice v2: pinned lenses, laid out by hand, for organization.** The stable one. Not the V1 Lattice repo, which
+  is still archived at M6. First two:
+  - a conceptual or thematic lattice (a grid) of lenses;
+  - the Qabalistic Tree of Life: a correspondence table condensed into definitions, each correspondence a lens
+    (1/Kether), on the sephirot and the paths between them.
 - **Removing sensitive elements**, per view and for the MCP connector. Builds on demo mode
   (`im/sensitivity.py`, migration 027), which already tags ideas and themes by category and lets my marks win:
   - offensive: derogatory to a group or a person (demo mode's `racism`, broadened);
@@ -73,7 +74,8 @@ filter over both.
 2. ~~What N makes two observations in one conversation independent?~~ 30 minutes, an operator setting (2026-10-28).
 3. ~~Which statuses can the operator set directly?~~ Only I make ideas, kept as canonical or pinned; a star is a pin (2026-10-28).
 4. ~~My point and someone else's: one cluster or two?~~ One: theirs joins mine as a not-me member (2026-10-28).
-5. ~~Digest points or a synthesis stage?~~ A stage of its own, triggered by weight, after M2 (2026-10-28).
+5. ~~Digest points or a synthesis stage?~~ A stage of its own, after M2 (2026-10-28), triggered by connected
+   neighbourhoods rather than weight ([0010](decisions/0010-connections-kinds-lenses.md), 2026-11-06).
 6. ~~Widening extraction to neutral observations (questions, jokes, passing thoughts): yes, after M2; when?~~ Now
    (2026-11-02): prompt `v3`. A re-read's captures of speech already captured join their observation's cluster
    without asking the matcher, so it costs about one extraction pass. Trial it, then switch `extract.prompt`.

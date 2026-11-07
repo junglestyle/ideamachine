@@ -9,9 +9,12 @@ typing. The build order and the bar each step has to clear are in [ROADMAP-v2.md
 V2 turns the lattice into a graph with a lifecycle: **utterances → observations → candidates → ideas**
 ([M2 design](design/m2-observations-candidates-ideas.md)). Everything extracted is an observation; observations of
 the same point cluster; a cluster of mine is a candidate with a computed weight; and only I make ideas, from the
-candidates the system proposes. Edges between ideas say how they relate (supports, tension, elaborates) and
-cite the evidence for it. **Lenses** show the graph from one idea or theme outward. Presentation and the MCP server
-move into this repo ([decision 0005](decisions/0005-presentation-inside-idea-machine.md)), and Lattice is archived.
+candidates the system proposes. Edges between ideas say that they're related, and optional kinds say how
+(supports, tension, elaborates, sympathy, and more as they're added); each cites its evidence. **Lenses** show the
+graph from any seed: an idea, a subject, a sentence, a question
+([decision 0010](decisions/0010-connections-kinds-lenses.md)).
+Presentation and the MCP server move into this repo ([decision 0005](decisions/0005-presentation-inside-idea-machine.md)),
+and Lattice is archived.
 
 ### Who said it, and what I keep
 
@@ -29,7 +32,8 @@ times, and one by `diarization` 147 of 162 times (the misses are short interject
 - **Ideas** are what I keep, as **canonical** (weighted: it attracts and pulls linked clusters) or **pinned** (kept
   and visible, no weight). Pinning never changes weight, maturity or clustering. The system proposes; it never makes
   an idea.
-- **Lenses:** topic overlays on the graph. They show it and change nothing.
+- **Lenses:** the way into the graph, from any seed. They return relevance and change nothing; pinned or archived,
+  never thrown away. Themes become subject lenses.
 
 It's a refactor of V1, not a rewrite: the ledger (`im.source_*`, `im.items`, `im.egress_log`), versioned inference
 and event-sourced human input are what V2 needs, and they stay.
@@ -53,7 +57,8 @@ V1's non-goals ([ROADMAP §1](ROADMAP.md#non-goals)) still hold, except "a UI in
   that shapes in the data and the code, and when to look again.
 - **The system deciding what's an idea.** Models and queries produce weight and proposals; I decide.
 - **Typing every pair.** Embeddings nominate pairs; nothing runs over n².
-- **On-demand synthesis.** Synthesis runs as a stage, triggered by weight, not by request.
+- **On-demand synthesis.** Synthesis runs as a stage, triggered by connected neighbourhoods
+  ([0010](decisions/0010-connections-kinds-lenses.md)), not by request.
 - **Reprocessing from audio.** V1 data is migrated with a dedupe pass. Its 818 verdicts, 743 feedback events and
   135+ comparisons are the only labels the benchmarks have.
 
@@ -93,8 +98,8 @@ Proposed shapes. Each is settled in its milestone's design doc, and every new ta
 | Cluster | Today's `im.ideas` row, ids kept. Maturity `observation`, `candidate` or `idea`; an idea is kept as `canonical` or `pinned`; `merged`, `rejected` stay | M2 |
 | Weight | `im.weights`: cluster, formula version, weight, the signals it read, when | M2 |
 | Proposals | `im.proposals`: cluster, weight, formula version, when, outcome (canonical, pinned, dismissed) | M2 |
-| Edges | `im.idea_links` gains `supports`, `tension`, `elaborates` beside `evolves`, `related`, `archive`, plus `cited_observation_ids`, `confidence`, and `method` with the model version, so a rerun can be diffed | M2, M4 |
-| Lens cache | `im.lens_cache(seed, graph_version, result)` | M5 |
+| Edges | One connection per pair (`cited_observation_ids`, `confidence`, `method` with the model version, so a rerun can be diffed); kinds (`supports`, `tension`, `elaborates`, `sympathy`, more later) are optional rows on a connection, with their own direction and method; lineage (`evolves`, `synthesizes`) is kept apart from both ([0010](decisions/0010-connections-kinds-lenses.md)) | M2, M4 |
+| Lenses | A lens: seed and definition, pinned or archived, its results by graph version; themes migrate into it | M5 |
 
 ## 4. Proposals
 
@@ -102,7 +107,8 @@ Nothing becomes an idea without me. Each run computes every cluster's weight wit
 signals: independent me recurrences above all, a capped amount for members by diarization or not me, links to
 canonical ideas. Weight orders nothing ([decision 0007](decisions/0007-neutral-proposals.md)): the most recently said
 candidates come to me as proposals (up to 10 a week), and I keep each as canonical or pinned, or dismiss it. Syntheses
-arrive the same way. `im tune` previews any change to the knobs at no cost.
+arrive the same way, triggered by a neighbourhood of connections
+([0010](decisions/0010-connections-kinds-lenses.md)). `im tune` previews any change to the knobs at no cost.
 
 ## 5. Edge typing (Jev)
 
@@ -110,11 +116,13 @@ A cheap, fast decision model ("Jev") types and weights edges: structured input (
 instructions), a choice out.
 
 - Embeddings nominate pairs: top-k neighbours plus shared evidence.
-- Jev decides whether there's an edge: connected or `none`. `none` is a real answer, and a confidence floor keeps
-  weak edges out of the graph. It also suggests a kind (`supports`, `elaborates`, `related`), shown on the edge and
-  never deciding whether it exists ([decision 0009](decisions/0009-edges-connection-graded-kind-suggested.md)).
+- Jev decides whether there's an edge: connected or `none`. Connected means the two belong in the same tight
+  neighbourhood, not that they share a subject, which is a lens's job ([0010](decisions/0010-connections-kinds-lenses.md)).
+  `none` is a real answer, and a confidence floor keeps weak edges out of the graph. It also suggests kinds, shown
+  on the edge and never deciding whether it exists ([0009](decisions/0009-edges-connection-graded-kind-suggested.md)).
 - Tension (two ideas pulling against each other, contradiction included) and analogy (the same structure in
   different subjects) are passes of their own over pairs, each with its own model.
 - Every edge records `method` and model version, so it can be rerun and diffed.
-- Jev's weights feed lenses and cluster weight. Jev does not make ideas.
+- Jev's weights feed lenses and cluster weight, one per connection; a kind adds a versioned fraction, 0 until
+  measured. Jev does not make ideas.
 - The bottleneck is labels: about 200 operator-labelled pairs (B4) before its weights are trusted.
