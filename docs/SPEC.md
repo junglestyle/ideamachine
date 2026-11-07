@@ -9,9 +9,10 @@ typing. The build order and the bar each step has to clear are in [ROADMAP-v2.md
 V2 turns the lattice into a graph with a lifecycle: **utterances → observations → candidates → ideas**
 ([M2 design](design/m2-observations-candidates-ideas.md)). Everything extracted is an observation; observations of
 the same point cluster; a cluster of mine is a candidate with a computed weight; and only I make ideas, from the
-candidates the system proposes. Edges between ideas say that they're related, and optional kinds say how (supports,
-tension, elaborates, and more as they're added); each cites its evidence. **Lenses** show the graph from any seed:
-an idea, a subject, a sentence, a question ([decision 0010](decisions/0010-connections-kinds-lenses.md)).
+candidates the system proposes. Edges between ideas say that they're related, and optional kinds say how
+(supports, tension, elaborates, sympathy, and more as they're added); each cites its evidence. **Lenses** show the
+graph from any seed: an idea, a subject, a sentence, a question
+([decision 0010](decisions/0010-connections-kinds-lenses.md)).
 Presentation and the MCP server move into this repo ([decision 0005](decisions/0005-presentation-inside-idea-machine.md)),
 and Lattice is archived.
 
@@ -56,7 +57,8 @@ V1's non-goals ([ROADMAP §1](ROADMAP.md#non-goals)) still hold, except "a UI in
   that shapes in the data and the code, and when to look again.
 - **The system deciding what's an idea.** Models and queries produce weight and proposals; I decide.
 - **Typing every pair.** Embeddings nominate pairs; nothing runs over n².
-- **On-demand synthesis.** Synthesis runs as a stage, triggered by weight, not by request.
+- **On-demand synthesis.** Synthesis runs as a stage, triggered by connected neighbourhoods
+  ([0010](decisions/0010-connections-kinds-lenses.md)), not by request.
 - **Reprocessing from audio.** V1 data is migrated with a dedupe pass. Its 818 verdicts, 743 feedback events and
   135+ comparisons are the only labels the benchmarks have.
 
@@ -96,7 +98,7 @@ Proposed shapes. Each is settled in its milestone's design doc, and every new ta
 | Cluster | Today's `im.ideas` row, ids kept. Maturity `observation`, `candidate` or `idea`; an idea is kept as `canonical` or `pinned`; `merged`, `rejected` stay | M2 |
 | Weight | `im.weights`: cluster, formula version, weight, the signals it read, when | M2 |
 | Proposals | `im.proposals`: cluster, weight, formula version, when, outcome (canonical, pinned, dismissed) | M2 |
-| Edges | One connection per pair (`cited_observation_ids`, `confidence`, `method` with the model version, so a rerun can be diffed); kinds (`supports`, `tension`, `elaborates`, more later) are optional rows on a connection, with their own direction and method ([0010](decisions/0010-connections-kinds-lenses.md)) | M2, M4 |
+| Edges | One connection per pair (`cited_observation_ids`, `confidence`, `method` with the model version, so a rerun can be diffed); kinds (`supports`, `tension`, `elaborates`, `sympathy`, more later) are optional rows on a connection, with their own direction and method; lineage (`evolves`, `synthesizes`) is kept apart from both ([0010](decisions/0010-connections-kinds-lenses.md)) | M2, M4 |
 | Lenses | A lens: seed and definition, pinned or archived, its results by graph version; themes migrate into it | M5 |
 
 ## 4. Proposals
@@ -105,7 +107,8 @@ Nothing becomes an idea without me. Each run computes every cluster's weight wit
 signals: independent me recurrences above all, a capped amount for members by diarization or not me, links to
 canonical ideas. Weight orders nothing ([decision 0007](decisions/0007-neutral-proposals.md)): the most recently said
 candidates come to me as proposals (up to 10 a week), and I keep each as canonical or pinned, or dismiss it. Syntheses
-arrive the same way. `im tune` previews any change to the knobs at no cost.
+arrive the same way, triggered by a neighbourhood of connections
+([0010](decisions/0010-connections-kinds-lenses.md)). `im tune` previews any change to the knobs at no cost.
 
 ## 5. Edge typing (Jev)
 

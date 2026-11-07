@@ -16,7 +16,9 @@ For M6:
    incrementally and stays put.~~ Not required since [0010](../decisions/0010-connections-kinds-lenses.md): Emanation
    is the fluid view, and Lattice v2 (pinned lenses laid out by hand) is the stable one.
 2. **Lenses as zoom, not separate pages.** Subjects → clusters → candidates → observations → the original
-   utterances. A lens focuses the sky from a seed instead of replacing it, and may lay its results out afresh.
+   utterances. On the home sky a lens lights its results where they are; opened on its own, it lays them out by their
+   connections (a force layout started from its last run's positions) and draws each neighbourhood as a cloud with
+   its synthesis proposal over it ([0010](../decisions/0010-connections-kinds-lenses.md)).
 3. **Proposed connections as faint dashed links.** The "negative space": connections the evidence suggests that I
    haven't made. These are hypotheses, never edges, until I keep them. Not to be confused with a bridge idea, which
    is an existing idea that touches two or more lenses (as Lattice v1's bridges touch two themes).

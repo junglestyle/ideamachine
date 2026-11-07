@@ -270,7 +270,9 @@ The ledger (items, verdicts, feedback events) is never rewritten, only pointed a
   - consolidation: a new statement for one cluster;
   - bridging: a candidate that ties several clusters together.
 
-  Each synthesis is versioned and capped, and it arrives as a proposal.
+  Each synthesis is versioned and capped, and it arrives as a proposal. _Amended by
+  [0010](../decisions/0010-connections-kinds-lenses.md) (2026-11-06): triggered by a neighbourhood of connections,
+  not weight; a synthesis links to what it was made from (`synthesizes`)._
 - **N:** 30 minutes by default, an operator setting, adjustable with `im tune`.
 - **Stars:** a star is a pin, with no weight.
 - **Not-me clusters** never become candidates on their own, and a canonical idea doesn't pull them up. I can still

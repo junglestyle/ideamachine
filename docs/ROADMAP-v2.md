@@ -13,7 +13,7 @@ Each one leaves the system working and Lattice usable until M6.
 | v1.1 | Stop re-spending on unchanged payloads | A naming change sends nothing to Claude and re-matches nothing ([#10](https://github.com/junglestyle/ideamachine/pull/10)) | done |
 | M1 | Stable segment identity | Naming produces no new segments or episodes, and no requests unless the pseudonymized payload changed; extractions per current episode ≤ 1.05; every verdict reachable, every item cites current segments, `pub.ideas` unchanged | [design](design/m1-segment-identity.md) |
 | M2 | Observations, clusters, candidates, weight; ideas I keep (canonical or pinned); proposals; edge citations | B5 passes; every cluster weighted; `pub.ideas` returns the same ids; Lattice works unchanged | done 2026-11-01 ([design](design/m2-observations-candidates-ideas.md)) |
-| Synthesis | A stage triggered by weight: consolidates a cluster's statement or bridges several into a candidate, citing observations; arrives as a proposal | Versioned and capped; I keep a fair share of what it proposes | after M2 |
+| Synthesis | A stage triggered by a neighbourhood of connections ([0010](decisions/0010-connections-kinds-lenses.md)): consolidates a cluster's statement or writes one idea for several connected clusters, citing observations and linked to them (`synthesizes`); arrives as a proposal. A/B against proposing the neighbourhood's best existing point | Versioned and capped; I keep a fair share of what it proposes | after M2 |
 | M3 | ~~Tune weight and proposals~~ No rating: proposals neutral, newest first | Closed without tuning: no signal predicted what I keep | [0007](decisions/0007-neutral-proposals.md) |
 | M4 | Jev for match decisions and edge typing, behind versioned `judged_by` | B1 and B4 pass; no rise in duplicate ideas. Baseline (2026-11-06): 6 quotes are evidence for two ideas each, all from October, when re-keyed episodes were read again and Opus joined the same words to two ideas or said they evolved one; every capture since 11-02 joins its observation's idea unasked. Ideas can't be merged yet | at M4 |
 | M5 | Lenses; MCP server moves here | Connector works unchanged against the new endpoint; 5 canonical lenses judged useful | at M5 |
@@ -74,7 +74,8 @@ drawn through lenses ([0010](decisions/0010-connections-kinds-lenses.md)), and a
 2. ~~What N makes two observations in one conversation independent?~~ 30 minutes, an operator setting (2026-10-28).
 3. ~~Which statuses can the operator set directly?~~ Only I make ideas, kept as canonical or pinned; a star is a pin (2026-10-28).
 4. ~~My point and someone else's: one cluster or two?~~ One: theirs joins mine as a not-me member (2026-10-28).
-5. ~~Digest points or a synthesis stage?~~ A stage of its own, triggered by weight, after M2 (2026-10-28).
+5. ~~Digest points or a synthesis stage?~~ A stage of its own, after M2 (2026-10-28), triggered by connected
+   neighbourhoods rather than weight ([0010](decisions/0010-connections-kinds-lenses.md), 2026-11-06).
 6. ~~Widening extraction to neutral observations (questions, jokes, passing thoughts): yes, after M2; when?~~ Now
    (2026-11-02): prompt `v3`. A re-read's captures of speech already captured join their observation's cluster
    without asking the matcher, so it costs about one extraction pass. Trial it, then switch `extract.prompt`.
