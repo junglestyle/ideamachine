@@ -42,7 +42,7 @@ class FakeChat:
         if "answer" in props:
             answer = {"answer": "yes", "why": f"{who} pulls"}
         elif "label" in props:
-            answer = {"label": "related", "direction": "none", "analogy": f"{who} moves"}
+            answer = {"label": "related", "direction": "none", "analogy": f"{who} moves", "why": f"{who} belongs"}
         elif "ideas" in props:
             answer = {"ideas": [{"idea": i, "structures": [f"{who} line {i}", f"b {i}", f"c {i}", f"d {i}"]}
                                 for i in range(1, n + 1)]}
@@ -79,7 +79,7 @@ def assert_pseudonymized(sent: list[str]) -> None:
     assert not any("Bob" in t for t in sent) and any(BOB in t for t in sent)   # he was there, under his pseudonym
 
 
-def test_a_b4_draft_sends_names_pseudonymized_and_maps_its_analogies_back(named_clusters, tmp_path):  # noqa: F811
+def test_a_b4_draft_sends_names_pseudonymized_and_maps_its_cases_back(named_clusters, tmp_path):  # noqa: F811
     conn = named_clusters
     edge_audit.write(conn, tmp_path)
     assert NAMED in (tmp_path / "sheet.md").read_text()
@@ -91,8 +91,9 @@ def test_a_b4_draft_sends_names_pseudonymized_and_maps_its_analogies_back(named_
     pairs = [p for _, p in sorted(json.loads((tmp_path / "key.json").read_text())["pairs"].items(),
                                   key=lambda kv: int(kv[0]))]
     assert_logged(conn, since, [(t, p["ideas"]) for t, p in zip(claude.sent(), pairs, strict=True)])
-    analogies = [d["analogy"] for d in json.loads(Path(out["draft"]).read_text()).values()]
-    assert "Bob moves" in analogies and not any(BOB in a for a in analogies)
+    draft = json.loads(Path(out["draft"]).read_text()).values()
+    for field, said in (("analogy", "Bob moves"), ("why", "Bob belongs")):
+        assert said in [d[field] for d in draft] and not any(BOB in d[field] for d in draft)
 
 
 def test_a_jev_b4_draft_sends_names_pseudonymized(named_clusters, tmp_path):  # noqa: F811

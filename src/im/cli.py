@@ -356,8 +356,11 @@ def cmd_audit_edges(args) -> None:
     if args.action == "score":
         _print(edge_audit.score(folders[0]) if len(folders) == 1 else edge_audit.pooled(folders))
         return
+    if args.action == "review":
+        _print(edge_audit.review(folders))
+        return
     if len(folders) > 1:
-        raise SystemExit("only score takes several folders")
+        raise SystemExit("only score and review take several folders")
     args.folder = folders[0]
     with db.connect(db.pipeline_dsn()) as conn:
         if args.action == "draft":
@@ -769,11 +772,12 @@ def main(argv=None) -> None:
     nm.add_argument("--all", action="store_true", help="every current episode instead")
     nm.set_defaults(func=cmd_names)
     ae = sub.add_parser("audit-edges", help="B4: a blind sheet of pairs of clusters to type; tally my marks")
-    ae.add_argument("action", choices=["sheet", "score", "draft"],
+    ae.add_argument("action", choices=["sheet", "score", "draft", "review"],
                     help="draft: a model marks the same sheet blind (sends to it: Claude, or OpenRouter for a "
-                         "provider/model name); score then compares it with me")
+                         "provider/model name); score then compares it with me; review: apply my answers on "
+                         "review.md, then list the pairs where a chat model's draft disagrees with me, with its case")
     ae.add_argument("folder", nargs="+", help="where sheet.md and key.json go (it quotes people: keep it in saved/); "
-                    "score takes several, to score them as one")
+                    "score and review take several, as one")
     ae.add_argument("--seed", type=int, default=4, help="the sample and shuffle's seed")
     ae.add_argument("--size", type=int, default=50, help="how many pairs")
     ae.add_argument("--model", default="claude-opus-5-5",

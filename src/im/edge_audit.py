@@ -352,15 +352,16 @@ For supports and elaborates, give the direction: "A>B" if A supports or elaborat
 it runs both ways or you can't say; otherwise "none".
 Separately, say whether the two are analogous: about different subjects, but with the same underlying structure \
 (the same move, pattern or mechanism in two domains). If they are, name the shared structure in a few words; \
-otherwise leave it empty. Don't evaluate the ideas."""
+otherwise leave it empty. In `why`, make the case for your label in one sentence: what's between them, or why \
+there's nothing beyond their subject. Don't evaluate the ideas."""
 
 DRAFT_SCHEMA = {
     "type": "object",
     "properties": {"label": {"type": "string", "enum": ["supports", "elaborates", "tension", "related", "none",
                                                           "same", "unsure"]},
                    "direction": {"type": "string", "enum": ["A>B", "B>A", "both", "none"]},
-                   "analogy": {"type": "string"}},
-    "required": ["label", "direction", "analogy"], "additionalProperties": False,
+                   "analogy": {"type": "string"}, "why": {"type": "string"}},
+    "required": ["label", "direction", "analogy", "why"], "additionalProperties": False,
 }
 CORE = ("none", "related", "elaborates", "tension")   # the labels macro_f1_core averages, over those I've used
 
@@ -415,11 +416,115 @@ def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: st
             got[num] = {"label": "unsure", "direction": "none", "analogy": "", "refused": True}
         else:
             got[num] = a.data
-            if got[num].get("analogy"):
-                got[num]["analogy"] = names.unscrub(got[num]["analogy"], back)
+            for field in ("analogy", "why"):
+                if got[num].get(field):
+                    got[num][field] = names.unscrub(got[num][field], back)
         out_path.write_text(json.dumps(got, indent=2))   # as it goes: a rerun picks up where this stopped
     return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "prompt_version": pv,
             "policy": policy, **({"failed": failed} if failed else {}), **({"stopped": stopped} if stopped else {})}
+
+
+# --- Reviewing where the models disagree with me ---------------------------------------------------------------------
+#
+# Marking every pair blind is slow. Instead the chat models draft under the current label set, each with its case in a
+# sentence, and I read only the pairs where one of them disagrees with me on whether there's an edge. If its case
+# convinces me, its label becomes my mark: the point is edges worth seeing, not my first guess.
+
+AGREE, KEEP = ("agree", "a", "yes", "y"), ("keep", "k", "no", "n")
+REVIEWED = "reviewed:"   # starts the note line a review adds, so a pair is reviewed once
+
+
+def _linked(label: str | None) -> bool:
+    return label not in (None, "none", "unsure")
+
+
+def _cases(folder: Path) -> dict[str, dict]:
+    """The chat models' drafts under the current label set, by model. Jev's give no case."""
+    return {d.stem.removeprefix("draft-"): json.loads(d.read_text())
+            for d in sorted(folder.glob(f"draft-*-labels{LABELSET}*.json")) if not d.stem.startswith("draft-jev")}
+
+
+def _sections(text: str) -> dict[str, str]:
+    parts = re.split(r"^##[ \t]+(\d+)[ \t]*$", text, flags=re.M)
+    return dict(zip(parts[1::2], parts[2::2]))
+
+
+def _set_mark(text: str, num: str, label: str | None, note: str) -> str:
+    """The sheet with pair `num` marked `label` (None leaves the mark as it is), and `note` added as the last line of
+    its note."""
+    parts = re.split(r"^(##[ \t]+\d+[ \t]*)$", text, flags=re.M)
+    for i in range(1, len(parts), 2):
+        if parts[i].split()[1] != num:
+            continue
+        body = parts[i + 1] if label is None else re.sub(r"^([ \t]*mark:).*$", rf"\g<1> {label}", parts[i + 1],
+                                                         count=1, flags=re.M | re.I)
+        end = len(body) - len(body.rstrip("\n"))
+        line = note if re.search(r"^[ \t]*note:", body, re.M | re.I) else f"note: {note}"
+        parts[i + 1] = body.rstrip("\n") + "\n" + line + "\n" * max(end, 1)
+    return "".join(parts)
+
+
+def _apply(folder: Path) -> dict:
+    """My answers on review.md, into my marks: `agree` takes the proposed label, `keep` keeps mine, a label is mine
+    now. Either way the pair's note says it was reviewed, and what it was. An answer I can't read is left alone."""
+    path = folder / "review.md"
+    if not path.exists():
+        return {"changed": 0, "kept": 0}
+    sheet = (folder / "sheet.md").read_text()
+    mine = marks(sheet)
+    changed = kept = 0
+    for num, body in _sections(path.read_text()).items():
+        answer = re.search(r"^answer:(.*)$", body, re.M)
+        proposed = re.search(r"^proposed: (\w+)$", body, re.M)
+        word = answer.group(1).strip().strip("`").lower() if answer else ""
+        was = mine.get(num, {}).get("label")
+        if not word or not proposed or REVIEWED in (mine.get(num, {}).get("note") or ""):
+            continue
+        label = proposed.group(1) if word in AGREE else was if word in KEEP else LABELS.get(word)
+        if label is None:
+            continue
+        changed += label != was
+        kept += label == was
+        sheet = _set_mark(sheet, num, None if label == was else label,
+                          f"{REVIEWED} {f'was {was}' if label != was else 'kept'}")
+    (folder / "sheet.md").write_text(sheet)
+    return {"changed": changed, "kept": kept}
+
+
+def review(folders: list[Path]) -> dict:
+    """Apply what I answered on each folder's review.md, then write a new one: every pair I marked where a chat model
+    disagrees with me on whether there's an edge and I haven't reviewed it yet, with each model's case. A pair two
+    sheets share is reviewed on the first, as pooling counts it."""
+    out, seen = {}, set()
+    for folder in folders:
+        applied = _apply(folder)
+        key = json.loads((folder / "key.json").read_text())["pairs"]
+        sheet = (folder / "sheet.md").read_text()
+        shown, mine, cases = _pairs_as_shown(sheet), marks(sheet), _cases(folder)
+        lines = [f"# B4 review: where a model disagrees with me ({folder.name})", "",
+                 "After `answer:`, write `agree` to take the proposed label, `keep` to keep my mark, or a label. Then "
+                 "run `im audit-edges review` again: it applies the answers and writes what's left.", ""]
+        n = 0
+        for num, p in sorted(key.items(), key=lambda kv: int(kv[0])):
+            pair, m = tuple(p["ideas"]), mine.get(num, {})
+            if pair in seen:
+                continue
+            seen.add(pair)
+            label = m.get("label")
+            if label in (None, "unsure") or REVIEWED in (m.get("note") or ""):
+                continue
+            against = {model: d[num] for model, d in cases.items()
+                       if num in d and d[num]["label"] != "unsure" and _linked(d[num]["label"]) != _linked(label)}
+            if not against:
+                continue
+            labels = [d["label"] for d in against.values()]
+            n += 1
+            lines += [f"## {num}", "", shown[num], "", f"mine: {label}", f"proposed: {max(labels, key=labels.count)}"]
+            lines += [f"{model}: {d['label']}. {d.get('why') or '(no case given)'}" for model, d in against.items()]
+            lines += ["", "answer: ", ""]
+        (folder / "review.md").write_text("\n".join(lines))
+        out[folder.name] = applied | {"to_review": n, "models": sorted(cases)}
+    return out
 
 
 EDGE_CUT = 0.5    # Jev's mean of the connected wordings at which a draft says there's an edge; scored at each cut
