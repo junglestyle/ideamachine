@@ -11,6 +11,11 @@ and answered `related`; a later version is the matcher's `evolves`, not an elabo
 `tension`, which includes contradiction: I found none, but noted two pairs pulling against each other. Old marks and
 drafts read `extends` as `elaborates` and `contradicts` as `tension`.
 
+What B4 with Jev (129 pairs, 2026-11-06) changed, labels 3 (decision 0010): `related` was "the same subject, but
+none of the above", and a shared subject is what a lens gathers, not an edge. An edge says two points belong in the
+same tight neighbourhood, so `related` is that, with no kind to say how, and a shared subject alone is `none`. Drafts
+under labels 2 answered the old question and stay in their own files.
+
 The pairs come in five sets:
 - near: nearest neighbours by embedding among candidates and ideas (SPEC §5: embeddings nominate pairs), spread
   across the range of similarity rather than only the closest;
@@ -37,7 +42,7 @@ SHARE = {"evolves": 0.12, "apart": 0.16, "levels": 0.16, "far": 0.08}   # the re
 SETS = ("near", "evolves", "apart", "levels", "far")
 CONCRETE = ("observation",)          # item kinds that are about a case, not a claim
 CLAIMS = ("idea", "aphorism")
-LABELSET = 2   # see the module docstring; drafts under a later set go to their own files
+LABELSET = 3   # see the module docstring; drafts under a later set go to their own files
 LABELS = {"supports": "supports", "sup": "supports", "tension": "tension", "ten": "tension",
           "contradicts": "tension", "con": "tension", "elaborates": "elaborates", "ela": "elaborates",
           "extends": "elaborates", "ext": "elaborates", "related": "related", "rel": "related", "none": "none",
@@ -55,9 +60,10 @@ the summary can be wrong. How does A relate to B? After `mark:`, write one of:
   an application, a generalization, or something built on it. Test: does one fill in or carry forward the other?
 - `tension` (`ten`): they pull against each other: a contradiction, a change of mind, a trade-off, or two pulls
   that would have to be balanced. Test: does holding one make the other harder to hold as stated?
-- `related` (`rel`): the same subject, but none of the above. Test: knowing one doesn't change how you read the
-  other.
-- `none`: no real connection.
+- `related` (`rel`): they belong together, in the same tight neighbourhood of ideas, but none of the above says
+  how. Test: is there more between them than their subject?
+- `none`: no real connection. Being about the same subject, or a broad area (relationships, emotions, work), isn't
+  one: a lens gathers those.
 - `same`: the same idea said twice (a merge the matcher missed).
 - `unsure` (`?`).
 
@@ -334,8 +340,10 @@ believable, while still saying the same thing? A case that only illustrates it i
 application, a generalization, or something built on it. Test: does one fill in or carry forward the other?
 - tension: they pull against each other: a contradiction, a change of mind, a trade-off, or two pulls that would \
 have to be balanced. Test: does holding one make the other harder to hold as stated?
-- related: the same subject, but none of the above. Test: knowing one doesn't change how you read the other.
-- none: no real connection. Sharing a broad area (relationships, emotions, work) isn't a connection.
+- related: they belong together, in the same tight neighbourhood of ideas, but none of the above says how. Test: is \
+there more between them than their subject?
+- none: no real connection. Being about the same subject, or the same broad area (relationships, emotions, work), \
+isn't a connection.
 - same: the same idea said twice.
 - unsure.
 A later version of an idea is elaborates if it refines it, tension if it reverses it, and same if it only says it \

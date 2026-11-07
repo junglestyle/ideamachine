@@ -156,13 +156,13 @@ def test_a_draft_sees_the_sheet_without_my_marks_and_score_compares(lattice_with
     assert table(lattice_with_clusters, "SELECT count(*) FROM im.egress_log WHERE prompt_version = %s",
                  out["prompt_version"]) == [(4,)]
     assert edge_audit.draft(lattice_with_clusters, claude, tmp_path)["pairs"] == 4 and len(claude.calls) == 4
-    d = edge_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low-labels2-B1"]
+    d = edge_audit.score(tmp_path)["drafts"][f"claude-opus-5-5-low-labels{edge_audit.LABELSET}-B1"]
     assert d["agree"] == 1.0 and d["analogies"]["both"] == [1]
     # The same model under another policy is another draft: none of policy B's answers stand in for it.
     other = edge_audit.draft(lattice_with_clusters, claude, tmp_path, scrubber=names.Scrubber(b"k"))
     assert other["pairs"] == 4 and len(claude.calls) == 8 and other["draft"] != out["draft"]
-    assert set(edge_audit.score(tmp_path)["drafts"]) == {"claude-opus-5-5-low-labels2-B1",
-                                                         "claude-opus-5-5-low-labels2"}
+    assert set(edge_audit.score(tmp_path)["drafts"]) == {f"claude-opus-5-5-low-labels{edge_audit.LABELSET}-B1",
+                                                         f"claude-opus-5-5-low-labels{edge_audit.LABELSET}"}
 
 
 def test_jev_drafts_a_sheet_from_each_side_as_shown_and_connection_is_scored_at_every_cut(lattice_with_clusters,
@@ -182,7 +182,8 @@ def test_jev_drafts_a_sheet_from_each_side_as_shown_and_connection_is_scored_at_
     draft = json.loads(Path(out["draft"]).read_text())
     assert all(d["label"] == edge_audit.jev_label(d) for d in draft.values())
 
-    d = edge_audit.score(tmp_path)["drafts"]["jev-1.14.0-connected3-kinds1-labels2-B1"]
+    d = edge_audit.score(tmp_path)["drafts"][f"jev-1.14.0-{jev.QUESTION_SETS['edge']}-{jev.PROBE_SET['edge']}"
+                                             f"-labels{edge_audit.LABELSET}-B1"]
     by_cut = d["connection_by_cut"]
     assert by_cut[str(edge_audit.EDGE_CUT)]["agree"] == d["connection"]["agree"]   # its labels are its cut
     mine = {n for n in key if tuple(key[n]["ideas"]) in linked}
