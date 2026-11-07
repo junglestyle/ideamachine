@@ -217,8 +217,8 @@ def test_jev_drafts_a_sheet_from_each_side_as_shown_and_connection_is_scored_at_
     by_cut = d["connection_by_cut"]
     assert by_cut[str(edge_audit.EDGE_CUT)]["agree"] == d["connection"]["agree"]   # its labels are its cut
     mine = {n for n in key if tuple(key[n]["ideas"]) in linked}
-    above = {n for n in key if draft[n]["p"] >= 0.3}
-    assert by_cut["0.3"]["recall"] == round(len(mine & above) / len(mine), 3)
+    above = {n for n in key if draft[n]["p"] >= 0.5}
+    assert by_cut["0.5"]["recall"] == round(len(mine & above) / len(mine), 3)
     assert 0.0 <= by_cut["auc"] <= 1.0
 
 

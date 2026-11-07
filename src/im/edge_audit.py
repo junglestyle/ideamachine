@@ -35,6 +35,8 @@ from pathlib import Path
 
 import numpy as np
 
+from im import jev
+
 SIZE = 50
 NEAR_K = 5
 WIDE_K = 10    # how far the apart and levels sets look for neighbours
@@ -527,7 +529,7 @@ def review(folders: list[Path]) -> dict:
     return out
 
 
-EDGE_CUT = 0.5    # Jev's mean of the connected wordings at which a draft says there's an edge; scored at each cut
+EDGE_CUT = jev.CUT["edge"]   # Jev's probability of an edge at which a draft says there is one; scored at each cut
 KIND_CUT = 0.5    # a kind Jev rates at least this likely is its suggestion; otherwise, connected, it's related
 
 
@@ -546,7 +548,7 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, monthly_cap_usd:
     """Jev marks every pair from structured state (each side's quotes and summary, A and B as the sheet shows them),
     one request of atomic questions per pair, into draft-<model>-<question set>-<probe set>-labels<n>[-<policy>].json.
     Each pair keeps every probability beside its label, so connection can be scored at every cut."""
-    from im import egress, jev, llm, probe_audit
+    from im import egress, llm, probe_audit
 
     policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     out_path = folder / (f"draft-{client.model}-{jev.QUESTION_SETS['edge']}-{jev.PROBE_SET['edge']}"
@@ -636,13 +638,13 @@ def agreement(mine: dict, theirs: dict) -> dict:
             "confusion_mine_to_theirs": confusion}
 
 
-EDGE_CUTS = (0.3, 0.4, 0.5, 0.6, 0.7)
+EDGE_CUTS = (0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9)
 
 
 def _connection_by_cut(pairs: list, mine_linked: set, theirs: dict) -> dict:
     """For a draft that kept its probability of an edge (Jev's): agreement, precision and recall on connection at
-    each cut, so the cut can be chosen from my marks; and the chance that a pair I linked scores above one I didn't
-    (AUC, ties half)."""
+    each cut, so the cut can be chosen from my marks; the chance that a pair I linked scores above one I didn't (AUC,
+    ties half); and that chance for each question it answered, deciding or probe, so wordings can be compared."""
     ratio = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
     out = {}
     for cut in EDGE_CUTS:
@@ -651,6 +653,13 @@ def _connection_by_cut(pairs: list, mine_linked: set, theirs: dict) -> dict:
                          "precision": ratio(len(mine_linked & yes), len(yes)),
                          "recall": ratio(len(mine_linked & yes), len(mine_linked))}
     linked, unlinked = [n for n in pairs if n in mine_linked], [n for n in pairs if n not in mine_linked]
-    wins = sum((theirs[a]["p"] > theirs[b]["p"]) + 0.5 * (theirs[a]["p"] == theirs[b]["p"])
-               for a in linked for b in unlinked)
-    return out | {"auc": ratio(wins, len(linked) * len(unlinked))}
+
+    def auc(q: str):
+        wins = sum((theirs[a][q] > theirs[b][q]) + 0.5 * (theirs[a][q] == theirs[b][q])
+                   for a in linked for b in unlinked)
+        return ratio(wins, len(linked) * len(unlinked))
+
+    asked = [q for q, v in theirs[pairs[0]].items() if q != "p" and isinstance(v, float)
+             and all(isinstance(theirs[n].get(q), float) for n in pairs)]
+    return out | {"auc": auc("p"), "auc_by_question": dict(sorted(((q, auc(q)) for q in asked),
+                                                                  key=lambda kv: -(kv[1] or 0)))}

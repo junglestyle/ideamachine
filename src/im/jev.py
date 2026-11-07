@@ -27,15 +27,16 @@ PRICE_IN = 0.042 / 1e6             # $ per input token
 YES, NO = 0.7, 0.3                 # TypeSafe's starting thresholds: between them, the state doesn't settle it
 # A question read as a ranking gets one cut-off instead: at it or above is yes, below it no. Tension: on four sheets
 # (150 pairs, 28 tensions, 10 new; 2026-11-05), 0.45 kept 9 of the 10 new ones and three quarters of all, flagging
-# 52; 0.4 kept no more and flagged 73, 0.5 kept 6 new. A proposal I keep or dismiss, so recall comes first.
-CUT = {"tension": 0.45}
+# 52; 0.4 kept no more and flagged 73, 0.5 kept 6 new. A proposal I keep or dismiss, so recall comes first. An edge:
+# on B4's 129 pairs (2026-11-07) `belongs` passed both bars from 0.78 to 0.83; 0.8 sits inside, and recall is 0.77.
+CUT = {"tension": 0.45, "edge": 0.8}
 
 # What decides. A tension is asked in four wordings of one question and decided by their mean: on the two tension
 # sheets (70 pairs, 14 tensions, 2026-11-04), no single question held above 0.80 AUC on both, the four wordings
 # correlate 0.7 to 0.9, and their mean held 0.79 to 0.81 on both while ranking tensions new to me as well as known
 # ones (pulls_v2 alone favoured known ones, 0.84 against 0.77). The forms asked before (contradiction, change of
 # mind, trade-off, the strongest counting: 0.71 to 0.74) stay as probes. A changed set gets a new name here, which names its drafts.
-QUESTION_SETS = {"tension": "pulls4", "edge": "tight3"}
+QUESTION_SETS = {"tension": "pulls4", "edge": "tight1"}
 QUESTIONS = {
     "tension": {
         "competing_pulls": ("Do `a` and `b` pull a person in directions that would have to be balanced?", None),
@@ -70,20 +71,19 @@ QUESTIONS = {
                       "false": "a says the same as b, or something unrelated to it"}),
         "develops_v2": ("Is `a` built on `b`, going further than `b` does?", None),
     },
-    # B4 (edge_audit): is there an edge between `a` and `b`? Only that is graded (decision 0009), so three wordings
-    # decide by their mean. An edge says two points belong in the same tight neighbourhood; a shared subject is a
-    # lens's, not an edge (0010). connected3 counted a shared subject and asked whether I'd want `b` beside `a`
-    # (AUC 0.926, the weakest); on 129 pairs no cut of it reached both of B4's bars.
+    # B4 (edge_audit): is there an edge between `a` and `b`? Only that is graded (decision 0009). An edge says two
+    # points belong in the same tight neighbourhood; a shared subject is a lens's, not an edge (0010). connected3
+    # counted a shared subject; on 129 pairs no cut of it reached both of B4's bars. tight3 asked this in three
+    # wordings and decided by their mean (2026-11-07, the same 129 pairs re-marked under labels 3): AUC 0.963, but the
+    # mean passed at one cut only (0.74), and choosing its cut on two sheets and scoring the third gave 0.899
+    # agreement and 0.893 precision. `belongs` alone, the one with criteria, passed from 0.78 to 0.83, and held out
+    # the same way gave 0.930 and 0.906 (recall 0.83), so it decides alone; the other two are probes.
     "edge": {
         "belongs": ("Do `a` and `b` belong in the same tight neighbourhood of ideas: does one support, fill in, "
                     "echo or pull against the other?",
                     {"true": "Knowing one bears on how you read the other",
                      "false": "No real connection, or only a shared subject or broad area (relationships, emotions, "
                               "work)"}),
-        "same_cluster": ("Would `a` and `b` belong in the same small cluster of ideas, not just under the same broad "
-                         "subject?", None),
-        "beyond_subject": ("Is there a real connection between `a` and `b`, beyond being about the same subject or a "
-                           "broad area such as relationships, emotions or work?", None),
     },
 }
 
@@ -92,7 +92,7 @@ QUESTIONS = {
 # wordings are scored against my marks without changing what's being compared. PROBE_SET names the draft.
 # Tension's probes2 (2026-11-04) also asked whether the sides differ in structure, only in emphasis, or are an
 # exception, and whether both are mine: all near chance on both sheets, so dropped.
-PROBE_SET = {"tension": "probes4", "analogy": "probes2", "edge": "kinds1"}
+PROBE_SET = {"tension": "probes4", "analogy": "probes2", "edge": "kinds2"}
 BOTH = {"true": "Someone could hold both without strain", "false": "Holding one means giving up some of the other"}
 PROBES = {
     "tension": {
@@ -152,8 +152,13 @@ PROBES = {
                               "technology and relationships?", None),
         "surprising": ("Would someone who knows both `a` and `b` be surprised to see them linked?", None),
     },
-    # The kind of an edge, a suggestion shown on it and never graded (0009): the sheet's definitions, one each.
+    # The kind of an edge, a suggestion shown on it and never graded (0009): the sheet's definitions, one each. And
+    # tight3's other two wordings of a connection (AUC 0.954 and 0.960 against `belongs`'s 0.964).
     "edge": {
+        "same_cluster": ("Would `a` and `b` belong in the same small cluster of ideas, not just under the same broad "
+                         "subject?", None),
+        "beyond_subject": ("Is there a real connection between `a` and `b`, beyond being about the same subject or a "
+                           "broad area such as relationships, emotions or work?", None),
         "supports": ("Is one of `a` and `b` a reason to believe the other: evidence or an argument for it?", None),
         "elaborates": ("Does one of `a` and `b` fill in the other: a case or example of it, how it works, an "
                        "application, a generalization, or something built on it?", None),
@@ -184,7 +189,7 @@ def _mean(p: dict[str, float], names) -> float:
 
 
 def combine(question: str, p: dict[str, float]) -> float:
-    """One probability from the atomic ones: a tension, or an edge, is the mean of its wordings; an analogy needs
+    """One probability from the atomic ones: a tension is the mean of its wordings, an edge its one; an analogy needs
     different subjects and the same structure (the less likely); a summary fails if it adds or misstates, and a
     capture links to an idea if it's the same or develops it (the more likely). The matcher decides from the atomic
     ones."""
