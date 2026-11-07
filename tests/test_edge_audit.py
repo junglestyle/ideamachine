@@ -217,8 +217,8 @@ def test_jev_drafts_a_sheet_from_each_side_as_shown_and_connection_is_scored_at_
     by_cut = d["connection_by_cut"]
     assert by_cut[str(edge_audit.EDGE_CUT)]["agree"] == d["connection"]["agree"]   # its labels are its cut
     mine = {n for n in key if tuple(key[n]["ideas"]) in linked}
-    above = {n for n in key if draft[n]["p"] >= 0.3}
-    assert by_cut["0.3"]["recall"] == round(len(mine & above) / len(mine), 3)
+    above = {n for n in key if draft[n]["p"] >= 0.5}
+    assert by_cut["0.5"]["recall"] == round(len(mine & above) / len(mine), 3)
     assert 0.0 <= by_cut["auc"] <= 1.0
 
 
@@ -259,6 +259,15 @@ def test_sheets_pool_into_one_benchmark_counting_a_shared_pair_once(lattice_with
     assert r["labels"] == {label: k for label, k in expected.items() if k}   # the second sheet may add none
     d = r["drafts"]["m-low"]   # only over the pairs that model drafted
     assert d["pairs"] == len(first) and d["agree"] == 1.0
+
+
+def test_a_sheet_can_leave_out_the_pairs_on_earlier_sheets(lattice_with_clusters, tmp_path):
+    one, two = tmp_path / "one", tmp_path / "two"
+    edge_audit.write(lattice_with_clusters, one, seed=1, size=4)
+    out = edge_audit.write(lattice_with_clusters, two, seed=1, size=4, exclude_folders=[one])
+    pairs = [{tuple(p["ideas"]) for p in json.loads((f / "key.json").read_text())["pairs"].values()}
+             for f in (one, two)]
+    assert out["pairs"] == 4 and not pairs[0] & pairs[1]   # the same seed, yet nothing I'd mark twice
 
 
 def test_a_pair_the_model_cant_answer_is_skipped_and_asked_again_next_time(lattice_with_clusters, tmp_path):

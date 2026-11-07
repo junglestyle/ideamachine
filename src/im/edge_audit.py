@@ -35,6 +35,8 @@ from pathlib import Path
 
 import numpy as np
 
+from im import jev
+
 SIZE = 50
 NEAR_K = 5
 WIDE_K = 10    # how far the apart and levels sets look for neighbours
@@ -169,11 +171,12 @@ def _side(conn, idea_id: str) -> list[str]:
     return lines
 
 
-def build(conn, seed: int = 4, size: int = SIZE) -> tuple[str, dict]:
-    """The sheet's text and its key."""
+def build(conn, seed: int = 4, size: int = SIZE, exclude: set | None = None) -> tuple[str, dict]:
+    """The sheet's text and its key. `exclude` leaves out pairs already on earlier sheets: marking one again is wasted,
+    since pooled sheets count a pair once."""
     rng = random.Random(seed)
     pool = candidates(conn)
-    taken, picked = set(), []
+    taken, picked = set(exclude or ()), []
 
     def take(pairs: list[dict], n: int, kind: str) -> None:
         for p in pairs:
@@ -202,18 +205,22 @@ def build(conn, seed: int = 4, size: int = SIZE) -> tuple[str, dict]:
             lines += [f"{side}. {first.strip()}", *[f"   {x}" if x.startswith(">") else x for x in rest], ""]
         lines += ["mark: ", "note: ", ""]
     key = {"benchmark": "B4", "seed": seed, "size": size, "near_k": NEAR_K, "wide_k": WIDE_K,
+           "excluded": len(exclude or ()),
            "available": {k: len(v) for k, v in pool.items()},
            "pairs": {str(n): p for n, p in enumerate(picked, 1)}}
     return "\n".join(lines), key
 
 
-def write(conn, out: Path, seed: int = 4, size: int = SIZE) -> dict:
-    """Write sheet.md and key.json into `out`. It won't write over a sheet: marks would be lost."""
+def write(conn, out: Path, seed: int = 4, size: int = SIZE, exclude_folders: list[Path] = ()) -> dict:
+    """Write sheet.md and key.json into `out`, without the pairs on the sheets in `exclude_folders`. It won't write
+    over a sheet: marks would be lost."""
+    from im import probe_audit
+
     out.mkdir(parents=True, exist_ok=True)
     sheet, key = out / "sheet.md", out / "key.json"
     if sheet.exists() or key.exists():
         raise SystemExit(f"{out} already has a sheet; score it, or pick another folder")
-    text, k = build(conn, seed, size)
+    text, k = build(conn, seed, size, probe_audit.earlier(list(exclude_folders)))
     sheet.write_text(text)
     key.write_text(json.dumps(k, indent=2))
     sets = [p["set"] for p in k["pairs"].values()]
@@ -527,7 +534,7 @@ def review(folders: list[Path]) -> dict:
     return out
 
 
-EDGE_CUT = 0.5    # Jev's mean of the connected wordings at which a draft says there's an edge; scored at each cut
+EDGE_CUT = jev.CUT["edge"]   # Jev's probability of an edge at which a draft says there is one; scored at each cut
 KIND_CUT = 0.5    # a kind Jev rates at least this likely is its suggestion; otherwise, connected, it's related
 
 
@@ -546,7 +553,7 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, monthly_cap_usd:
     """Jev marks every pair from structured state (each side's quotes and summary, A and B as the sheet shows them),
     one request of atomic questions per pair, into draft-<model>-<question set>-<probe set>-labels<n>[-<policy>].json.
     Each pair keeps every probability beside its label, so connection can be scored at every cut."""
-    from im import egress, jev, llm, probe_audit
+    from im import egress, llm, probe_audit
 
     policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     out_path = folder / (f"draft-{client.model}-{jev.QUESTION_SETS['edge']}-{jev.PROBE_SET['edge']}"
@@ -636,13 +643,13 @@ def agreement(mine: dict, theirs: dict) -> dict:
             "confusion_mine_to_theirs": confusion}
 
 
-EDGE_CUTS = (0.3, 0.4, 0.5, 0.6, 0.7)
+EDGE_CUTS = (0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9)
 
 
 def _connection_by_cut(pairs: list, mine_linked: set, theirs: dict) -> dict:
     """For a draft that kept its probability of an edge (Jev's): agreement, precision and recall on connection at
-    each cut, so the cut can be chosen from my marks; and the chance that a pair I linked scores above one I didn't
-    (AUC, ties half)."""
+    each cut, so the cut can be chosen from my marks; the chance that a pair I linked scores above one I didn't (AUC,
+    ties half); and that chance for each question it answered, deciding or probe, so wordings can be compared."""
     ratio = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
     out = {}
     for cut in EDGE_CUTS:
@@ -651,6 +658,13 @@ def _connection_by_cut(pairs: list, mine_linked: set, theirs: dict) -> dict:
                          "precision": ratio(len(mine_linked & yes), len(yes)),
                          "recall": ratio(len(mine_linked & yes), len(mine_linked))}
     linked, unlinked = [n for n in pairs if n in mine_linked], [n for n in pairs if n not in mine_linked]
-    wins = sum((theirs[a]["p"] > theirs[b]["p"]) + 0.5 * (theirs[a]["p"] == theirs[b]["p"])
-               for a in linked for b in unlinked)
-    return out | {"auc": ratio(wins, len(linked) * len(unlinked))}
+
+    def auc(q: str):
+        wins = sum((theirs[a][q] > theirs[b][q]) + 0.5 * (theirs[a][q] == theirs[b][q])
+                   for a in linked for b in unlinked)
+        return ratio(wins, len(linked) * len(unlinked))
+
+    asked = [q for q, v in theirs[pairs[0]].items() if q != "p" and isinstance(v, float)
+             and all(isinstance(theirs[n].get(q), float) for n in pairs)]
+    return out | {"auc": auc("p"), "auc_by_question": dict(sorted(((q, auc(q)) for q in asked),
+                                                                  key=lambda kv: -(kv[1] or 0)))}
