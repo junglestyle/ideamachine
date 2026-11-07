@@ -2,7 +2,8 @@
 
 _2026-11-06. Status: accepted, not built yet. Amends [0005](0005-presentation-inside-idea-machine.md)'s one
 coordinate space, [0006](0006-graph-in-postgres.md)'s edge key, [0009](0009-edges-connection-graded-kind-suggested.md)'s
-list of kinds, and what triggers synthesis ([0007](0007-neutral-proposals.md)); my decision._
+list of kinds, and what triggers synthesis ([0007](0007-neutral-proposals.md)); my decision. Amended 2026-11-07:
+an analogy is a lens._
 
 ## Context
 
@@ -47,6 +48,15 @@ a relationship between two ideas. Themes become subject lenses rather than a con
 keep it at hand; one I leave is archived, never thrown away, with its definition and what was paid to compute it, and
 the graph version it read. Reopening reuses that; refreshing it is a separate act.
 
+**An analogy is a lens, not a connection.** Analogous ideas are about different subjects, so they're far apart by
+definition; a connection between them would pull distant clusters together in Emanation's layout and join
+neighbourhoods that aren't one. What an analogy gives is its shared structure, named ("easy against perfect", "bad
+work blamed on its maker's state"), and a structure has as many instances as there are, not two. So the analogy pass
+(0009's, Jev's different-subjects and same-structure questions) proposes a pair and names what it shares; one I keep
+becomes a pinned lens seeded with that structure, whose results are its other instances, and which Lattice v2 can
+place like any lens. It writes no connections. Until lenses are built, analogous pairs on B4 are marked `none`, with
+a note starting `analogy:` that names the structure: those notes are the first seeds.
+
 **Strength is counted per connection, not per row.** A lens and weight read each connection as 1. Each kind may add
 a fractional weight (its specificity), set per kind and versioned like the weight formula; it's 0 until something
 shows a kind should pull harder. Adding a kind never adds a connection.
@@ -86,3 +96,5 @@ as one, and becomes a connection only when I keep it.
 - Embeddings stay what nominates pairs and seeds a lens's search, never what decides a connection.
 - Synthesis is triggered by connected neighbourhoods, not weight; the M2 design's "bridging" synthesis is this,
   and isn't a bridge idea.
+- The analogy pass feeds lenses: a kept analogy is a lens seeded with its named structure, not a kind on a
+  connection.
