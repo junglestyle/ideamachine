@@ -331,7 +331,8 @@ def pooled(folders: list[Path]) -> dict:
         for label, k in c.items():
             labels[label] = labels.get(label, 0) + k
     return {"sheets": [str(f) for f in folders], "marked": len(mine),
-            "by_models": sum(DRAFTED in (m["note"] or "") for m in mine.values()), "counted_once": dupes,
+            "by_models": sum(DRAFTED in (m["note"] or "") and REVIEWED not in (m["note"] or "") for m in mine.values()),
+            "counted_once": dupes,
             **({"unreadable": unreadable} if unreadable else {}), "labels": labels,
             "by_set": {s: c for s, c in by_set.items() if c},
             "drafts": {model: agreement({n: m for n, m in mine.items() if n in theirs}, theirs)
@@ -510,12 +511,12 @@ def _models_mark(verdicts: list[str]) -> str:
     return verdicts[0] if len(set(verdicts)) == 1 else "related"
 
 
-def review(folders: list[Path]) -> dict:
+def review(folders: list[Path], every: bool = False) -> dict:
     """Apply what I answered on each folder's review.md, then write a new one: every pair where a chat model
     disagrees with my mark on whether there's an edge and I haven't reviewed it yet, with each model's case. A pair I
     left unmarked is marked from the models when two or more drafted it and agree on whether there's an edge, and is
-    on review.md, with every case, when they don't. A pair two sheets share is reviewed on the first, as pooling
-    counts it."""
+    on review.md, with every case, when they don't. With `every`, the models' marks I haven't reviewed are on it too,
+    to spot-check: left blank, a mark stands. A pair two sheets share is reviewed on the first, as pooling counts it."""
     out, seen = {}, set()
     for folder in folders:
         applied = _apply(folder)
@@ -525,38 +526,46 @@ def review(folders: list[Path]) -> dict:
         lines = [f"# B4 review: where a model disagrees with me ({folder.name})", "",
                  "After `answer:`, write `agree` to take the proposed label, `keep` to keep my mark, or a label. Where "
                  "I left the pair unmarked, the models split: `agree` takes the proposed edge, `none` says there isn't "
-                 "one. Then run `im audit-edges review` again: it applies the answers and writes what's left.", ""]
-        n = drafted = 0
+                 "one. Where the models agree (`mine: <label>, the models'`), a blank answer leaves their mark. Then "
+                 "run `im audit-edges review` again: it applies the answers and writes what's left.", ""]
+        n = drafted = spot = 0
         for num, p in sorted(key.items(), key=lambda kv: int(kv[0])):
             pair, m = tuple(p["ideas"]), mine.get(num, {})
             if pair in seen:
                 continue
             seen.add(pair)
-            label = m.get("label")
+            label, note = m.get("label"), m.get("note") or ""
             said = {model: d[num] for model, d in cases.items() if num in d and d[num]["label"] != "unsure"}
-            if label is None and "unreadable" not in m and len(said) >= 2:
-                if len({_linked(d["label"]) for d in said.values()}) == 1:
-                    sheet = _set_mark(sheet, num, _models_mark([d["label"] for d in said.values()]),
-                                      f"{DRAFTED} {', '.join(said)} agree")
-                    drafted += 1
-                    continue
+            unmarked = label is None and "unreadable" not in m and len(said) >= 2
+            if unmarked and len({_linked(d["label"]) for d in said.values()}) == 1:
+                label, note = _models_mark([d["label"] for d in said.values()]), f"{DRAFTED} {', '.join(said)} agree"
+                sheet = _set_mark(sheet, num, label, note)
+                drafted += 1
+                unmarked = False
+            if unmarked:
                 against = said
                 proposed = [d["label"] for d in said.values() if _linked(d["label"])]
-            elif label in (None, "unsure") or REVIEWED in (m.get("note") or ""):
+            elif label in (None, "unsure") or REVIEWED in note:
                 continue
+            elif DRAFTED in note:
+                if not every:
+                    continue
+                against, proposed = said, [label]
+                spot += 1
             else:
                 against = {model: d for model, d in said.items() if _linked(d["label"]) != _linked(label)}
                 proposed = [d["label"] for d in against.values()]
             if not against:
                 continue
-            n += 1
-            lines += [f"## {num}", "", shown[num], "", f"mine: {label or 'unmarked'}",
-                      f"proposed: {max(proposed, key=proposed.count)}"]
+            n += DRAFTED not in note
+            mark = f"{label}, the models'" if DRAFTED in note else label or "unmarked"
+            lines += [f"## {num}", "", shown[num], "", f"mine: {mark}", f"proposed: {max(proposed, key=proposed.count)}"]
             lines += [f"{model}: {d['label']}. {d.get('why') or '(no case given)'}" for model, d in against.items()]
             lines += ["", "answer: ", ""]
         (folder / "sheet.md").write_text(sheet)
         (folder / "review.md").write_text("\n".join(lines))
-        out[folder.name] = applied | {"drafted": drafted, "to_review": n, "models": sorted(cases)}
+        out[folder.name] = applied | {"drafted": drafted, "to_review": n, **({"spot_check": spot} if every else {}),
+                                      "models": sorted(cases)}
     return out
 
 
