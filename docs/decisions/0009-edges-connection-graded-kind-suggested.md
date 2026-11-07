@@ -1,7 +1,7 @@
 # 0009: An edge is graded on whether it exists; its kind is a suggestion
 
 _2026-11-04. Status: accepted. Changes B4's bar in [ROADMAP-v2.md](../ROADMAP-v2.md) and Jev in
-[SPEC §5](../SPEC.md#5-edge-typing-jev); my decision._
+[SPEC §5](../SPEC.md#5-edge-typing); my decision._
 
 ## Context
 

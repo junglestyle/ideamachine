@@ -43,8 +43,8 @@ in visually.
 
 ## The negative-space map is synthesis, drawn
 
-It doesn't need a new subsystem. The spec already has the parts: embeddings nominate pairs, Jev answers `none` as
-a real answer ([SPEC §5](../SPEC.md#5-edge-typing-jev)), and the synthesis stage writes an idea from a neighbourhood
+It doesn't need a new subsystem. The spec already has the parts: embeddings nominate pairs, the edge model answers
+`none` as a real answer ([SPEC §5](../SPEC.md#5-edge-typing)), and the synthesis stage writes an idea from a neighbourhood
 of connected clusters, which arrives as a proposal (whether that beats proposing its best existing point is an A/B
 test, [0010](../decisions/0010-connections-kinds-lenses.md)). The dashed links are:
 
