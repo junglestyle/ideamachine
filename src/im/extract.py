@@ -11,6 +11,7 @@ import json
 import uuid
 
 from im import egress, feedback, llm, names
+from im.config import ExtractConfig
 
 SCHEMA_VERSION = 1
 STAGE_VERSION = "extract/1"
@@ -438,7 +439,7 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
     return ids
 
 
-def run_stage(conn, client, model: str = "claude-opus-5-5", effort: str = "medium",
+def run_stage(conn, client, model: str = ExtractConfig.model, effort: str = ExtractConfig.effort,
               monthly_cap_usd: float = 20.0, limit: int | None = None, system: str = SYSTEM) -> dict:
     pv = prompt_version(model, effort, system)
     todo = _pending(conn, model, pv)

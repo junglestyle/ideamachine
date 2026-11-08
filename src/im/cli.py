@@ -156,7 +156,7 @@ def _lattice(conn, cfg) -> dict:
 
     try:
         return lattice.match_stage(conn, anthropic.Anthropic(), SentenceEmbedder(cfg.lattice.embedding_model),
-                                   cfg.extract.monthly_cap_usd, cfg.lattice.max_items_per_run)
+                                   cfg.extract.monthly_cap_usd, cfg.lattice.max_items_per_run, cfg.match)
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -170,9 +170,10 @@ def _themes(conn, cfg) -> dict:
     out = {"feedback": themes.apply_feedback(conn)}
     try:
         client = anthropic.Anthropic()
-        out["describe"] = themes.describe_stage(conn, client, cfg.extract.monthly_cap_usd)   # the filer reads them
-        out["file"] = themes.file_stage(conn, client, cfg.extract.monthly_cap_usd)
-        out["propose"] = themes.propose_stage(conn, client, cfg.extract.monthly_cap_usd)
+        # Described first: the filer reads the descriptions.
+        out["describe"] = themes.describe_stage(conn, client, cfg.extract.monthly_cap_usd, cfg.themes)
+        out["file"] = themes.file_stage(conn, client, cfg.extract.monthly_cap_usd, cfg.themes)
+        out["propose"] = themes.propose_stage(conn, client, cfg.extract.monthly_cap_usd, cfg.themes)
     except anthropic.AnthropicError as e:
         out["stopped"] = f"Claude unavailable: {e}"
     return out
@@ -185,7 +186,7 @@ def _scores(conn, cfg) -> dict:
     from im import scores
 
     try:
-        return scores.score_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd)
+        return scores.score_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd, cfg.scores)
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -197,7 +198,7 @@ def _sensitivity(conn, cfg) -> dict:
     from im import sensitivity
 
     try:
-        return sensitivity.tag_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd)
+        return sensitivity.tag_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd, cfg.sensitivity)
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -212,7 +213,7 @@ def _vocab(conn, cfg) -> dict:
         client = anthropic.Anthropic()
     except anthropic.AnthropicError:
         client = None
-    return vocab.refresh(conn, client, cfg.extract.monthly_cap_usd)
+    return vocab.refresh(conn, client, cfg.extract.monthly_cap_usd, chat=cfg.vocab)
 
 
 def _digest(conn, cfg, week=None, again=False) -> dict:
@@ -222,7 +223,7 @@ def _digest(conn, cfg, week=None, again=False) -> dict:
     from im import digest
 
     try:
-        return digest.digest_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd, week, again)
+        return digest.digest_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd, week, again, cfg.digest)
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -296,7 +297,7 @@ def cmd_pending(args) -> None:
                "already_extracted_would_resend": sum(p.episode_id in done for p in todo),
                "their_last_reads_cost_usd": round(float(last_read or 0), 2),
                "items_to_match": len(lattice._pending_items(conn)),
-               "ideas_to_file": len(themes._unthemed(conn, themes.themes_version(conn)))}
+               "ideas_to_file": len(themes._unthemed(conn, themes.themes_version(conn, cfg.themes)))}
     _print(out)
     if args.expect_none_resent and out["already_extracted_would_resend"]:
         raise SystemExit(1)

@@ -12,6 +12,7 @@ import hashlib
 import json
 
 from im import llm, themes
+from im.config import ModelConfig
 
 BATCH = 50
 QUOTES = 3
@@ -41,8 +42,8 @@ SCHEMA = {
 }
 
 
-def tagger_version() -> str:
-    return themes.version(SYSTEM, SCHEMA, themes.MODEL, themes.EFFORT)
+def tagger_version(chat: ModelConfig = ModelConfig()) -> str:
+    return themes.version(SYSTEM, SCHEMA, chat.model, chat.effort)
 
 
 def _hash(*parts) -> str:
@@ -67,10 +68,10 @@ def _todo(conn, tv: str) -> tuple[list, list]:
     return ideas, th
 
 
-def tag_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
+def tag_stage(conn, client, monthly_cap_usd: float = 20.0, chat: ModelConfig = ModelConfig()) -> dict:
     """Tag what's new or changed, a batch at a time. A batch refused or failed is tagged on a later run; the
-    batches after it go on."""
-    tv = tagger_version()
+    batches after it go on. `chat`: the model and effort ([sensitivity] in im.toml)."""
+    tv = tagger_version(chat)
     ideas, th = _todo(conn, tv)
     stats = {"tagger_version": tv, "pending": len(ideas) + len(th), "tagged": 0, "sensitive": 0, "refused": 0,
              "failed": 0, "stopped": None}
@@ -82,7 +83,7 @@ def tag_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
         text = ("Ideas:\n" + ("\n".join(f"{n}. {line}" for n, (_, line, _) in enumerate(bi, 1)) or "(none)")
                 + "\n\nThemes:\n" + ("\n".join(f"{n}. {line}" for n, (_, line, _) in enumerate(bt, 1)) or "(none)"))
         try:
-            a = themes.ask(conn, client, SYSTEM, SCHEMA, text, f"sensitivity:{tv}", [i for i, _, _ in bi],
+            a = themes.ask(conn, client, chat, SYSTEM, SCHEMA, text, f"sensitivity:{tv}", [i for i, _, _ in bi],
                            monthly_cap_usd)
         except llm.Stop as e:
             stats["stopped"] = str(e)[:200]

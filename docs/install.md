@@ -59,10 +59,26 @@ Settings are env vars:
   unless every host it (or `PGHOST`) names is localhost, a loopback address or a socket directory. Each test gets a
   fresh `im_test` database and stream directory, and none of the other settings here.
 
-`IM_CONFIG` can name a TOML file that overrides the defaults in `src/im/config.py` (`[segment]` and `[triage]`).
-Every segmentation value goes into the episodes' `stage_version`, so changing one re-derives episodes on the
-next run. Triage rows record the model, its weights revision and a hash of the questions, so a model or
+`IM_CONFIG` can name a TOML file that overrides the defaults in `src/im/config.py`. An unknown key in a section
+stops the run. Every segmentation value goes into the episodes' `stage_version`, so changing one re-derives episodes
+on the next run. Triage rows record the model, its weights revision and a hash of the questions, so a model or
 question change re-triages.
+
+Every stage that asks Claude takes its model and effort from the file:
+
+| Section | Stage | `model` | `effort` |
+|---|---|---|---|
+| `[extract]` | extraction (also `prompt`, `interests`, `monthly_cap_usd`, `max_episodes_per_run`) | `claude-opus-5-5` | `medium` |
+| `[match]` | the lattice's matcher | `claude-opus-5-5` | `low` |
+| `[themes]` | describing, filing and proposing themes | `claude-opus-5-5` | `low` |
+| `[scores]` | the rubric | `claude-opus-5-5` | `low` |
+| `[sensitivity]` | the tags demo mode hides by | `claude-opus-5-5` | `low` |
+| `[vocab]` | vocabulary repairs and archive picks | `claude-opus-5-5` | `low` |
+| `[digest]` | the weekly digest | `claude-opus-5-5` | `low` |
+
+Both go into the stage's version. Changing extraction's re-reads every episode, so try it first with `im trial`.
+Changing the scores', sensitivity's or vocab's asks again about every idea, and the themes' about every idea that
+fits no theme. The matcher and the digest use a new one from then on; what they've already done stays.
 
 Set `CUDA_VISIBLE_DEVICES=""` on a box with a GPU to measure what the NAS's CPU will do.
 

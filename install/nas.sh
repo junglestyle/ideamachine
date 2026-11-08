@@ -154,10 +154,36 @@ if [ ! -f "$NAS_CONFIG/im/im.toml" ]; then
     cat > "$NAS_CONFIG/im/im.toml" <<'TOML'
 # Idea Machine's config. Every key and its default is in src/im/config.py. Kept out of the repo: it can hold
 # personal details, such as extract.interests. Changing extract.prompt or extract.interests re-reads every
-# episode with Claude, so try a prompt first: im trial <prompt>.
+# episode with Claude, so try a prompt first: im trial <prompt>. A stage's model and effort are part of its
+# version: changing them re-asks scores, sensitivity and vocab about every idea, and themes about every idea
+# that fits no theme; the matcher and the digest use them from then on.
 [extract]
 # prompt = "v1"
 # interests = ""
+
+[match]
+# model = "claude-opus-5-5"
+# effort = "low"
+
+[themes]
+# model = "claude-opus-5-5"
+# effort = "low"
+
+[scores]
+# model = "claude-opus-5-5"
+# effort = "low"
+
+[sensitivity]
+# model = "claude-opus-5-5"
+# effort = "low"
+
+[vocab]
+# model = "claude-opus-5-5"
+# effort = "low"
+
+[digest]
+# model = "claude-opus-5-5"
+# effort = "low"
 TOML
     echo "created $NAS_CONFIG/im/im.toml"
 fi

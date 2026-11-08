@@ -16,8 +16,8 @@ import json
 import string
 
 from im import egress, llm
+from im.config import ModelConfig
 
-MODEL, EFFORT = "claude-opus-5-5", "low"
 BATCH = 25
 PROPOSE_MIN = 6           # unthemed ideas, not yet seen by a proposal pass, before proposing
 MIN_GROUP = 3             # a proposed theme needs at least this many ideas
@@ -75,8 +75,8 @@ def current_themes(conn) -> list[tuple]:
                            ORDER BY pinned DESC, name""").fetchall()
 
 
-def themes_version(conn) -> str:
-    return version(FILE_SYSTEM, FILE_SCHEMA, MODEL, EFFORT,
+def themes_version(conn, chat: ModelConfig = ModelConfig()) -> str:
+    return version(FILE_SYSTEM, FILE_SCHEMA, chat.model, chat.effort,
                    sorted((str(t), n, d) for t, n, d in current_themes(conn)))
 
 
@@ -84,11 +84,11 @@ def _letters(n: int) -> list[str]:
     return [string.ascii_uppercase[i] if i < 26 else f"Z{i - 25}" for i in range(n)]
 
 
-def ask(conn, client, system: str, schema: dict, text: str, prompt_version: str, idea_ids: list,
+def ask(conn, client, chat: ModelConfig, system: str, schema: dict, text: str, prompt_version: str, idea_ids: list,
         monthly_cap_usd: float) -> egress.Answer:
-    """A request about lattice ideas, on the lattice's model, logged with the segments behind the ideas it shows.
-    Raises llm.Stop at the cap or when Claude can't answer now; a request that failed comes back failed."""
-    return egress.ask(conn, client, MODEL, EFFORT, system, schema, text, prompt_version=prompt_version,
+    """A request about lattice ideas, on the stage's model (`chat`), logged with the segments behind the ideas it
+    shows. Raises llm.Stop at the cap or when Claude can't answer now; a request that failed comes back failed."""
+    return egress.ask(conn, client, chat.model, chat.effort, system, schema, text, prompt_version=prompt_version,
                       segment_ids=egress.segments_of(conn, idea_ids), monthly_cap_usd=monthly_cap_usd)
 
 
@@ -115,10 +115,11 @@ def refile_corrected(conn) -> int:
     return len(ids)
 
 
-def file_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
+def file_stage(conn, client, monthly_cap_usd: float = 20.0, chat: ModelConfig = ModelConfig()) -> dict:
+    """`chat`, here and in the other stages: the model and effort ([themes] in im.toml), part of every version."""
     refiled = refile_corrected(conn)
 
-    tv = themes_version(conn)
+    tv = themes_version(conn, chat)
     themes = current_themes(conn)
     todo = _unthemed(conn, tv)
     stats = {"themes_version": tv, "pending": len(todo), "refiled_after_correction": refiled, "assigned": 0, "none": 0,
@@ -132,7 +133,7 @@ def file_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
         batch = todo[start:start + BATCH]
         text = header + "\n\nIdeas:\n" + "\n".join(f"{n}. {t}: {s}" for n, (_, t, s) in enumerate(batch, 1))
         try:
-            a = ask(conn, client, FILE_SYSTEM, FILE_SCHEMA, text, f"themes-file:{tv}", [b[0] for b in batch],
+            a = ask(conn, client, chat, FILE_SYSTEM, FILE_SCHEMA, text, f"themes-file:{tv}", [b[0] for b in batch],
                     monthly_cap_usd)
         except llm.Stop as e:
             stats["stopped"] = str(e)[:200]
@@ -159,7 +160,7 @@ def file_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
     return stats
 
 
-def propose_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
+def propose_stage(conn, client, monthly_cap_usd: float = 20.0, chat: ModelConfig = ModelConfig()) -> dict:
     """Group ideas that fit no theme into proposed themes, once enough new ones have piled up."""
     loose = conn.execute(
         """SELECT d.idea_id, d.title, d.statement, c.proposal_seen FROM pub.ideas d
@@ -174,10 +175,10 @@ def propose_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
     text = ("Existing themes:\n" + "\n".join(f"- {n}" for _, n, _ in current_themes(conn))
             + "\n\nRejected names:\n" + ("\n".join(f"- {n}" for n in rejected) or "(none)")
             + "\n\nIdeas that fit no theme:\n" + "\n".join(f"{n}. {t}: {s}" for n, (_, t, s, _) in enumerate(loose, 1)))
-    pv = version(PROPOSE_SYSTEM, PROPOSE_SCHEMA, MODEL, EFFORT)
+    pv = version(PROPOSE_SYSTEM, PROPOSE_SCHEMA, chat.model, chat.effort)
     try:
-        a = ask(conn, client, PROPOSE_SYSTEM, PROPOSE_SCHEMA, text, f"themes-propose:{pv}", [x[0] for x in loose],
-                monthly_cap_usd)
+        a = ask(conn, client, chat, PROPOSE_SYSTEM, PROPOSE_SCHEMA, text, f"themes-propose:{pv}",
+                [x[0] for x in loose], monthly_cap_usd)
     except llm.Stop as e:
         stats["stopped"] = str(e)[:200]
         return stats
@@ -228,7 +229,7 @@ def apply_feedback(conn) -> dict:
     return done
 
 
-def describe_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
+def describe_stage(conn, client, monthly_cap_usd: float = 20.0, chat: ModelConfig = ModelConfig()) -> dict:
     """Give themes without a description (ones I split off) one, from their name and up to 12 of their ideas."""
     todo = conn.execute("SELECT theme_id, name FROM im.themes WHERE description IS NULL ORDER BY created_at").fetchall()
     stats = {"pending": len(todo), "described": 0, "failed": 0, "stopped": None}
@@ -243,8 +244,9 @@ def describe_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
         blocks.append(f"{n}. {name}\n" + ("\n".join(f"   - {t}" for _, t in rows) or "   (no ideas yet)"))
     text = "Themes:\n" + "\n".join(blocks)
     try:
-        a = ask(conn, client, DESCRIBE_SYSTEM, DESCRIBE_SCHEMA, text,
-                f"themes-describe:{version(DESCRIBE_SYSTEM, DESCRIBE_SCHEMA, MODEL, EFFORT)}", ideas, monthly_cap_usd)
+        a = ask(conn, client, chat, DESCRIBE_SYSTEM, DESCRIBE_SCHEMA, text,
+                f"themes-describe:{version(DESCRIBE_SYSTEM, DESCRIBE_SCHEMA, chat.model, chat.effort)}", ideas,
+                monthly_cap_usd)
     except llm.Stop as e:
         stats["stopped"] = str(e)[:200]
         return stats

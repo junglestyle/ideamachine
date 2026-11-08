@@ -15,6 +15,7 @@ from pathlib import Path
 from wordfreq import zipf_frequency
 
 from im import llm, themes
+from im.config import ModelConfig
 
 RARE = 2.7               # Zipf frequency: about 1 in 2 million words. "moderation" is 3.5, "gnomon" 1.5
 MIN_LEN = 4
@@ -49,8 +50,8 @@ FIND_SCHEMA = {
 }
 
 
-def finder_version() -> str:
-    return themes.version(FIND_SYSTEM, FIND_SCHEMA, PICK_SYSTEM, PICK_SCHEMA, themes.MODEL, themes.EFFORT, RARE)
+def finder_version(chat: ModelConfig = ModelConfig()) -> str:
+    return themes.version(FIND_SYSTEM, FIND_SCHEMA, PICK_SYSTEM, PICK_SCHEMA, chat.model, chat.effort, RARE)
 
 
 def rare_words(text: str) -> list[str]:
@@ -126,10 +127,10 @@ def _repair_todo(conn, fv: str) -> list[tuple]:
     return out
 
 
-def repair_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
+def repair_stage(conn, client, monthly_cap_usd: float = 20.0, chat: ModelConfig = ModelConfig()) -> dict:
     """Ask Claude which rare words in an idea its quotes misheard, for ideas where that's possible. A batch refused
     or failed isn't recorded as checked, so it's asked again on a later run; the batches after it go on."""
-    fv = finder_version()
+    fv = finder_version(chat)
     todo = _repair_todo(conn, fv)
     ask = [r for r in todo if r[1] is not None]
     stats = {"checked": len(todo), "asked": len(ask), "repairs": 0, "refused": 0, "failed": 0, "stopped": None}
@@ -144,8 +145,8 @@ def repair_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
         text = "\n\n".join(f"Idea {n}. {t}: {s}\n" + "\n".join(f"  Quote {k}: {q}" for k, q in enumerate(qs, 1))
                            for n, (_, t, s, _, qs, _) in enumerate(batch, 1))
         try:
-            a = themes.ask(conn, client, FIND_SYSTEM, FIND_SCHEMA, text, f"vocab-repair:{fv}", [b[0] for b in batch],
-                           monthly_cap_usd)
+            a = themes.ask(conn, client, chat, FIND_SYSTEM, FIND_SCHEMA, text, f"vocab-repair:{fv}",
+                           [b[0] for b in batch], monthly_cap_usd)
         except llm.Stop as e:
             stats["stopped"] = str(e)[:200]
             break
@@ -174,9 +175,9 @@ def repair_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
     return stats
 
 
-def pick_archive(conn, client, monthly_cap_usd: float = 20.0) -> dict:
+def pick_archive(conn, client, monthly_cap_usd: float = 20.0, chat: ModelConfig = ModelConfig()) -> dict:
     """Have Claude pick, from the archive's rare words, the ones speech-to-text would get wrong; once per list."""
-    fv = finder_version()
+    fv = finder_version(chat)
     rows = archive(conn)
     words = sorted({w for w, _, _ in rows}, key=str.lower)
     h = hashlib.sha256(json.dumps([words, fv]).encode()).hexdigest()[:16]
@@ -188,7 +189,7 @@ def pick_archive(conn, client, monthly_cap_usd: float = 20.0) -> dict:
         else:
             text = "Words:\n" + "\n".join(words)
             try:
-                a = themes.ask(conn, client, PICK_SYSTEM, PICK_SCHEMA, text, f"vocab-pick:{fv}",
+                a = themes.ask(conn, client, chat, PICK_SYSTEM, PICK_SCHEMA, text, f"vocab-pick:{fv}",
                                sorted({i for _, i, _ in rows}), monthly_cap_usd)
             except llm.Stop as e:
                 stats["stopped"] = str(e)[:200]
@@ -209,15 +210,17 @@ def pick_archive(conn, client, monthly_cap_usd: float = 20.0) -> dict:
     return stats
 
 
-def refresh(conn, client=None, monthly_cap_usd: float = 20.0, path: str | None = None) -> dict:
-    """Recompute corrections, and with a client the archive picks and repairs; then write the file."""
+def refresh(conn, client=None, monthly_cap_usd: float = 20.0, path: str | None = None,
+            chat: ModelConfig = ModelConfig()) -> dict:
+    """Recompute corrections, and with a client the archive picks and repairs (on `chat`, [vocab] in im.toml); then
+    write the file."""
     with conn.transaction():
         c = corrections(conn)
         _replace(conn, "correction", c)
     stats = {"corrections": len(c)}
     if client is not None:
-        stats["archive"] = pick_archive(conn, client, monthly_cap_usd)
-        stats["repair"] = repair_stage(conn, client, monthly_cap_usd)
+        stats["archive"] = pick_archive(conn, client, monthly_cap_usd, chat)
+        stats["repair"] = repair_stage(conn, client, monthly_cap_usd, chat)
     path = path or os.environ.get("IM_VOCAB_PATH")
     if path:
         stats["written"] = write(conn, Path(path))

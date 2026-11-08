@@ -14,11 +14,11 @@ from pathlib import Path
 import numpy as np
 
 from im import citations, egress, llm
+from im.config import ModelConfig
 
 MATCH_K = 5                    # nearest ideas shown to Claude
 RELATED_K, RELATED_MIN = 3, 0.70   # related edges: top 3 neighbours at cosine >= 0.70. bge-small puts a typical
                                    # nearest neighbour at 0.68 (p90 0.73) on my ideas; tune by eye in Lattice.
-MATCH_MODEL, MATCH_EFFORT = "claude-opus-5-5", "low"
 
 MATCH_SYSTEM = """You maintain my idea lattice: a long-lived collection of ideas captured from my conversations \
 and notes. You get one newly captured item and the existing ideas most similar to it. Decide which it is:
@@ -42,8 +42,8 @@ MATCH_SCHEMA = {
 }
 
 
-def matcher_version() -> str:
-    digest = hashlib.sha256(json.dumps([MATCH_SYSTEM, MATCH_SCHEMA, MATCH_MODEL, MATCH_EFFORT, MATCH_K],
+def matcher_version(chat: ModelConfig = ModelConfig()) -> str:
+    digest = hashlib.sha256(json.dumps([MATCH_SYSTEM, MATCH_SCHEMA, chat.model, chat.effort, MATCH_K],
                                        sort_keys=True).encode()).hexdigest()[:12]
     return f"match-1:{digest}"
 
@@ -219,8 +219,10 @@ def _text(item: tuple, candidates: list[tuple]) -> str:
 NEW = {"decision": "new", "candidate": 0, "title": "", "statement": ""}
 
 
-def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: int | None = None) -> dict:
-    version = matcher_version()
+def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: int | None = None,
+                chat: ModelConfig = ModelConfig()) -> dict:
+    """`chat`: the model that decides, and its effort ([match] in im.toml); a change is a new matcher_version."""
+    version = matcher_version(chat)
     carried = carry_by_observation(conn)
     items = _pending_items(conn)
     stats = {"matcher": version, "carried": carried, "pending": len(items), "new": 0, "same_as": 0, "evolves": 0,
@@ -251,7 +253,7 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
         egress_id, answer = None, NEW   # the very first idea: nothing to compare with
         if candidates:
             try:
-                a = egress.ask(conn, client, MATCH_MODEL, MATCH_EFFORT, MATCH_SYSTEM, MATCH_SCHEMA,
+                a = egress.ask(conn, client, chat.model, chat.effort, MATCH_SYSTEM, MATCH_SCHEMA,
                                _text(item, candidates), segment_ids=item[6], prompt_version=version,
                                monthly_cap_usd=monthly_cap_usd, episode_id=item[1], max_tokens=4000)
             except llm.Stop as e:
