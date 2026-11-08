@@ -419,8 +419,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   edit it (024).
 - **Lattice.** The legacy app, in its own repo, that reads `pub`: the map, review and the first MCP server ([0005]).
   **Status:** feature-frozen at `v1`, and archived at M6.
-- **Trellis.** The stable view: pinned lenses laid out by hand, called Lattice v2 in [0010] ([0010]:70-73,
-  ROADMAP-v2 §4). The first are a grid of lenses and the Tree of Life. **Status:** not built.
+- **Trellis.** The stable family of views in which pinned lenses are arranged by hand: a lens board. Called Lattice
+  v2 in [0010] ([0010]:70-73, ROADMAP-v2 §4). The first are a grid of lenses and the Tree of Life. _Not_ the graph,
+  and _not_ a collection of lenses. **Status:** not built.
 - **Tree of Life, correspondence.** The Tree of Life is the Qabalistic correspondence table, condensed into
   definitions and laid out on the sephirot and the paths between them. A correspondence is one entry of that table,
   such as 1/Kether, and each becomes a lens (ROADMAP-v2.md:57-58, [0010]:70-73).
@@ -769,8 +770,9 @@ analogy pass only proposes.
 - The Lattice app ([0005]), and Lattice v2 ([0010]:70).
 - `src/im/lattice.py`: the matcher, the embedding neighbors and the positions.
 
-**Use:** Lattice names only the legacy app. The stable view of pinned lenses is Trellis (owner's decision,
-2026-11-07), and the data is the graph. The module's name stays.
+**Use:** Lattice names only the legacy app. Trellis names the stable family of views where pinned lenses are
+arranged by hand (owner's decision, 2026-11-07); "lens board" describes it. The data is the graph: never call the
+graph or a set of lenses a trellis. The module's name stays.
 
 ### evolves, elaborates, develops, extends
 
