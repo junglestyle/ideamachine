@@ -433,7 +433,7 @@ def cmd_hard_set(args) -> None:
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
         scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
-        _print(hard_set.write(conn, Path(args.folder), args.per_case, args.seed, scrubber))
+        _print(hard_set.write(conn, Path(args.folder), args.per_case, args.seed, scrubber, args.controls))
 
 
 def cmd_audit_misses(args) -> None:
@@ -847,6 +847,7 @@ def main(argv=None) -> None:
                         "it (sends nothing)")
     hs.add_argument("folder", help="where the episodes and index.json go (it quotes people: keep it in saved/)")
     hs.add_argument("--per-case", type=int, default=6, help="episodes per case (default 6)")
+    hs.add_argument("--controls", type=int, default=0, help="also this many episodes from the trials' random sample")
     hs.add_argument("--seed", type=int, default=1, help="the shuffle's seed")
     hs.add_argument("--policy", choices=["B", "C"], default="C", help="C (default) pseudonymizes names said too")
     hs.set_defaults(func=cmd_hard_set)
