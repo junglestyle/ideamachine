@@ -424,6 +424,18 @@ def cmd_audit_probe(args) -> None:
                                  args.pool or probe_audit.JEV_POOL, cfg.extract.monthly_cap_usd))
 
 
+def cmd_hard_set(args) -> None:
+    """A deliberate hard set of episodes for checking an extraction prompt, each as extraction would send it."""
+    from pathlib import Path
+
+    from im import hard_set, names
+
+    cfg = config.load()
+    with db.connect(db.pipeline_dsn()) as conn:
+        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
+        _print(hard_set.write(conn, Path(args.folder), args.per_case, args.seed, scrubber))
+
+
 def cmd_audit_misses(args) -> None:
     """A blind sheet of the reference's solid captures, missed or found by a cheaper model in a trial; my marks."""
     from pathlib import Path
@@ -830,6 +842,14 @@ def main(argv=None) -> None:
     am.add_argument("--seed", type=int, default=13, help="sheet: the sample and shuffle's seed")
     am.add_argument("--size", type=int, help="sheet: how many misses (default: all), beside as many found")
     am.set_defaults(func=cmd_audit_misses)
+    hs = sub.add_parser("hard-set", help="a deliberate hard set of episodes (irony, fragments, relayed thoughts, short "
+                        "thoughts, ones I only acknowledge, ones answering someone), each as extraction would send "
+                        "it (sends nothing)")
+    hs.add_argument("folder", help="where the episodes and index.json go (it quotes people: keep it in saved/)")
+    hs.add_argument("--per-case", type=int, default=6, help="episodes per case (default 6)")
+    hs.add_argument("--seed", type=int, default=1, help="the shuffle's seed")
+    hs.add_argument("--policy", choices=["B", "C"], default="C", help="C (default) pseudonymizes names said too")
+    hs.set_defaults(func=cmd_hard_set)
     bm = sub.add_parser("bench-match", help="B1: replay Opus's logged match decisions through Jev (sends to Jev), "
                         "then score its agreement with Opus")
     bm.add_argument("action", choices=["run", "score"])
