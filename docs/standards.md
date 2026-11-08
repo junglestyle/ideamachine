@@ -35,6 +35,9 @@ What the pipeline keeps true, whatever the stage:
 - Lean on Postgres before writing your own: `im run`'s import, purge and segmentation share one transaction,
   embeddings live in pgvector, and roles draw the boundaries (`im_pipeline` owns `im.*`; `lattice_app` reads `pub` and
   only appends feedback).
+- Outside work on extraction is read for ideas, not copied: the AI Co-Ethnographer (`aicoe`) is AGPL-3, and the
+  knowledge-ingestion-pipeline has no license (all rights reserved). psy-qm-skills (MIT) and the hypotheses/claims
+  benchmark (Apache-2.0) can be reused with their notices, but nothing here needs them. Write our own.
 
 ## Structure
 
