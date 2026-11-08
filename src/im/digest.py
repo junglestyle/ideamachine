@@ -11,6 +11,7 @@ me. The digest keeps the segment IDs behind every idea it was shown, so forgetti
 from datetime import date, datetime, time, timedelta
 
 from im import egress, llm, themes
+from im.config import ModelConfig
 
 TOP = 15          # the top of the ranking, beside the week's own ideas, for context
 KINDS = ("recurring", "convergence", "sleeper", "project", "outside_value")
@@ -46,8 +47,8 @@ SCHEMA = {
 }
 
 
-def prompt_version() -> str:
-    return themes.version(SYSTEM, SCHEMA, themes.MODEL, themes.EFFORT)
+def prompt_version(chat: ModelConfig = ModelConfig()) -> str:
+    return themes.version(SYSTEM, SCHEMA, chat.model, chat.effort)
 
 
 def last_week(today: date | None = None) -> date:
@@ -160,11 +161,12 @@ def payload(conn, week: date) -> tuple[str, list]:
     return "\n".join(text), [r[0] for r in ideas]
 
 
-def digest_stage(conn, client, monthly_cap_usd: float = 20.0, week: date | None = None, again: bool = False) -> dict:
+def digest_stage(conn, client, monthly_cap_usd: float = 20.0, week: date | None = None, again: bool = False,
+                 chat: ModelConfig = ModelConfig()) -> dict:
     """Write the week's digest (by default the last completed week) unless it exists. It waits while the week has
     speech extraction or matching hasn't got to (the cap, an outage, a backlog), and is written on a later run: a
     digest written then would miss those ideas for good. A week with nothing said gets a short digest without asking
-    Claude."""
+    Claude. `chat`: the model and effort ([digest] in im.toml)."""
     week = week or last_week()
     stats = {"week": week.isoformat(), "written": False, "points": 0, "failed": 0, "stopped": None}
     if conn.execute("SELECT 1 FROM im.digests WHERE week_start = %s", (week,)).fetchone() and not again:
@@ -174,12 +176,12 @@ def digest_stage(conn, client, monthly_cap_usd: float = 20.0, week: date | None 
         stats["waiting"] = True
         return stats
     text, ids = payload(conn, week)
-    pv = prompt_version()
+    pv = prompt_version(chat)
     if not _said(conn, start, end) and not _added(conn, start, end):
         answer, segs = {"summary": "Nothing new was said this week.", "points": []}, []
     else:
         try:
-            a = themes.ask(conn, client, SYSTEM, SCHEMA, text, pv, ids, monthly_cap_usd)
+            a = themes.ask(conn, client, chat, SYSTEM, SCHEMA, text, pv, ids, monthly_cap_usd)
         except llm.Stop as e:
             stats["stopped"] = str(e)[:200]
             return stats

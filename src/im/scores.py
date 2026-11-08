@@ -10,6 +10,7 @@ import hashlib
 import json
 
 from im import llm, themes
+from im.config import ModelConfig
 
 BATCH = 25
 CRITERIA = ("generality", "novelty", "compression", "outside_value")
@@ -40,8 +41,8 @@ RUBRIC_SCHEMA = {
 }
 
 
-def rubric_version() -> str:
-    return themes.version(RUBRIC_SYSTEM, RUBRIC_SCHEMA, themes.MODEL, themes.EFFORT)
+def rubric_version(chat: ModelConfig = ModelConfig()) -> str:
+    return themes.version(RUBRIC_SYSTEM, RUBRIC_SCHEMA, chat.model, chat.effort)
 
 
 def _hash(title: str, statement: str) -> str:
@@ -57,18 +58,18 @@ def _todo(conn, rv: str) -> list[tuple]:
     return [(i, t, st) for i, t, st, h, v in rows if v != rv or h != _hash(t, st)]
 
 
-def score_stage(conn, client, monthly_cap_usd: float = 20.0) -> dict:
+def score_stage(conn, client, monthly_cap_usd: float = 20.0, chat: ModelConfig = ModelConfig()) -> dict:
     """Score what's new or changed, a batch at a time. A batch refused or failed is scored on a later run; the
     batches after it go on. A score off the 1-5 scale is read as the end it's past: left unscored, the idea would be
-    asked about, and paid for, again every run."""
-    rv = rubric_version()
+    asked about, and paid for, again every run. `chat`: the model and effort ([scores] in im.toml)."""
+    rv = rubric_version(chat)
     todo = _todo(conn, rv)
     stats = {"rubric_version": rv, "pending": len(todo), "scored": 0, "refused": 0, "failed": 0, "stopped": None}
     for start in range(0, len(todo), BATCH):
         batch = todo[start:start + BATCH]
         text = "Ideas:\n" + "\n".join(f"{n}. {t}: {st}" for n, (_, t, st) in enumerate(batch, 1))
         try:
-            a = themes.ask(conn, client, RUBRIC_SYSTEM, RUBRIC_SCHEMA, text, rv, [i for i, _, _ in batch],
+            a = themes.ask(conn, client, chat, RUBRIC_SYSTEM, RUBRIC_SCHEMA, text, rv, [i for i, _, _ in batch],
                            monthly_cap_usd)
         except llm.Stop as e:
             stats["stopped"] = str(e)[:200]

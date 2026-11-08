@@ -156,12 +156,12 @@ def answer_distributions(logprobs: list[dict], content: str, qs: dict) -> dict[s
 
 class LLMBackend:
     """A local instruct model through Ollama, with schema-constrained JSON answers and probabilities
-    from the tokens' log-probabilities. Nothing leaves the machine Ollama runs on."""
+    from the tokens' log-probabilities. Nothing leaves the machine Ollama runs on. Its model, think level and
+    context come from [triage] in im.toml (config.TriageConfig)."""
 
     name = "llm"
 
-    def __init__(self, model: str = "gpt-oss:20b", url: str = "http://localhost:11434", think: str | None = "low",
-                 num_ctx: int = 16384, timeout: float = 600):
+    def __init__(self, model: str, url: str, think: str | None, num_ctx: int, timeout: float = 600):
         import urllib.request
 
         self.url, self.think, self.num_ctx, self.timeout = url.rstrip("/"), think, num_ctx, timeout

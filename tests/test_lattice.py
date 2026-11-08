@@ -10,6 +10,7 @@ import pytest
 
 from im import extract, fixtures, lattice, observations, pipeline
 from im.checks import run_checks
+from im.config import ModelConfig
 
 from helpers import assert_invariants, run, segment_of, table
 from test_extract import FakeClaude
@@ -215,6 +216,13 @@ def test_a_match_cut_off_is_logged_and_paid_for_and_the_other_captures_are_match
     assert logged == [(3, 1)]
     again = lattice.match_stage(seeded, FakeMatcher(), HashEmbedder())   # the one cut off is asked again
     assert again["pending"] == 1 and again["failed"] == 0
+
+
+def test_the_matchers_version_follows_its_configured_model():
+    # Every match so far is filed under this; the defaults must keep it.
+    assert lattice.matcher_version() == lattice.matcher_version(ModelConfig()) == "match-1:f9f0f4514533"
+    for other in (ModelConfig(model="claude-sonnet-5-5"), ModelConfig(effort="medium")):
+        assert lattice.matcher_version(other) != lattice.matcher_version()
 
 
 def test_lattice_app_reads_pub_and_only_appends_feedback(seeded, admin):

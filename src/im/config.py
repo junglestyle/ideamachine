@@ -51,6 +51,15 @@ class ExtractConfig:
 
 
 @dataclass(frozen=True)
+class ModelConfig:
+    """The model a stage asks, and its effort: [match], [themes], [scores], [sensitivity], [vocab], [digest]. Both go
+    into the stage's version: a change re-asks what that stage keys on its version (every score, tag and vocab check;
+    every idea that fits no theme); the matcher and the digest use it from then on."""
+    model: str = "claude-opus-5-5"
+    effort: str = "low"
+
+
+@dataclass(frozen=True)
 class LatticeConfig:
     enabled: bool = True
     embedding_model: str = "BAAI/bge-small-en-v1.5"   # local, CPU
@@ -88,6 +97,12 @@ class Config:
     triage: TriageConfig = TriageConfig()
     extract: ExtractConfig = ExtractConfig()
     lattice: LatticeConfig = LatticeConfig()
+    match: ModelConfig = ModelConfig()          # the lattice's matcher
+    themes: ModelConfig = ModelConfig()
+    scores: ModelConfig = ModelConfig()
+    sensitivity: ModelConfig = ModelConfig()
+    vocab: ModelConfig = ModelConfig()
+    digest: ModelConfig = ModelConfig()
     weight: WeightConfig = WeightConfig()
     egress: EgressConfig = EgressConfig()
 
@@ -102,6 +117,8 @@ def load() -> Config:
     if "backends" in triage:
         triage["backends"] = tuple(triage["backends"])
     egress = {k: tuple(v) for k, v in data.get("egress", {}).items()}
+    models = {k: ModelConfig(**data.get(k, {}))
+              for k in ("match", "themes", "scores", "sensitivity", "vocab", "digest")}
     return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
                   extract=ExtractConfig(**data.get("extract", {})), lattice=LatticeConfig(**data.get("lattice", {})),
-                  weight=WeightConfig(**data.get("weight", {})), egress=EgressConfig(**egress))
+                  weight=WeightConfig(**data.get("weight", {})), egress=EgressConfig(**egress), **models)
