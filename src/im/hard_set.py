@@ -75,21 +75,29 @@ def pick(conn, per_case: int = PER_CASE, seed: int = 1) -> tuple[list[dict], dic
     return out, available
 
 
-def write(conn, folder: Path, per_case: int = PER_CASE, seed: int = 1, scrubber=None) -> dict:
+def write(conn, folder: Path, per_case: int = PER_CASE, seed: int = 1, scrubber=None, controls: int = 0) -> dict:
     """Each picked episode as extraction would send it, one file per episode named by its case, and index.json
-    saying which case and which earlier capture picked it. Won't write over a set."""
+    saying which case and which earlier capture picked it. `controls` adds that many episodes from the trials' random
+    sample (`trial.sample`: the episodes every trial reads), leaving out any already picked. Won't write over a set."""
+    from im import trial
+
     if (folder / "index.json").exists():
         raise SystemExit(f"{folder} already has a hard set; pick another folder")
     folder.mkdir(parents=True, exist_ok=True)
     picked, available = pick(conn, per_case, seed)
+    taken = {p["episode_id"] for p in picked}
+    picked += [{"case": "control", "episode_id": str(eid), "item_id": None}
+               for eid in trial.sample(conn, len(taken) + controls) if str(eid) not in taken][:controls]
     index, n = [], {}
     for p in picked:
         n[p["case"]] = n.get(p["case"], 0) + 1
         name = f"{p['case']}-{n[p['case']]:02d}.txt"
         payload = egress.build(conn, p["episode_id"], scrubber)
         (folder / name).write_text(payload.text + "\n")
-        index.append({"file": name, "case": p["case"], "why": CASES[p["case"]][0], "episode_id": p["episode_id"],
+        why = CASES[p["case"]][0] if p["case"] in CASES else "a control: from the trials' random sample"
+        index.append({"file": name, "case": p["case"], "why": why, "episode_id": p["episode_id"],
                       "picked_by_item": p["item_id"], "policy": payload.policy})
-    (folder / "index.json").write_text(json.dumps({"seed": seed, "per_case": per_case, "episodes": index}, indent=2))
+    (folder / "index.json").write_text(json.dumps({"seed": seed, "per_case": per_case, "controls": controls,
+                                                   "episodes": index}, indent=2))
     return {"folder": str(folder), "episodes": len(index), "by_case": n, "available": available,
             "policy": index[0]["policy"] if index else None}
