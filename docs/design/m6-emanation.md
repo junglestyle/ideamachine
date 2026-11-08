@@ -12,18 +12,18 @@ to show rather than all six at once.
 
 For M6:
 
-1. **A sky as the home view.** Stars are clusters, placed by semantic neighbourhood. ~~The layout updates
+1. **A sky as the home view.** Stars are clusters, placed by semantic neighborhood. ~~The layout updates
    incrementally and stays put.~~ Not required since [0010](../decisions/0010-connections-kinds-lenses.md): Emanation
-   is the fluid view, and Lattice v2 (pinned lenses laid out by hand) is the stable one.
+   is the fluid view, and Trellis (pinned lenses laid out by hand; Lattice v2 in 0010) is the stable one.
 2. **Lenses as zoom, not separate pages.** Subjects → clusters → candidates → observations → the original
    utterances. On the home sky a lens lights its results where they are; opened on its own, it lays them out by their
-   connections (a force layout started from its last run's positions) and draws each neighbourhood as a cloud with
+   connections (a force layout started from its last run's positions) and draws each neighborhood as a cloud with
    its synthesis proposal over it ([0010](../decisions/0010-connections-kinds-lenses.md)).
 3. **Proposed connections as faint dashed links.** The "negative space": connections the evidence suggests that I
    haven't made. These are hypotheses, never edges, until I keep them. Not to be confused with a bridge idea, which
    is an existing idea that touches two or more lenses (as Lattice v1's bridges touch two themes).
 
-**2D, not 3D** (2026-11-04). Depth hides neighbours and makes you orbit to find them; motion (replay, new evidence
+**2D, not 3D** (2026-11-04). Depth hides neighbors and makes you orbit to find them; motion (replay, new evidence
 arriving, the camera flying to a lens) earns more than a third axis of meaning. A faster renderer (WebGL) doesn't
 need 3D positions, and changing the pipeline's stable positions to 3D later would reset where everything is.
 
@@ -34,7 +34,7 @@ need 3D positions, and changing the pipeline's stable positions to 3D later woul
 | Sharpness | How recently it was said | A fact |
 | Brightness | Recurrence (distinct conversations), decaying with time | A fact |
 | Size | Lifecycle, and canonical vs pinned | My decision |
-| Colour | Semantic neighbourhood | Descriptive |
+| Color | Semantic neighborhood | Descriptive |
 | Links | Connections; their kinds and cited observations on inspection | Evidence-backed |
 
 **No significance channel.** [Decision 0007](../decisions/0007-neutral-proposals.md) closed M3 because no signal
@@ -44,7 +44,7 @@ in visually.
 ## The negative-space map is synthesis, drawn
 
 It doesn't need a new subsystem. The spec already has the parts: embeddings nominate pairs, the edge model answers
-`none` as a real answer ([SPEC §5](../SPEC.md#5-edge-typing)), and the synthesis stage writes an idea from a neighbourhood
+`none` as a real answer ([SPEC §5](../SPEC.md#5-edge-typing)), and the synthesis stage writes an idea from a neighborhood
 of connected clusters, which arrives as a proposal (whether that beats proposing its best existing point is an A/B
 test, [0010](../decisions/0010-connections-kinds-lenses.md)). The dashed links are:
 
@@ -65,7 +65,7 @@ a synthesis makes it an idea, linked to what it was made from.
 
 - Every card at its pipeline position (`pub.card_positions`; the pipeline places every card, not only Lattice's).
 - Brightness: distinct conversations. Sharpness: days since last said (older is softer and wider). Size: lifecycle
-  (observation, candidate, pinned, canonical). Colour: the direction from the map's centre, so neighbours share a
+  (observation, candidate, pinned, canonical). Color: the direction from the map's center, so neighbors share a
   hue. Edges: faint, every kind.
 - `/sky?seed=<id>` is a lens: personalized PageRank from the seed over edges, plus the seed's nearest by meaning
   (`lens.relevance`). Unlit clusters dim; the camera frames the lit ones.

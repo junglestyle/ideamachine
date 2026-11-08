@@ -28,7 +28,7 @@ What the seam cost, measured in the V2 architecture review:
   feedback), `/mcp`, and **Emanation**, the static page that replaces Lattice's UI.
 - **The MCP server moves in with its tool names, argument schemas and result shapes byte-compatible**
   (`lattice/src/lattice/mcp.py`, `TOOLS`), and keeps speaker pseudonymization in every answer and the public
-  listener's OAuth behaviour. It's a live claude.ai connector, so renaming a tool is a breaking change. New tools are
+  listener's OAuth behavior. It's a live claude.ai connector, so renaming a tool is a breaking change. New tools are
   additions only (`open_lens`). _Amended 2026-10-29: the contract is the 19 tools after lattice#10, which retired
   the seven review and rating tools (M2 reads no verdicts) and added `proposals` and `keep_idea`._
 - **Domain logic moves into pipeline stages or `pub` views**: bridges.
@@ -56,7 +56,7 @@ A lens returned `{nodes, links}` for the page to lay out, so every lens drew its
 somewhere else in each, and a lens padded with unrelated ideas to fill its size. Splitting the two jobs fixes both:
 
 - **Positions stay in the pipeline**, one coordinate space for every view, kept stable between runs (placed ideas
-  stay; new ones land near their neighbours). This reverses "map positions leave the pipeline".
+  stay; new ones land near their neighbors). This reverses "map positions leave the pipeline".
 - **A lens returns relevance, never positions:** a score for every cluster, from personalized PageRank seeded at the
   lens over edges plus embedding similarity. The page uses it for brightness and to frame the camera.
 - **The home sky is the lens with no seed.** Relevance is uniform, and the encodings light it (recurrence,

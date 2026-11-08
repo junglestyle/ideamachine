@@ -30,7 +30,7 @@ const c = document.getElementById("c"), g = c.getContext("2d");
 let W = 0, H = 0, dpr = 1, cam = {x: 0, y: 0, k: 200}, selected = null, queued = false;
 if (D.seed) document.getElementById("home").hidden = false;
 
-// Colour is the direction from the map's centre, so neighbours share a hue.
+// Color is the direction from the map's center, so neighbors share a hue.
 const mx = S.reduce((a, s) => a + s.x, 0) / (S.length || 1), my = S.reduce((a, s) => a + s.y, 0) / (S.length || 1);
 for (const s of S) s.hue = Math.round((Math.atan2(s.y - my, s.x - mx) * 180 / Math.PI + 360) % 360);
 

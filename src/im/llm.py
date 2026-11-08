@@ -173,7 +173,7 @@ class OpenRouter:
         body = {"model": model, "max_tokens": max_tokens,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}],
                 "reasoning": {"effort": effort}, "usage": {"include": True},
-                # Only providers that honour the schema, and none that keep or train on what's sent.
+                # Only providers that honor the schema, and none that keep or train on what's sent.
                 "provider": {"require_parameters": not in_prompt, "data_collection": "deny"}}
         if not in_prompt:
             body["response_format"] = {"type": "json_schema",

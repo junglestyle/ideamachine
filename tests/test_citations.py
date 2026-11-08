@@ -9,7 +9,7 @@ from test_extract import FakeClaude
 from test_lattice import FakeMatcher, items_for, seeded  # noqa: F401
 from test_triage import HashEmbedder
 
-# Every edge with what the old table called its kind: a connection is the archive's or an embedding neighbour's.
+# Every edge with what the old table called its kind: a connection is the archive's or an embedding neighbor's.
 EDGES = """SELECT a, b, CASE WHEN method LIKE '%%-archive' THEN 'archive' ELSE 'related' END AS kind,
                   cited_observation_ids FROM im.connections
            UNION ALL SELECT from_id, to_id, kind, cited_observation_ids FROM im.lineage"""
@@ -70,7 +70,7 @@ def test_a_citation_to_an_observation_thats_gone_is_dropped(seeded, cfg, stream)
 
 def test_an_idle_run_keeps_its_citations(seeded, cfg, stream, monkeypatch):
     """A run with nothing new to match still rebuilds the related edges, and must cite them (seen on the NAS)."""
-    monkeypatch.setattr(lattice, "RELATED_MIN", -1.0)   # every idea gets its nearest neighbours
+    monkeypatch.setattr(lattice, "RELATED_MIN", -1.0)   # every idea gets its nearest neighbors
     matched(seeded, cfg, stream)
     before = table(seeded, f"SELECT * FROM ({EDGES}) e ORDER BY 1, 2, 3")
     assert any(kind == "related" and cited for _, _, kind, cited in before)

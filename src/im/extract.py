@@ -153,7 +153,7 @@ shaky transcription or a reading that depends on guessing the context."""
 # mistranscriptions fixed, a dropped word put back), so it was already a reading, not what was said. 183 gists noted
 # a transcription fix, and gists and statements opened with labels ("Bit:", "Joke:", "Self-observation:", "Dance
 # tip:"), attribution ("S1's view:", "A nurse frames...") or topic. Now the quote is exactly as transcribed, so it
-# can be checked; the reading is what was meant; the gist is the thought, unlabelled; attribution is a field. `joke`
+# can be checked; the reading is what was meant; the gist is the thought, unlabeled; attribution is a field. `joke`
 # leaves kind: a joke is a register, not a sort of thought, and register is for a judging pass after extraction
 # (Jev, not built yet). For trials only, until im.items keeps the reading and attribution (the run refuses it live).
 SYSTEM_V4 = """You extract observations from transcripts of my everyday speech, recorded by an always-on pendant. \

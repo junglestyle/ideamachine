@@ -53,7 +53,7 @@ and I hadn't connected it), `known` (it holds, I had it), `no`. A proposer or fi
 it brings, at a noise I'll tolerate, not for agreeing with me: a filter that drops what was new to me filters out
 the point.
 
-What the tension sheets showed (70 pairs, 2026-11-04): random neighbours 0 in 10, neighbours said far apart and
+What the tension sheets showed (70 pairs, 2026-11-04): random neighbors 0 in 10, neighbors said far apart and
 claims beside observations 1 in 10 each, Sonnet reading every idea 11 in 39. Checking Sonnet's proposals, the cheap
 models did best (GLM-5.3-flash precision 0.55, recall 0.67; DeepSeek V4.1 Flash 0.57, 0.44) and the large ones
 barely beat keeping everything (0.30), finding a pull almost everywhere. That was agreement; whether a filter is
@@ -64,7 +64,7 @@ Jev on both tension sheets, with each `yes` re-marked `new` or `known` (70 pairs
 no single question ranked my tensions above 0.80 AUC on both sheets, and the forms it decided by (contradiction,
 change of mind, trade-off, competing pulls, the strongest counting) managed 0.71 and 0.74. Four wordings of
 competing pulls correlate 0.7 to 0.9; their mean held 0.79 and 0.81, and ranked new tensions as well as known ones
-(0.80, 0.79), where the best single wording favoured known ones (0.77, 0.84). So Jev decides a tension by that mean
+(0.80, 0.79), where the best single wording favored known ones (0.77, 0.84). So Jev decides a tension by that mean
 (`jev.QUESTION_SETS`, `pulls4`), read as a ranking: its scores run lower, and a cut-off waits for more marks. Every
 chat-model checker dropped at least one new tension; Jev at 0.5 dropped none. What may tell new from known, on 14
 pairs: new ones ran across subjects, over values, and between sides that could both be true; kept as probes.

@@ -12,9 +12,9 @@ an analogy is a lens._
   none of the above", and Jev's first wording counts a shared subject as a connection; my notes on `none` marks say
   why it isn't one ("topical only", "both about AI coding, that's all"). A shared subject is what a lens gathers; an
   edge has to say more.
-- **`related` meant two things.** In the graph it's an embedding neighbour (cosine ≥ 0.70, top 3,
+- **`related` meant two things.** In the graph it's an embedding neighbor (cosine ≥ 0.70, top 3,
   `lattice.relate`); on the B4 sheet it's a label beside `supports` and `tension`. Neither is "these two distinct
-  points belong in the same tight neighbourhood", which is what edges are for: they shape clusters and what's
+  points belong in the same tight neighborhood", which is what edges are for: they shape clusters and what's
   proposed.
 - **Kinds are stored as separate edges.** `im.idea_links` is keyed `(a, b, kind)`, and the lens
   (`lens.relevance`), the card's edge count (`pub.cards.links`) and weight (`weight._signals`) count rows. A second
@@ -26,14 +26,14 @@ an analogy is a lens._
 ## Decision
 
 **A connection is an edge, pure and simple.** Two distinct points are related: they belong in the same tight
-neighbourhood, beyond sharing a subject. One per pair, symmetric, with its confidence, cited observations and
-`method` (model and question version). Until a model decides them (M4: Terra, which passed B4), embedding neighbours
+neighborhood, beyond sharing a subject. One per pair, symmetric, with its confidence, cited observations and
+`method` (model and question version). Until a model decides them (M4: Terra, which passed B4), embedding neighbors
 stand in, named by their `method`.
 
 **Connections promote.** What V1 asked me to do by hand (keep/discard, comparisons, the rubric, all thrown out by
-0007) is what connections do instead: a neighbourhood of connected observations is what triggers a synthesis, the
+0007) is what connections do instead: a neighborhood of connected observations is what triggers a synthesis, the
 other trigger 0007 left synthesis waiting for. To watch: broad ideas collect connections to everything, so a
-neighbourhood held together only by one of them isn't a neighbourhood.
+neighborhood held together only by one of them isn't a neighborhood.
 
 **Kinds are optional annotations on a connection**, from a vocabulary that grows: today `supports`, `elaborates`,
 `tension` and `sympathy` (the two resonate, or pull the same way). Later ones (`antipathy`, `disproves`) are added
@@ -50,7 +50,7 @@ the graph version it read. Reopening reuses that; refreshing it is a separate ac
 
 **An analogy is a lens, not a connection.** Analogous ideas are about different subjects, so they're far apart by
 definition; a connection between them would pull distant clusters together in Emanation's layout and join
-neighbourhoods that aren't one. What an analogy gives is its shared structure, named ("easy against perfect", "bad
+neighborhoods that aren't one. What an analogy gives is its shared structure, named ("easy against perfect", "bad
 work blamed on its maker's state"), and a structure has as many instances as there are, not two. So the analogy pass
 (0009's, Jev's different-subjects and same-structure questions) proposes a pair and names what it shares; one I keep
 becomes a pinned lens seeded with that structure, whose results are its other instances, and which Lattice v2 can
@@ -66,18 +66,18 @@ shows a kind should pull harder. Adding a kind never adds a connection.
 - **Emanation** is fluid: association and promotion. Its sky need not stay put between runs; a stable global map is no
   longer a requirement. The home sky lights a lens's results where they are. Opened on its own, a lens lays its results
   out by their connections (a force layout, started from where its last run left them, so it doesn't jump), and draws
-  each neighbourhood as a cloud with its synthesis proposal over it, to keep or dismiss.
+  each neighborhood as a cloud with its synthesis proposal over it, to keep or dismiss.
 - **Lattice v2** is the stable one: a spatial arrangement of pinned lenses that I lay out. The Tree of Life is the
   first: a correspondence table, condensed (once, paid) into definitions I can read and edit, each correspondence a
   lens (1/Kether), the paths too. Placing a lens on the Tree is organization: it creates no connections between the
   ideas it shows.
 
-**Promotion can synthesize.** A neighbourhood of connected observations can be proposed as an idea that a synthesis
+**Promotion can synthesize.** A neighborhood of connected observations can be proposed as an idea that a synthesis
 writes, which may name several kinds at once (a sympathy and a tension, say). The synthesis points to each point it
 was made from (`synthesizes`), as lineage, like `evolves`, not a connection: a lens follows it both ways, weight
-doesn't count it (a synthesis would otherwise gain weight from the neighbourhood it was made from), and it adds no
-connection between its sources, which are connected already. Whether a synthesis beats proposing the neighbourhood's
-best existing point is an A/B test on the same neighbourhoods, judged blind. Either way only I keep an idea.
+doesn't count it (a synthesis would otherwise gain weight from the neighborhood it was made from), and it adds no
+connection between its sources, which are connected already. Whether a synthesis beats proposing the neighborhood's
+best existing point is an A/B test on the same neighborhoods, judged blind. Either way only I keep an idea.
 
 **A bridge is an idea, not a proposed connection.** As in Lattice v1, a bridge idea touches two or more lenses (by
 belonging to both, or by connections across). A connection the system suggests and I haven't made is a proposal, drawn
@@ -85,7 +85,7 @@ as one, and becomes a connection only when I keep it.
 
 ## Consequences
 
-- B4 asks whether two points belong in the same tight neighbourhood, not whether they share a subject: the sheet's
+- B4 asks whether two points belong in the same tight neighborhood, not whether they share a subject: the sheet's
   `related` and Jev's wordings change to that, and my `related` marks are re-read under it before Jev is tuned
   against them. Kinds stay ungraded.
 - Storage: connections keyed by pair, kinds in rows of their own that reference a connection, and lineage
@@ -94,7 +94,7 @@ as one, and becomes a connection only when I keep it.
 - Lenses get a table of their own (seed, definition, pinned or archived, results by graph version), replacing
   `im.lens_cache` in [SPEC §3](../SPEC.md#3-data-model); themes migrate into it as subject lenses.
 - Embeddings stay what nominates pairs and seeds a lens's search, never what decides a connection.
-- Synthesis is triggered by connected neighbourhoods, not weight; the M2 design's "bridging" synthesis is this,
+- Synthesis is triggered by connected neighborhoods, not weight; the M2 design's "bridging" synthesis is this,
   and isn't a bridge idea.
 - The analogy pass feeds lenses: a kept analogy is a lens seeded with its named structure, not a kind on a
   connection.

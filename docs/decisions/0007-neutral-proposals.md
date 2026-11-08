@@ -43,6 +43,6 @@ ranking) never produced a view I use.
 - `im tune` still previews weight, but a knob now only changes what a run stores and when a dismissed candidate
   returns.
 - Synthesis is triggered by weight (M2 design). It waits until weight means something, or another trigger is chosen.
-  _Chosen by [0010](0010-connections-kinds-lenses.md) (2026-11-06): a neighbourhood of connections._
+  _Chosen by [0010](0010-connections-kinds-lenses.md) (2026-11-06): a neighborhood of connections._
 - **Look again** when clusters recur enough for weight to vary (more than a few dozen with two or more recurrences),
-  or when I've labelled through the neutral view rather than Lattice's rating flows.
+  or when I've labeled through the neutral view rather than Lattice's rating flows.

@@ -64,7 +64,7 @@ without touching the records, comes from the write rule above.
 **Shape of the software:**
 
 - Traversal is Python. A stage or request loads the edge list into memory (NetworkX; 10,000 edges is a few
-  megabytes) and works there. SQL holds only fixed-depth reads in `pub` views, such as an idea's direct neighbours.
+  megabytes) and works there. SQL holds only fixed-depth reads in `pub` views, such as an idea's direct neighbors.
 - A lens is computed in Python (personalized PageRank from the seed), and kept by seed and graph version (M5): pinned,
   or archived with what it cost ([0010](0010-connections-kinds-lenses.md)). Emanation shows lens projections, not
   live traversal.
