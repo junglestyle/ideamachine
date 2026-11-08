@@ -9,8 +9,9 @@ once the month's spend reaches it (egress.send).
 import hashlib
 import json
 import uuid
+from importlib import resources
 
-from im import egress, feedback, llm, names
+from im import capture_checks, egress, feedback, llm, names
 from im.config import ExtractConfig
 
 SCHEMA_VERSION = 1
@@ -218,7 +219,13 @@ said around that time.
 confidence is how sure you are that the reading and gist are what was actually said and meant: lower it for \
 shaky transcription or a reading that depends on guessing the context."""
 
-PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3, "v4": SYSTEM_V4}
+# v5 (2026-11-08, decision 0012): only my speech (0011); a reading, the attribution of a thought I relay and the
+# mishearings the reading fixed; a gist that says only what the cited lines say. No capture kind, no confidence (nothing
+# read them) and no interests slot (it favored my usual subjects). The text was reviewed and merged in the prompt
+# review; it lives in prompts/extract_v5.txt. For trials until im.items keeps its fields (the run refuses it live).
+SYSTEM_V5 = resources.files("im.prompts").joinpath("extract_v5.txt").read_text().rstrip("\n")
+
+PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3, "v4": SYSTEM_V4, "v5": SYSTEM_V5}
 LIVE = ("v1", "v2", "v3")   # the prompts im.items can hold; a later one is for `im trial` until it can
 
 
@@ -283,7 +290,35 @@ SCHEMA_V4 = {
     "required": ["items"],
     "additionalProperties": False,
 }
-SCHEMAS = {"v4": SCHEMA_V4}   # a prompt not here answers in SCHEMA
+# v5's schema lists the evidence first, the gist after it; what JSON Schema can't say (lines exist and are in order,
+# strings aren't empty) is checked in code (capture_checks).
+SCHEMA_V5 = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "quote": {"type": "string"},
+                    "lines": {"type": "array", "items": {"type": "integer"}},
+                    "attributed_to": {"type": "string"},
+                    "reading": {"type": "string"},
+                    "mishearings": {"type": "array", "items": {
+                        "type": "object",
+                        "properties": {"heard": {"type": "string"}, "meant": {"type": "string"}},
+                        "required": ["heard", "meant"], "additionalProperties": False}},
+                    "gist": {"type": "string"},
+                },
+                "required": ["quote", "lines", "attributed_to", "reading", "mishearings", "gist"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+SCHEMAS = {"v4": SCHEMA_V4, "v5": SCHEMA_V5}   # a prompt not here answers in SCHEMA
 TEXT = ("quote", "reading", "gist", "attributed_to")   # what a capture says, names unscrubbed back (policy C)
 
 
@@ -341,18 +376,23 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict
 
 def _items(p: egress.Payload, raw: list[dict]) -> list[dict]:
     """The model's items, mapped back to segments, local speakers and the names said (policy C). Items citing no
-    real line are dropped."""
+    real line are dropped. Each keeps `checks`, the capture checks it fails on the transcript as sent (v5 answers have
+    no speaker, being mine, and no confidence)."""
+    sent = capture_checks.lines_of(p.text)
     out = []
     for item in raw:
         lines = sorted({n for n in item["lines"] if 1 <= n <= len(p.segment_ids)})
         if not lines:
             continue
+        said_by = item.get("said_by", "me")
         out.append(item | {k: names.unscrub(item[k], p.names) for k in TEXT if k in item} | {
             "themes": [names.unscrub(t, p.names) for t in item.get("themes", [])],
-            "said_by": p.speakers.get(item["said_by"], item["said_by"]),
+            "said_by": p.speakers.get(said_by, said_by),
             "source_segment_ids": [p.segment_ids[n - 1] for n in lines],
-            "confidence": min(max(float(item["confidence"]), 0.0), 1.0),
-        })
+            "confidence": min(max(float(item["confidence"]), 0.0), 1.0) if "confidence" in item else None,
+            "checks": capture_checks.check(sent, item),
+        } | ({"mishearings": [{k: names.unscrub(m[k], p.names) for k in ("heard", "meant")}
+                              for m in item["mishearings"]]} if "mishearings" in item else {}))
     return out
 
 

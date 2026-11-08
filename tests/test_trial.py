@@ -159,6 +159,40 @@ def test_v4_keeps_the_quote_as_said_apart_from_its_reading_and_attribution(pipe,
     assert table(pipe, "SELECT count(*) FROM im.egress_log") == sent
 
 
+def test_v5_records_which_capture_checks_each_capture_fails(pipe, cfg, stream):
+    turns = stream.conversations["c-conv"].turns
+    turns[0] = replace(turns[0], text="Did you see the build broke again, Bob?")
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    v5, schema = extract.system_prompt("v5"), extract.schema_for("v5")
+    scrubber = names.Scrubber(b"k", egress.known_names(pipe))
+    bob = names.token("Bob", b"k")
+
+    def respond(text):
+        rows = {int(r[1:].split("]")[0]): r.split(": ", 1) for r in text.splitlines() if r.startswith("[")}
+        mine = next(n for n, (who, said) in rows.items() if who.endswith("me") and "build broke" in said)
+        theirs = next(n for n, (who, _) in rows.items() if not who.endswith("me"))
+        said, other = rows[mine][1], rows[theirs][1]
+        base = {"lines": [mine], "attributed_to": "", "reading": f"{bob}, the build broke again.", "mishearings": [],
+                "gist": "The build broke again."}
+        return [base | {"quote": said, "attributed_to": bob,
+                        "mishearings": [{"heard": "build", "meant": "build"}]},       # passes, names come back
+                base | {"quote": said.lower()},                                           # tidied
+                base | {"quote": other, "lines": [mine, theirs]},                       # someone else's words
+                base | {"quote": said, "attributed_to": "P-ZZZZZ"},                    # a code it wasn't sent
+                base | {"quote": said, "mishearings": [{"heard": "cash", "meant": "cache"}]}]
+
+    claude = FakeClaude(respond)
+    trial.run(pipe, claude, v5, scrubber=scrubber, schema=schema)
+    assert all(c["output_config"]["format"]["schema"] == extract.SCHEMA_V5 for c in claude.calls)
+    (items,) = [i for (i,) in table(pipe, "SELECT items FROM im.prompt_trials") if i]
+    assert [it["checks"] for it in items] == [[], ["quote_inexact"], ["quote_not_mine"], ["unknown_pseudonym"],
+                                              ["mishearing_not_in_quote", "mishearing_not_in_reading"]]
+    assert items[0]["attributed_to"] == "Bob" and items[0]["said_by"] == "me" and items[0]["confidence"] is None
+    opus = (trial.version("claude-opus-5-5", "medium", v5, schema=schema), "claude-opus-5-5")
+    assert trial.report(pipe, opus, opus, scrubber.policy)["checks"]["candidate"]["pass"] == 0.2
+
+
 def test_recall_is_split_by_how_far_each_captures_idea_reaches(seeded_lattice):
     conn = seeded_lattice
     v3 = extract.system_prompt("v3")
