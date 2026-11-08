@@ -2,7 +2,7 @@
 
 What the pilot (20 pairs, 2026-11-02) settled: the answers stay supports, contradicts, extends, related and none,
 with the matcher's `evolves` counted as `extends`; direction is cheap to give; and contradictions and supports
-don't turn up among nearest neighbours, so the sheet goes looking for them. Marks were mine, made blind: a model's
+don't turn up among nearest neighbors, so the sheet goes looking for them. Marks were mine, made blind: a model's
 marks would score Jev against another model. Since labels 3, a pair I leave unmarked takes the chat models' mark
 where they agree (see review below), and the pooled score counts those marks (`by_models`).
 
@@ -14,14 +14,14 @@ drafts read `extends` as `elaborates` and `contradicts` as `tension`.
 
 What B4 with Jev (129 pairs, 2026-11-06) changed, labels 3 (decision 0010): `related` was "the same subject, but
 none of the above", and a shared subject is what a lens gathers, not an edge. An edge says two points belong in the
-same tight neighbourhood, so `related` is that, with no kind to say how, and a shared subject alone is `none`. Drafts
+same tight neighborhood, so `related` is that, with no kind to say how, and a shared subject alone is `none`. Drafts
 under labels 2 answered the old question and stay in their own files.
 
 The pairs come in five sets:
-- near: nearest neighbours by embedding among candidates and ideas (SPEC §5: embeddings nominate pairs), spread
+- near: nearest neighbors by embedding among candidates and ideas (SPEC §5: embeddings nominate pairs), spread
   across the range of similarity rather than only the closest;
 - evolves: pairs the matcher linked as one evolving into the other;
-- apart: neighbours among candidates and ideas first said far apart in time, where a change of mind would show;
+- apart: neighbors among candidates and ideas first said far apart in time, where a change of mind would show;
 - levels: a candidate or idea next to a nearby concrete observation (anyone's), where support would show;
 - far: pairs below the median similarity, so `none` is represented.
 The sets are shuffled together, each pair's sides in random order, with no similarity or set shown. Each side shows
@@ -40,7 +40,7 @@ from im import jev
 
 SIZE = 50
 NEAR_K = 5
-WIDE_K = 10    # how far the apart and levels sets look for neighbours
+WIDE_K = 10    # how far the apart and levels sets look for neighbors
 SHARE = {"evolves": 0.12, "apart": 0.16, "levels": 0.16, "far": 0.08}   # the rest of the sheet is near pairs
 SETS = ("near", "evolves", "apart", "levels", "far")
 CONCRETE = ("observation",)          # item kinds that are about a case, not a claim

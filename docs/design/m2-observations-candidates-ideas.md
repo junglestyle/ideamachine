@@ -271,7 +271,7 @@ The ledger (items, verdicts, feedback events) is never rewritten, only pointed a
   - bridging: a candidate that ties several clusters together.
 
   Each synthesis is versioned and capped, and it arrives as a proposal. _Amended by
-  [0010](../decisions/0010-connections-kinds-lenses.md) (2026-11-06): triggered by a neighbourhood of connections,
+  [0010](../decisions/0010-connections-kinds-lenses.md) (2026-11-06): triggered by a neighborhood of connections,
   not weight; a synthesis links to what it was made from (`synthesizes`)._
 - **N:** 30 minutes by default, an operator setting, adjustable with `im tune`.
 - **Stars:** a star is a pin, with no weight.

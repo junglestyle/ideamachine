@@ -35,7 +35,7 @@ CUT = {"tension": 0.45, "edge": 0.8}
 # What decides. A tension is asked in four wordings of one question and decided by their mean: on the two tension
 # sheets (70 pairs, 14 tensions, 2026-11-04), no single question held above 0.80 AUC on both, the four wordings
 # correlate 0.7 to 0.9, and their mean held 0.79 to 0.81 on both while ranking tensions new to me as well as known
-# ones (pulls_v2 alone favoured known ones, 0.84 against 0.77). The forms asked before (contradiction, change of
+# ones (pulls_v2 alone favored known ones, 0.84 against 0.77). The forms asked before (contradiction, change of
 # mind, trade-off, the strongest counting: 0.71 to 0.74) stay as probes. A changed set gets a new name here, which names its drafts.
 QUESTION_SETS = {"tension": "pulls4", "edge": "tight1"}
 QUESTIONS = {
@@ -73,7 +73,7 @@ QUESTIONS = {
         "develops_v2": ("Is `a` built on `b`, going further than `b` does?", None),
     },
     # B4 (edge_audit): is there an edge between `a` and `b`? Only that is graded (decision 0009). An edge says two
-    # points belong in the same tight neighbourhood; a shared subject is a lens's, not an edge (0010). connected3
+    # points belong in the same tight neighborhood; a shared subject is a lens's, not an edge (0010). connected3
     # counted a shared subject; on 129 pairs no cut of it reached both of B4's bars. tight3 asked this in three
     # wordings and decided by their mean (2026-11-07, the same 129 pairs re-marked under labels 3): AUC 0.963, but the
     # mean passed at one cut only (0.74), and choosing its cut on two sheets and scoring the third gave 0.899

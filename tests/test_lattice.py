@@ -475,13 +475,13 @@ def test_a_pair_is_one_connection_and_an_unlink_holds_until_a_later_method(seede
 
 
 def test_embedding_neighbours_never_replace_another_methods_connection(seeded, monkeypatch):
-    monkeypatch.setattr(lattice, "RELATED_MIN", -1.0)   # every pair of the three is a neighbour
+    monkeypatch.setattr(lattice, "RELATED_MIN", -1.0)   # every pair of the three is a neighbor
     lattice.relate(seeded, HashEmbedder())
     methods = dict(((a, b), m) for a, b, m in table(seeded, "SELECT a, b, method FROM im.connections"))
     assert len(methods) == 3 and sorted(m.split(":")[0] for m in methods.values()) == \
         ["chatgpt-archive", "embedding", "embedding"]   # one per pair; the archive's stays the archive's
     decided = next(p for p, m in methods.items() if m.startswith("embedding"))
     seeded.execute("UPDATE im.connections SET method = 'terra;edge-v1' WHERE (a, b) = (%s, %s)", decided)
-    monkeypatch.setattr(lattice, "RELATED_MIN", 2.0)   # no neighbours at all now
+    monkeypatch.setattr(lattice, "RELATED_MIN", 2.0)   # no neighbors at all now
     lattice.relate(seeded, HashEmbedder())
     assert sorted(table(seeded, "SELECT method FROM im.connections")) == [("chatgpt-archive",), ("terra;edge-v1",)]

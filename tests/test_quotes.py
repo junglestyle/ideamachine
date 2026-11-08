@@ -20,7 +20,7 @@ def test_a_quote_cites_the_lines_its_words_are_on_and_never_fewer():
     assert segs == ["s3"] and share < quotes.FLAG     # not on the line either side: left as cited, and flagged
     _, segs, share = quotes.place("soil moisture over LoRa", LINES[1:4], ["s3"])
     assert (segs, share) == (["s2", "s3"], 1.0)
-    # A tidied quote stays on its line: one word it shares with a neighbour ("the") doesn't put it there.
+    # A tidied quote stays on its line: one word it shares with a neighbor ("the") doesn't put it there.
     _, segs, share = quotes.place("Battery life is hard, a solar charger", LINES[1:4], ["s3"])
     assert segs == ["s3"] and share == 1.0
     # The transcript's own line label, copied into the quote, goes; stitched pieces are placed one by one.

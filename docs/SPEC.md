@@ -57,7 +57,7 @@ V1's non-goals ([ROADMAP §1](ROADMAP.md#non-goals)) still hold, except "a UI in
   that shapes in the data and the code, and when to look again.
 - **The system deciding what's an idea.** Models and queries produce weight and proposals; I decide.
 - **Typing every pair.** Embeddings nominate pairs; nothing runs over n².
-- **On-demand synthesis.** Synthesis runs as a stage, triggered by connected neighbourhoods
+- **On-demand synthesis.** Synthesis runs as a stage, triggered by connected neighborhoods
   ([0010](decisions/0010-connections-kinds-lenses.md)), not by request.
 - **Reprocessing from audio.** V1 data is migrated with a dedupe pass. Its 818 verdicts, 743 feedback events and
   135+ comparisons are the only labels the benchmarks have.
@@ -76,7 +76,7 @@ storing the index's `open` flag per conversation, which the format already carri
 - Until cutover (M6), every existing `pub` view keeps its shape, so Lattice keeps working. New views are additions.
 - **MCP tools are a contract.** The 19 tools Lattice serves after the rating tools were retired (lattice#10,
   2026-10-29; `src/lattice/mcp.py`, `TOOLS`) keep their names, argument schemas and result shapes byte-compatible,
-  along with speaker pseudonymization in every answer and the public listener's OAuth behaviour. New tools are
+  along with speaker pseudonymization in every answer and the public listener's OAuth behavior. New tools are
   additions: `open_lens` (M5). The seven retired tools (`review_digest`, `look_again`, `decide_item`, `keep_rest`,
   `compare_pair`, `record_comparison`, `rate_digest_point`) asked me for verdicts and ratings that nothing reads.
 - All human input stays feedback events: stars, links, notes, theme edits, and V2's keep (canonical or pinned) /
@@ -107,7 +107,7 @@ Nothing becomes an idea without me. Each run computes every cluster's weight wit
 signals: independent me recurrences above all, a capped amount for members by diarization or not me, links to
 canonical ideas. Weight orders nothing ([decision 0007](decisions/0007-neutral-proposals.md)): the most recently said
 candidates come to me as proposals (up to 10 a week), and I keep each as canonical or pinned, or dismiss it. Syntheses
-arrive the same way, triggered by a neighbourhood of connections
+arrive the same way, triggered by a neighborhood of connections
 ([0010](decisions/0010-connections-kinds-lenses.md)). `im tune` previews any change to the knobs at no cost.
 
 ## 5. Edge typing
@@ -116,9 +116,9 @@ A model decides edges from structured input (the pair as each side was said and 
 (`openai/gpt-6.1-terra`, low effort) decides, having passed B4 (2026-11-07); Jev, the cheap, fast decision model, failed
 it on edges that only belong together, and may come back as a cheaper decider or a filter in front of one.
 
-- Embeddings nominate pairs: top-k neighbours plus shared evidence.
+- Embeddings nominate pairs: top-k neighbors plus shared evidence.
 - The model decides whether there's an edge: connected or `none`. Connected means the two belong in the same tight
-  neighbourhood, not that they share a subject, which is a lens's job ([0010](decisions/0010-connections-kinds-lenses.md)).
+  neighborhood, not that they share a subject, which is a lens's job ([0010](decisions/0010-connections-kinds-lenses.md)).
   `none` is a real answer. It also suggests kinds, shown on the edge and never deciding whether it exists
   ([0009](decisions/0009-edges-connection-graded-kind-suggested.md)).
 - Tension (two ideas pulling against each other, contradiction included) and analogy (the same structure in

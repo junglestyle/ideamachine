@@ -6,7 +6,7 @@ passes are not part of it._
 
 ## Today
 
-`im.idea_links` is keyed `(a, b, kind)` with kinds `related` (embedding neighbours: top 3 at cosine ≥ 0.70, rebuilt
+`im.idea_links` is keyed `(a, b, kind)` with kinds `related` (embedding neighbors: top 3 at cosine ≥ 0.70, rebuilt
 every run), `evolves` (the matcher) and `archive` (the ChatGPT archive's `#n` cross-references). My links are not in
 it: they are `link`/`unlink` events, added back as `mine` rows by `pub.connections` and `pub.card_links`. Every
 reader counts rows, so one pair with `related`, `evolves` and `mine` counts three times, and nothing enforces
@@ -15,7 +15,7 @@ reader counts rows, so one pair with `related`, `evolves` and `mine` counts thre
 ## Tables
 
 - **`im.connections`**: one row per pair. `a < b`, both cascading from `im.ideas`; `method`, `confidence`,
-  `cited_observation_ids`, `decided_at`. One method per pair. Embedding neighbours and the archive's
+  `cited_observation_ids`, `decided_at`. One method per pair. Embedding neighbors and the archive's
   cross-references stand in until a model decides the pair, and a model decision replaces them; the embedding
   rebuild deletes and writes only rows whose method is an embedding method, so it never overwrites the archive's or
   a model's. A model's `none`, which keeps a stand-in from returning, is M4's to store.
@@ -36,13 +36,13 @@ My links stay events, as all my input does (SPEC §2), and the views read them a
 - a **link** makes the pair a connection, `mine`, whatever else says;
 - an **unlink** hides every stored connection on the pair whose method had already written when I unlinked
   (`seen_event_id` below the unlink's `event_id`). A method first used after it (a new question version, a new
-  model, a new kind's pass) can connect the pair again, and I can unlink again. Embedding neighbours keep one
+  model, a new kind's pass) can connect the pair again, and I can unlink again. Embedding neighbors keep one
   method name across runs, so a rebuild doesn't bring a pair back.
 
 ## Archive cross-references
 
 Connections, with method `chatgpt-archive`, symmetric, so mutual references become one. ChatGPT wrote them, under
-the first Idea Machine's contract, not this one: they stand in, like embedding neighbours, until a model decides the
+the first Idea Machine's contract, not this one: they stand in, like embedding neighbors, until a model decides the
 pair under 0010.
 
 ## Views and readers
@@ -65,7 +65,7 @@ pair under 0010.
 
 One migration moves the rows and drops `im.idea_links`, with every reader moved in the same change:
 `related` and `archive` rows become connections (pair ordered, both orders and both sources of a pair merged into
-one, citations merged; an archive reference wins the pair over an embedding neighbour, since a rebuild would delete
-the neighbour); `evolves` rows become lineage. Counts change where pairs were counted twice: that's the fix. The
+one, citations merged; an archive reference wins the pair over an embedding neighbor, since a rebuild would delete
+the neighbor); `evolves` rows become lineage. Counts change where pairs were counted twice: that's the fix. The
 methods already stored count as known before any unlink I made, so a pair I'd unlinked, which an embedding or the
 archive still connected, stays hidden. Forgetting is unchanged: every new table cascades from `im.ideas`.

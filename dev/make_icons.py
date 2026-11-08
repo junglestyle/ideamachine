@@ -20,7 +20,7 @@ PNGS = {"icon-192.png": 192, "icon-512.png": 512, "apple-touch-icon.png": 180}
 
 
 def adaptive() -> str:
-    """The light mark, recoloured by class so a media query can switch it to the dark mark's colours."""
+    """The light mark, recolored by class so a media query can switch it to the dark mark's colors."""
     body = LIGHT.replace('"#1A1918"', '"currentColor"').replace('fill="#E09A00"', 'class="core"')
     style = ("<style>svg{color:#1A1918}.core{fill:#E09A00}"
              "@media (prefers-color-scheme: dark){svg{color:#E8E4DA}.core{fill:#FFD15C}}</style>")

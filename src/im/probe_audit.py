@@ -1,6 +1,6 @@
 """Sheets that ask one question of a pair of clusters: is there an analogy, or a tension? (decision 0009)
 
-B4 drew its pairs from neighbourhoods, so every analogy I found there was between ideas already close by topic,
+B4 drew its pairs from neighborhoods, so every analogy I found there was between ideas already close by topic,
 and the spike that ranked them by structure couldn't say anything about analogies between unrelated ideas
 (2026-11-04). And two tensions in 50 pairs can't choose a model. These sheets go looking: each set is a way of
 proposing pairs, and a random set beside them says how often the answer is yes by chance.
@@ -12,10 +12,10 @@ Analogy (pairs from ideas below the median similarity by topic, so unrelated):
   on is likelier to be there; pairs whose closest lines are closest;
 - random: pairs drawn at random, the base rate.
 Tension (any similarity):
-- apart: neighbours first said far apart in time, where a change of mind would show;
+- apart: neighbors first said far apart in time, where a change of mind would show;
 - levels: a claim beside a nearby concrete observation;
 - model: a model reads every idea at once and proposes pairs that pull against each other;
-- near: neighbours drawn at random, the base rate among related ideas.
+- near: neighbors drawn at random, the base rate among related ideas.
 
 The sheet is blind and shuffled like B4's, and the mark is one word: yes, no or unsure. Each pair records which
 sets proposed it, so the score says which ways of looking find what, and whether they find the same things. The

@@ -17,8 +17,8 @@ from im import citations, egress, llm
 from im.config import ModelConfig
 
 MATCH_K = 5                    # nearest ideas shown to Claude
-RELATED_K, RELATED_MIN = 3, 0.70   # related edges: top 3 neighbours at cosine >= 0.70. bge-small puts a typical
-                                   # nearest neighbour at 0.68 (p90 0.73) on my ideas; tune by eye in Lattice.
+RELATED_K, RELATED_MIN = 3, 0.70   # related edges: top 3 neighbors at cosine >= 0.70. bge-small puts a typical
+                                   # nearest neighbor at 0.68 (p90 0.73) on my ideas; tune by eye in Lattice.
 
 MATCH_SYSTEM = """You maintain my idea lattice: a long-lived collection of ideas captured from my conversations \
 and notes. You get one newly captured item and the existing ideas most similar to it. Decide which it is:
@@ -300,10 +300,10 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
 
 
 def relate(conn, embedder) -> int:
-    """Rebuild the embedding neighbours that stand in as connections until a model decides a pair (0010): each idea's
-    nearest neighbours above RELATED_MIN. Only connections an embedding made are dropped or rewritten, so the archive's
+    """Rebuild the embedding neighbors that stand in as connections until a model decides a pair (0010): each idea's
+    nearest neighbors above RELATED_MIN. Only connections an embedding made are dropped or rewritten, so the archive's
     and a model's stay. They're cited as they're rebuilt, whichever path called this (an idle run rebuilds them too),
-    along with any new lineage. Returns how many neighbour pairs there are."""
+    along with any new lineage. Returns how many neighbor pairs there are."""
     ids, M = _idea_matrix(conn, embedder)
     method = f"embedding:{embedder.model_version};k={RELATED_K};min={RELATED_MIN}"
     pairs = {}
@@ -377,7 +377,7 @@ def project(M: np.ndarray, prev: np.ndarray | None = None, shared: np.ndarray | 
         sims = M[placed] @ M[i]
         top = np.argsort(-sims)[:PLACE_K]
         w = np.exp((sims[top] - sims[top].max()) / PLACE_TEMP)
-        angle = n * 2.399963   # the golden angle: new ideas around one neighbour fan out instead of stacking
+        angle = n * 2.399963   # the golden angle: new ideas around one neighbor fan out instead of stacking
         P[i] = (w @ P[placed][top]) / w.sum() + PLACE_JITTER * np.array([np.cos(angle), np.sin(angle)])
     return P
 
