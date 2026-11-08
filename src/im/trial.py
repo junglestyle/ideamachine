@@ -28,7 +28,7 @@ from im.feedback import CARRY_MIN_SCORE, quote_score
 
 SAMPLE = 150
 EXAMPLES = 15
-KEEP = ("kind", "said_by", "attributed_to", "quote", "reading", "gist", "confidence")   # what a trial keeps
+KEEP = ("kind", "said_by", "attributed_to", "quote", "reading", "mishearings", "gist", "confidence", "checks")
 
 
 def sample(conn, n: int = SAMPLE) -> list:
@@ -167,14 +167,14 @@ def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy:
             n["episodes_reference_captured_in"] += 1
             n["of_those_candidate_captured_nothing"] += not c_items
         for i, it in enumerate(r_items):
-            k = by_kind.setdefault(it["kind"], [0, 0])
+            k = by_kind.setdefault(it.get("kind", "-"), [0, 0])
             k[0] += 1
             k[1] += i in m
             found_by_reach.append((eid, it, i in m))
             if i not in m:
-                missed.append(f"{it['kind']}: {it['quote']}")
+                missed.append(f"{it.get('kind', '-')}: {it['quote']}")
         used = set(m.values())
-        extra += [f"{it['kind']}: {it['quote']}" for j, it in enumerate(c_items) if j not in used]
+        extra += [f"{it.get('kind', '-')}: {it['quote']}" for j, it in enumerate(c_items) if j not in used]
     rate = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
     cost = lambda reads: sum(reads[e][2] or 0.0 for e in both)  # noqa: E731
     return {"candidate": candidate[1], "reference": reference[1], "policy": policy, "episodes": len(both),
@@ -188,7 +188,22 @@ def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy:
                             "reference": verbatim(conn, [ref[e][1] for e in both])},
         "quotes_not_in_lines": {"candidate": not_in_lines(conn, {e: cand[e][1] for e in both}),
                                 "reference": not_in_lines(conn, {e: ref[e][1] for e in both})},
+        "checks": {"candidate": checks([cand[e][1] for e in both]), "reference": checks([ref[e][1] for e in both])},
         "missed": missed[:EXAMPLES], "extra_examples": extra[:EXAMPLES]}
+
+
+def checks(reads: list[list[dict]]) -> dict | None:
+    """How many captures fail each capture check (capture_checks), and the share that pass every one. None for reads
+    made before the checks were recorded."""
+    items = [it for r in reads for it in r]
+    if not items or any("checks" not in it for it in items):
+        return None
+    failing: dict = {}
+    for it in items:
+        for code in it["checks"]:
+            failing[code] = failing.get(code, 0) + 1
+    return {"captures": len(items), "pass": round(sum(not it["checks"] for it in items) / len(items), 3),
+            "failing": dict(sorted(failing.items()))}
 
 
 def _words(text: str) -> str:
