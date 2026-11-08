@@ -114,3 +114,13 @@ drawn through lenses ([0010](decisions/0010-connections-kinds-lenses.md)), and a
     transcribed, a reading, an unlabelled gist and who a relayed thought is from; `im trial` reports each read's
     share of quotes word for word in their lines. Register (joke, irony) leaves `kind` for a judging pass after
     extraction.
+11. Which of Jev's question types fit where? Every question is a Noul today, combined in code (2026-11-07). A
+    `choice` (one of a list, probabilities summing to 1) fits what is one of several: the matcher's decision (new,
+    same as candidate n, or develops candidate n), which B1's replay can score against Opus's logged decisions with
+    nothing for me to mark, where today's four Nouls can say yes twice; the direction of `supports` and
+    `elaborates` (A>B, B>A, both); the register a judging pass gives a capture after extraction (open question 10);
+    and, if kinds come to matter downstream, a capture's kind. Not edge kinds, which a connection may carry several
+    of (0010), nor connection against none, a Noul at a cut already. A choice always picks one, so it needs a
+    "none of these" option, and overlapping options split their probability. `score` fits nothing yet: a
+    connection weighs 1 (0010), ideas aren't rated (0007), a Noul's probability is already a confidence, and what's
+    counted or measured (recurrence, similarity, `quote_in_lines`) is better computed than asked.
