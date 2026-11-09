@@ -22,8 +22,8 @@ def fake_jev(sent):
 
 
 def test_jev_replays_the_matchers_decisions_and_is_scored_against_opus(seeded, cfg, stream, tmp_path):
-    lat_setup(seeded, cfg, stream)   # Opus (a fake) decided: the coffee capture same as the coffee idea, the build
-    sent = []                        # capture develops the signal idea, the LoRa capture is new
+    lat_setup(seeded, cfg, stream)   # Opus (a fake, matcher v2) decided: the coffee capture makes the coffee idea's
+    sent = []                        # point; the build and LoRa captures are new
     out = match_bench.run(seeded, fake_jev(sent), tmp_path, names.Scrubber(b"k"))
     assert out == {"decisions": 3, "asked": len(sent), "answered": len(sent)}
     assert all(set(b["questions"]) == set(jev.QUESTIONS["match"]) for b in sent)
@@ -34,11 +34,12 @@ def test_jev_replays_the_matchers_decisions_and_is_scored_against_opus(seeded, c
     assert len(logged) == len(sent) and all(set(segs) & matcher for (segs,) in logged)
 
     r = match_bench.score(tmp_path)
-    assert r["by_opus"] == {"new": 1, "same_as": 1, "evolves": 1} and r["chosen_unknown"] == 0
+    assert r["by_opus"] == {"new": 2, "same_as": 1, "evolves": 0} and r["chosen_unknown"] == 0
     assert (r["best"]["agree"], r["best"]["same_as_precision"], r["best"]["same_as_recall"]) == (1.0, 1.0, 1.0)
-    assert r["auc"]["same_as:mean"] == 1.0 and r["auc"]["evolves:mean"] == 1.0
-    # Jev rates the development 0.75 on "develops": a cut above that makes it a new idea, and Opus disagrees.
-    assert r["agree"]["same 0.5"].split()[-1] == "0.67"   # at develops 0.8: the development read as new, 2 of 3
+    assert r["auc"]["same_as:mean"] == 1.0
+    # Jev rates the build capture 0.75 on "develops" against the signal idea: below that cut it's read as a
+    # development, which matcher v2 never decides, so Jev and Opus disagree on 1 of 3.
+    assert r["agree"]["same 0.5"].split() == ["0.67", "0.67", "0.67", "0.67", "1.00"]
 
     assert match_bench.run(seeded, fake_jev(sent), tmp_path, names.Scrubber(b"k"))["answered"] == out["answered"]
     assert len(sent) == out["asked"]   # a rerun sends nothing it has an answer to
@@ -51,3 +52,15 @@ def test_the_matchers_request_is_read_back_as_it_was_shown():
     assert item == {"kind": "idea", "said_by": "me", "quote": "the build broke — again", "summary": "Builds break."}
     assert candidates == [{"text": "Signals: A broken build is a signal", "note": "true"},
                           {"text": "Coffee: The order is\nthe meeting."}]
+
+
+def test_matcher_v2s_request_is_read_back_as_it_was_shown():
+    payload = ("New capture\ngist: Builds break.\nreading: The build broke again.\nrelayed from: my lead\n"
+               "quote (evidence only): the build broke — again\n\nCandidates\n"
+               "1. title (mine): Signals\n   statement: A broken build is a signal\n   my note: true\n"
+               "   observations:\n   - A gist (relayed from: Bob)\n   quote: a quote\n"
+               "2. title: Coffee\n   statement (mine): The order is the meeting.")
+    item, candidates = match_bench.parse(payload)
+    assert item == {"quote": "the build broke — again", "summary": "Builds break.", "relayed_from": "my lead"}
+    assert candidates == [{"text": "Signals: A broken build is a signal", "note": "true"},
+                          {"text": "Coffee: The order is the meeting."}]
