@@ -83,6 +83,17 @@ def test_no_provider_that_keeps_nothing_is_said_plainly():
         llm.complete(llm.OpenRouter(post=post), "some/model", "low", "s", SCHEMA, "t")
 
 
+def test_claudes_default_budget_is_one_the_sdk_sends_and_one_it_wouldnt_is_never_tried():
+    import anthropic
+    sdk = anthropic.Anthropic(api_key="x")
+    sdk._calculate_nonstreaming_timeout(llm.max_tokens_for("claude-opus-5-5"), None)   # raises past 10 minutes
+    with pytest.raises(ValueError):
+        sdk._calculate_nonstreaming_timeout(llm.CLAUDE_CEILING + 1, None)
+    with pytest.raises(llm.Stop, match="streamed"):
+        llm.complete(SimpleNamespace(), "claude-opus-5-5", "low", "s", SCHEMA, "t", llm.CLAUDE_CEILING + 1)
+    assert llm.max_tokens_for("deepseek/deepseek-v4.1-flash") == 32000
+
+
 def test_a_dated_model_id_is_priced_as_its_model_and_an_unknown_one_never_as_free():
     usage = SimpleNamespace(input_tokens=1_000_000, output_tokens=0)
     assert llm.cost("claude-opus-5-5-20261015", usage) == llm.cost("claude-opus-5-5", usage) == 4.0

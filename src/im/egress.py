@@ -176,11 +176,11 @@ def send(conn, request: Callable[[], llm.Reply], *, model: str, payload: str, se
 def ask(conn, client, model: str, effort: str, system: str, schema: dict, text: str, *, segment_ids,
         prompt_version: str, monthly_cap_usd: float, policy: str = POLICY_VERSION, episode_id=None,
         max_tokens: int | None = None, read: Callable[[dict], object] = lambda answer: answer) -> Answer:
-    """One request to a chat model (llm.complete), by `send`, with an output budget of `max_tokens` (None:
-    llm.MAX_TOKENS). A Claude model with no known price isn't sent: what it spent couldn't be counted toward the cap."""
+    """One request to a chat model (llm.complete), by `send`, with an output budget of `max_tokens` (None: the
+    model's, llm.max_tokens_for). A Claude model with no known price isn't sent: what it spent couldn't be counted
+    toward the cap."""
     if not llm.via_openrouter(model) and llm.price(model) is None:
         raise llm.Stop(f"no price known for {model} (llm.PRICES): nothing sent")
-    budget = max_tokens or llm.MAX_TOKENS
-    return send(conn, lambda: llm.complete(client, model, effort, system, schema, text, budget), model=model,
+    return send(conn, lambda: llm.complete(client, model, effort, system, schema, text, max_tokens), model=model,
                 payload=text, segment_ids=segment_ids, prompt_version=prompt_version,
                 monthly_cap_usd=monthly_cap_usd, policy=policy, episode_id=episode_id, read=read)
