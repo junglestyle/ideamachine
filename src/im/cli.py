@@ -352,6 +352,40 @@ def cmd_gate(args) -> None:
     _print(out)
 
 
+def cmd_audit_gate(args) -> None:
+    """The gate's labeling sheet: drawn from a trial read Jev answered about, drafted by models, my review of their
+    disagreements, and the cuts it suggests."""
+    from pathlib import Path
+
+    from im import egress, extract, gate_audit, jev, llm, names, trial
+
+    folder = Path(args.folder)
+    if args.action == "review":
+        _print(gate_audit.review(folder))
+        return
+    if args.action == "score":
+        _print(gate_audit.score(folder))
+        return
+    cfg = config.load()
+    x = cfg.extract
+    cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
+    with db.connect(db.pipeline_dsn()) as conn:
+        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
+        policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+        if args.action == "draft":
+            if not args.model:
+                raise SystemExit("draft needs --model, the model drafting, e.g. openai/gpt-6.1-terra")
+            _print(gate_audit.draft(conn, folder, llm.client_for(args.model), args.model, args.effort or "low",
+                                    scrubber, cap))
+            return
+        if not args.prompt:
+            raise SystemExit("sheet needs the trial's prompt, e.g. v5 --model openai/gpt-6.1-sol")
+        system, schema = extract.system_prompt(args.prompt, x.interests), extract.schema_for(args.prompt)
+        model, effort = args.model or x.model, args.effort or x.effort
+        read = (trial.version(model, effort, system, args.replicate, schema), model)
+        _print(gate_audit.write(conn, folder, jev.Jev(), read, policy, args.seed, args.size))
+
+
 def cmd_tune(args) -> None:
     """Preview what changing the weight knobs would do. Writes nothing; paste the printed [weight] into im.toml."""
     from im import weight
@@ -813,6 +847,23 @@ def main(argv=None) -> None:
     ga.add_argument("--monthly-cap-usd", type=float, help="send nothing once the month's spend reaches this "
                     "(default: config)")
     ga.set_defaults(func=cmd_gate)
+    ag = sub.add_parser("audit-gate", help="set the gate's cuts: a sheet of captures Jev answered about, drafted by "
+                        "two models; I review only where they disagree (sheet and review send nothing; draft sends "
+                        "to the model)")
+    ag.add_argument("action", choices=["sheet", "draft", "review", "score"])
+    ag.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
+    ag.add_argument("prompt", nargs="?", help="sheet: the trial's prompt, e.g. v5")
+    ag.add_argument("--model", help="sheet: the trial's model, as it named it (default: the configured one); "
+                    "draft: the model drafting, e.g. openai/gpt-6.1-terra")
+    ag.add_argument("--effort", help="sheet: the trial's effort (default: the configured one); draft: the drafting "
+                    "model's (default low)")
+    ag.add_argument("--replicate", type=int, default=1, help="sheet: which of the trial's reads (default the first)")
+    ag.add_argument("--size", type=int, default=80, help="sheet: how many captures, half flagged by Jev")
+    ag.add_argument("--seed", type=int, default=13, help="sheet: the sample and shuffle's seed")
+    ag.add_argument("--policy", choices=["B", "C"], default="C", help="the trial's policy, and the draft's (default C)")
+    ag.add_argument("--monthly-cap-usd", type=float, help="draft: send nothing once the month's spend reaches this "
+                    "(default: config)")
+    ag.set_defaults(func=cmd_audit_gate)
     tu = sub.add_parser("tune", help="preview weight and proposal settings, e.g. recurrence_minutes=45 (writes nothing)")
     tu.add_argument("knobs", nargs="*", metavar="knob=value")
     tu.add_argument("--top", type=int, default=10)
