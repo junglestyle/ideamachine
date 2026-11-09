@@ -61,7 +61,8 @@ Settings are env vars:
   and says so. What's sent, and how, is in [decisions/0004-claude-extraction.md](decisions/0004-claude-extraction.md).
 - `LATTICE_DATABASE_URL` and `LATTICE_TOKEN`: for `im web`, the neutral view (every cluster past the gates, newest
   first, no score; [decision 0007](decisions/0007-neutral-proposals.md)). It reads `pub` and appends feedback as
-  Lattice's role, logs in with Lattice's token, and listens on 127.0.0.1:8792.
+  Lattice's role, logs in with Lattice's token, and listens on 127.0.0.1:8792. A link toggles demo mode, where
+  nothing sensitive shows and nothing can be kept or dismissed; `im web --demo` serves demo mode only.
 - `IM_DEV_ADMIN_URL`: the local dev superuser, used only by tests to create and drop `im_test`. Code refuses it
   unless every host it (or `PGHOST`) names is localhost, a loopback address or a socket directory. Each test gets a
   fresh `im_test` database and stream directory, and none of the other settings here.
@@ -79,13 +80,15 @@ Every stage that asks Claude takes its model and effort from the file:
 | `[match]` | the lattice's matcher | `claude-opus-5-5` | `low` |
 | `[themes]` | describing, filing and proposing themes | `claude-opus-5-5` | `low` |
 | `[scores]` | the rubric | `claude-opus-5-5` | `low` |
-| `[sensitivity]` | the tags demo mode hides by | `claude-opus-5-5` | `low` |
 | `[vocab]` | vocabulary repairs and archive picks | `claude-opus-5-5` | `low` |
 | `[digest]` | the weekly digest | `claude-opus-5-5` | `low` |
 
 Both go into the stage's version. Changing extraction's re-reads every episode, so try it first with `im trial`.
-Changing the scores', sensitivity's or vocab's asks again about every idea, and the themes' about every idea that
-fits no theme. The matcher and the digest use a new one from then on; what they've already done stays.
+Changing the scores' or vocab's asks again about every idea, and the themes' about every idea that fits no theme.
+The matcher and the digest use a new one from then on; what they've already done stays.
+
+The sensitivity tags have no section: Jev (`jev.MODEL`) answers one yes or no per tag, with names said pseudonymized
+(policy C), and every idea and theme is tagged again when the questions or the cut (`sensitivity.CUT`) change.
 
 Each section also takes `max_tokens`, a request's output budget, reasoning included (OpenRouter counts it there).
 It isn't part of any version, so raising it changes nothing already done: a request that ran out is simply asked

@@ -110,6 +110,26 @@ QUESTIONS = {
         "mocked": ("In `context`, does `me` voice the point of `gist` only to mock, parody or reject it?", None),
         "two_points": ("Does `gist` make two separate points, each of which could stand on its own?", None),
     },
+    # Sensitivity tags (im.sensitivity, decision 0012): an idea or a theme (`item`: its text, and for an idea what was
+    # said), one yes or no per tag, each decided at sensitivity.CUT. They describe; a view decides what to hide.
+    "sensitivity": {
+        "profanity": ("Does `item` contain swearing or crude language?",
+                      {"true": "Swear words or crude terms appear in its text or in what was said",
+                       "false": "Its wording is clean, whatever its subject"}),
+        "sex": ("Is `item` about sex: sexual content or behavior, or dating framed sexually?", None),
+        "gender_politics": ("Is `item` about gender politics: claims about men and women, gender roles and power, "
+                            "feminism or its critics?", None),
+        "politics": ("Is `item` about politics: parties, politicians, ideologies, policy or political conflict?",
+                     None),
+        "drugs": ("Is `item` about recreational drugs or drug use?", None),
+        "offensive": ("Could `item` offend: stereotypes or slurs about a group, mockery of a group, or a crude insult, "
+                      "even as a joke?", None),
+        "violence": ("Is `item` about violence, weapons or harming people?", None),
+        "private_person": ("Is `item` about a specific private individual?",
+                           {"true": "It describes, judges or tells about one particular person who isn't a public "
+                                    "figure, named or not (a friend, a date, a coworker; P-... stands for a name)",
+                            "false": "It's about people in general, a public figure, or no one in particular"}),
+    },
 }
 
 

@@ -5,6 +5,10 @@ diarization, not me; never a name), in how many conversations, when, its maturit
 No score orders or filters anything. From a card I keep a cluster (canonical or pinned), un-keep it or dismiss it,
 as the same feedback events Lattice's keep_idea writes.
 
+Demo mode (a toggle, or `im web --demo` for nothing else) reads the `demo` views instead of `pub`'s, so nothing
+sensitive is there to show: the sky keeps a sensitive cluster's star, blank, with its edges, and the lists (the
+feed, a card's quotes and connections) leave it out. Nothing can be kept or dismissed in demo mode.
+
 It connects as Lattice's role (LATTICE_DATABASE_URL: read pub, append feedback), never as im_pipeline, and logs in
 with Lattice's token (LATTICE_TOKEN), exchanged once per device for a signed cookie. Loopback only: tailscale serve
 publishes it to the tailnet (install/nas.sh).
@@ -26,6 +30,7 @@ import psycopg
 DATABASE_ENV = "LATTICE_DATABASE_URL"
 TOKEN_ENV = "LATTICE_TOKEN"
 COOKIE = "emanation_session"
+DEMO_COOKIE = "emanation_demo"
 PAGE = 50
 SHOW = {  # which maturities the feed shows, and the tab's name
     "candidates": (("candidate", "idea"), "candidates and ideas"),
@@ -53,12 +58,22 @@ def _session() -> str:
     return hmac.new(_token().encode(), b"emanation-session-v1", hashlib.sha256).hexdigest()
 
 
-def logged_in(cookie_header: str | None) -> bool:
+def _cookie(cookie_header: str | None, name: str) -> str | None:
     for part in (cookie_header or "").split(";"):
-        name, _, value = part.strip().partition("=")
-        if name == COOKIE and hmac.compare_digest(value.encode(), _session().encode()):
-            return True
-    return False
+        key, _, value = part.strip().partition("=")
+        if key == name:
+            return value
+    return None
+
+
+def logged_in(cookie_header: str | None) -> bool:
+    value = _cookie(cookie_header, COOKIE)
+    return value is not None and hmac.compare_digest(value.encode(), _session().encode())
+
+
+def _views(demo: bool) -> str:
+    """The prefix of the views with words a page reads: pub.demo_ in demo mode, else pub."""
+    return "pub.demo_" if demo else "pub."
 
 
 def _e(value) -> str:
@@ -86,39 +101,46 @@ def _rows(conn, sql: str, args=()) -> list[dict]:
     return [dict(zip(names, row)) for row in cur.fetchall()]
 
 
-def feed(conn, show: str = "candidates", page: int = 0) -> str:
+def feed(conn, show: str = "candidates", page: int = 0, demo: bool = False) -> str:
     maturities = SHOW.get(show, SHOW["candidates"])[0]
-    rows = _rows(conn, """SELECT * FROM pub.cards WHERE maturity = ANY(%s)
-                          ORDER BY last_seen DESC, idea_id LIMIT %s OFFSET %s""",
+    rows = _rows(conn, f"""SELECT * FROM {_views(demo)}cards WHERE maturity = ANY(%s) {"AND NOT redacted" if demo else ""}
+                           ORDER BY last_seen DESC, idea_id LIMIT %s OFFSET %s""",
                  (list(maturities), PAGE + 1, page * PAGE))
     tabs = " ".join(f'<a href="/?show={k}"{" aria-current=page" if k == show else ""}>{name}</a>'
-                    for k, (_, name) in SHOW.items()) + ' <a href="/sky">sky</a>'
+                    for k, (_, name) in SHOW.items()) + ' <a href="/sky">sky</a>' \
+        + f' <a href="/demo?on={0 if demo else 1}">{"leave demo mode" if demo else "demo mode"}</a>'
     cards = "".join(f'<li><a href="/idea/{r["idea_id"]}">{_e(r["title"])}</a><p>{_e(r["statement"])}</p>'
                     f'<small>{_e(_facts(r))}</small></li>' for r in rows[:PAGE])
     more = f'<a href="/?show={_e(show)}&page={page + 1}">older</a>' if len(rows) > PAGE else ""
     return _page("Idea Machine", f"<nav>{tabs}</nav><ol>{cards or '<li>Nothing here.</li>'}</ol>{more}")
 
 
-def card(conn, idea_id: str) -> str | None:
-    rows = _rows(conn, "SELECT * FROM pub.cards WHERE idea_id = %s", (idea_id,))
+def card(conn, idea_id: str, demo: bool = False) -> str | None:
+    v = _views(demo)
+    shown = "AND NOT c.redacted" if demo else ""
+    rows = _rows(conn, f"SELECT * FROM {v}cards WHERE idea_id = %s", (idea_id,))
     if not rows:
         return None
     r = rows[0]
-    quotes = _rows(conn, """SELECT speaker, quote, said_at FROM pub.card_evidence WHERE idea_id = %s
-                            ORDER BY said_at, item_id""", (idea_id,))
-    links = _rows(conn, """SELECT l.kind, l.kinds, c.idea_id, c.title FROM pub.card_links l
-                           JOIN pub.cards c ON c.idea_id = CASE WHEN l.a = %s THEN l.b ELSE l.a END
-                           WHERE %s IN (l.a, l.b) ORDER BY l.kind, c.title""", (idea_id, idea_id))
-    lineage = _rows(conn, """SELECT CASE WHEN l.from_id = %s THEN l.kind WHEN l.kind = 'evolves' THEN 'evolved by'
-                                         ELSE 'synthesized in' END AS kind,
-                                    c.idea_id, c.title FROM pub.card_lineage l
-                             JOIN pub.cards c ON c.idea_id = CASE WHEN l.from_id = %s THEN l.to_id ELSE l.from_id END
-                             WHERE %s IN (l.from_id, l.to_id) ORDER BY 1, c.title""", (idea_id, idea_id, idea_id))
-    near = _rows(conn, """SELECT c.idea_id, c.title, n.similarity FROM pub.card_neighbours(%s) n
-                          JOIN pub.cards c USING (idea_id) ORDER BY n.similarity DESC""", (idea_id,))
+    if demo and r["redacted"]:
+        return _page("Hidden", f"<h1>Hidden in demo mode</h1><small>{_e(_facts(r))}</small>")
+    quotes = _rows(conn, f"""SELECT speaker, quote, said_at FROM {v}card_evidence WHERE idea_id = %s
+                             ORDER BY said_at, item_id""", (idea_id,))
+    links = _rows(conn, f"""SELECT l.kind, l.kinds, c.idea_id, c.title FROM pub.card_links l
+                            JOIN {v}cards c ON c.idea_id = CASE WHEN l.a = %s THEN l.b ELSE l.a END
+                            WHERE %s IN (l.a, l.b) {shown} ORDER BY l.kind, c.title""", (idea_id, idea_id))
+    lineage = _rows(conn, f"""SELECT CASE WHEN l.from_id = %s THEN l.kind WHEN l.kind = 'evolves' THEN 'evolved by'
+                                          ELSE 'synthesized in' END AS kind,
+                                     c.idea_id, c.title FROM pub.card_lineage l
+                              JOIN {v}cards c ON c.idea_id = CASE WHEN l.from_id = %s THEN l.to_id ELSE l.from_id END
+                              WHERE %s IN (l.from_id, l.to_id) {shown} ORDER BY 1, c.title""",
+                    (idea_id, idea_id, idea_id))
+    near = _rows(conn, f"""SELECT c.idea_id, c.title, n.similarity FROM pub.card_neighbours(%s) n
+                           JOIN {v}cards c USING (idea_id) WHERE true {shown} ORDER BY n.similarity DESC""",
+                 (idea_id,))
     buttons = "".join(f'<button name="action" value="{a}">{a}</button>' for a in ACTIONS)
     body = [f"<h1>{_e(r['title'])}</h1><p>{_e(r['statement'])}</p><small>{_e(_facts(r))}</small>",
-            f'<form method="post" action="/idea/{idea_id}">{buttons}</form>',
+            "" if demo else f'<form method="post" action="/idea/{idea_id}">{buttons}</form>',
             f'<p><a href="/sky?seed={idea_id}">Light the sky from here</a></p>']
     if r["my_note"]:
         body.append(f"<h2>My note</h2><p>{_e(r['my_note'])}</p>")
@@ -140,26 +162,29 @@ def card(conn, idea_id: str) -> str | None:
 SIZES = {"observation": 0, "candidate": 1, "idea": 2}   # a canonical idea is one bigger than a pinned one
 
 
-def sky(conn, seed: str | None = None) -> str | None:
+def sky(conn, seed: str | None = None, demo: bool = False) -> str | None:
     """Every card at its place on the one map (decision 0005, amended). With a seed, a lens lights what's relevant to
-    it; without one, the encodings light everything. None if the seed isn't on the map."""
+    it; without one, the encodings light everything. None if the seed isn't on the map. In demo mode a sensitive
+    card keeps its star, blank."""
     from im import lens
 
-    rows = _rows(conn, """SELECT c.*, p.x, p.y FROM pub.cards c JOIN pub.card_positions p USING (idea_id)
-                          ORDER BY c.idea_id""")
+    v = _views(demo)
+    rows = _rows(conn, f"""SELECT c.*, p.x, p.y FROM {v}cards c JOIN pub.card_positions p USING (idea_id)
+                           ORDER BY c.idea_id""")
     index = {str(r["idea_id"]): n for n, r in enumerate(rows)}
     if seed is not None and seed not in index:
         return None
     now = datetime.now(timezone.utc)
     stars = [[str(r["idea_id"]), round(float(r["x"]), 4), round(float(r["y"]), 4),
               SIZES[r["maturity"]] + (r["kept_as"] == "canonical"), r["conversations"],
-              max((now - r["last_seen"]).days, 0) if r["last_seen"] else 365, r["title"], _facts(r)] for r in rows]
+              max((now - r["last_seen"]).days, 0) if r["last_seen"] else 365, r["title"] or "", _facts(r)]
+             for r in rows]
     links = sorted({tuple(sorted((index[a], index[b]))) for a, b in conn.execute(
         """SELECT a::text, b::text FROM pub.card_links UNION ALL SELECT from_id::text, to_id::text FROM pub.card_lineage""")
         if a in index and b in index and a != b})
     rel = {k: v for k, v in lens.relevance(conn, seed).items() if k in index} if seed else None
     data = json.dumps({"stars": stars, "links": links, "rel": rel, "seed": seed}, separators=(",", ":"))
-    title = rows[index[seed]]["title"] if seed else "Sky"
+    title = (rows[index[seed]]["title"] or "Sky") if seed else "Sky"
     return _SKY.replace("{title}", _e(title)).replace("{data}", data.replace("</", "<\\/"))
 
 
@@ -201,6 +226,10 @@ _SKY = (files("im") / "sky.html").read_text()
 
 class Handler(BaseHTTPRequestHandler):
     dsn = ""
+    demo_only = False   # im web --demo: demo mode, and no way out of it
+
+    def _demo(self) -> bool:
+        return self.demo_only or _cookie(self.headers.get("Cookie"), DEMO_COOKIE) == "1"
 
     def _send(self, code: int, body: str = "", headers: dict | None = None) -> None:
         data = body.encode()
@@ -234,16 +263,21 @@ class Handler(BaseHTTPRequestHandler):
         if not logged_in(self.headers.get("Cookie")):
             return self._send(303, headers={"Location": "/login"})
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
+        if url.path == "/demo":   # the toggle: a cookie for this browser
+            on = "1" if self.demo_only or q.get("on") == "1" else "0"
+            return self._send(303, headers={"Location": "/", "Set-Cookie": f"{DEMO_COOKIE}={on}; Path=/; "
+                                            "Max-Age=31536000; HttpOnly; SameSite=Strict"})
+        demo = self._demo()
         with psycopg.connect(self.dsn, autocommit=True) as conn:
             if url.path == "/":
                 page = int(q["page"]) if q.get("page", "").isdigit() else 0
-                return self._send(200, feed(conn, q.get("show", "candidates"), page))
+                return self._send(200, feed(conn, q.get("show", "candidates"), page, demo))
             if url.path == "/sky":
                 seed = q.get("seed")
-                body = sky(conn, seed) if seed is None or _UUID.match(seed) else None
+                body = sky(conn, seed, demo) if seed is None or _UUID.match(seed) else None
                 return self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))
             m = re.fullmatch(r"/idea/([0-9a-f-]{36})", url.path)
-            body = card(conn, m[1]) if m and _UUID.match(m[1]) else None
+            body = card(conn, m[1], demo) if m and _UUID.match(m[1]) else None
         self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))
 
     def do_POST(self) -> None:
@@ -260,16 +294,20 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/idea/([0-9a-f-]{36})", url.path)
         if not (m and _UUID.match(m[1]) and form.get("action") in ACTIONS):
             return self._send(400, _page("Bad request", "Bad request."))
+        if self._demo():
+            return self._send(403, _page("Demo mode", "Nothing can be kept or dismissed in demo mode."))
         with psycopg.connect(self.dsn, autocommit=True) as conn:
             act(conn, m[1], form["action"])
         self._send(303, headers={"Location": f"/idea/{m[1]}"})
 
 
-def serve(host: str, port: int) -> None:
+def serve(host: str, port: int, demo: bool = False) -> None:
+    """`demo`: demo mode for every page, with no way out of it."""
     try:
         Handler.dsn = os.environ[DATABASE_ENV]
     except KeyError:
         raise SystemExit(f"{DATABASE_ENV} is not set (role lattice_app; see .env.example)") from None
     _token()
-    print(f"serving on http://{host}:{port}/", flush=True)
+    Handler.demo_only = demo
+    print(f"serving on http://{host}:{port}/" + (" in demo mode" if demo else ""), flush=True)
     ThreadingHTTPServer((host, port), Handler).serve_forever()

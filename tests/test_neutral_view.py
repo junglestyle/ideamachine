@@ -180,6 +180,40 @@ def test_a_lens_lights_its_seed_and_what_it_reaches(matched, admin):  # noqa: F8
     assert as_app(admin, web.sky, "00000000-0000-0000-0000-000000000000") is None
 
 
+def test_demo_mode_blanks_a_sensitive_star_and_leaves_it_out_of_every_list(matched, admin):  # noqa: F811
+    import json
+
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    new = str(idea(matched, "Something new"))
+    as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
+                                         VALUES ('idea_sensitive', %s, %s)""", (new, json.dumps({"sensitive": True}))))
+    lattice.place(matched, HashEmbedder().model_version)
+    assert "Something new" in as_app(admin, web.feed, "candidates")
+    assert "Something new" not in as_app(admin, web.feed, "candidates", 0, True)   # a list leaves it out
+    hidden = as_app(admin, web.card, new, True)
+    assert "Hidden in demo mode" in hidden and "A new thing" not in hidden and "action" not in hidden
+    stars = {s[0]: s for s in sky_data(as_app(admin, web.sky, None, True))["stars"]}
+    assert set(stars) == {s[0] for s in sky_data(as_app(admin, web.sky))["stars"]}   # the map keeps its shape
+    assert stars[new][6] == ""                                                       # its star, blank
+    # What any presentation reads in demo mode holds nothing it could show by mistake.
+    assert as_app(admin, lambda c: c.execute("SELECT title, statement, redacted FROM pub.demo_cards WHERE idea_id = %s",
+                                             (new,)).fetchall()) == [(None, None, True)]
+    assert as_app(admin, lambda c: c.execute("SELECT count(*) FROM pub.demo_card_evidence WHERE idea_id = %s",
+                                             (new,)).fetchall()) == [(0,)]
+
+
+def test_demo_mode_is_a_toggle_and_takes_nothing(served, matched):  # noqa: F811
+    new = str(idea(matched, "Something new"))
+    _, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")
+    cookie = headers["Set-Cookie"].split(";")[0]
+    status, headers, _ = request(served, "GET", "/demo?on=1", cookie=cookie)
+    demo = cookie + "; " + headers["Set-Cookie"].split(";")[0]
+    assert status == 303 and "leave demo mode" in request(served, "GET", "/", cookie=demo)[2]
+    assert request(served, "POST", f"/idea/{new}", "action=dismiss", demo)[0] == 403
+
+
 class Nearby:
     """What the lens reads: connections and lineage with their weight, and the seed's nearest cards by meaning."""
 
