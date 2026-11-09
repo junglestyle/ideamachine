@@ -255,7 +255,7 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
             try:
                 a = egress.ask(conn, client, chat.model, chat.effort, MATCH_SYSTEM, MATCH_SCHEMA,
                                _text(item, candidates), segment_ids=item[6], prompt_version=version,
-                               monthly_cap_usd=monthly_cap_usd, episode_id=item[1], max_tokens=4000)
+                               monthly_cap_usd=monthly_cap_usd, episode_id=item[1], max_tokens=chat.max_tokens or 4000)
             except llm.Stop as e:
                 stats["stopped"] = str(e)[:200]
                 break

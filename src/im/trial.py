@@ -39,9 +39,10 @@ def sample(conn, n: int = SAMPLE) -> list:
 
 def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str = "medium",
         monthly_cap_usd: float = 20.0, limit: int | None = None, n: int = SAMPLE, scrubber=None,
-        replicate: int = 1, schema: dict = extract.SCHEMA) -> dict:
+        replicate: int = 1, schema: dict = extract.SCHEMA, max_tokens: int | None = None) -> dict:
     """Send the sampled episodes this model hasn't read yet under this prompt and policy (or whose payload changed).
-    `schema` is the prompt's (extract.schema_for)."""
+    `schema` is the prompt's (extract.schema_for); `max_tokens`, each request's output budget, isn't part of the
+    trial's version."""
     pv = version(model, effort, system, replicate, schema)
     policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     done = {r[0]: r[1] for r in conn.execute(
@@ -55,7 +56,8 @@ def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str =
         try:
             a = egress.ask(conn, client, model, effort, system, schema, p.text, segment_ids=p.segment_ids,
                            prompt_version=pv, monthly_cap_usd=monthly_cap_usd, policy=p.policy,
-                           episode_id=p.episode_id, read=lambda answer: extract._items(p, answer["items"]))
+                           episode_id=p.episode_id, max_tokens=max_tokens,
+                           read=lambda answer: extract._items(p, answer["items"]))
         except llm.Stop as e:
             stats["stopped"] = str(e)[:200]
             break

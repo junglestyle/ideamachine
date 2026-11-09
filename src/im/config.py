@@ -48,15 +48,18 @@ class ExtractConfig:
     interests: str = ""                  # my interests, for prompts with a slot for them (v2); keep it out of the repo
     monthly_cap_usd: float = 20.0        # every paid request stops once the month's egress spend reaches this
     max_episodes_per_run: int | None = None
+    max_tokens: int | None = None        # a request's output budget, reasoning included (None: llm.MAX_TOKENS)
 
 
 @dataclass(frozen=True)
 class ModelConfig:
     """The model a stage asks, and its effort: [match], [themes], [scores], [sensitivity], [vocab], [digest]. Both go
     into the stage's version: a change re-asks what that stage keys on its version (every score, tag and vocab check;
-    every idea that fits no theme); the matcher and the digest use it from then on."""
+    every idea that fits no theme); the matcher and the digest use it from then on. `max_tokens`, a request's output
+    budget, isn't in the version (None: the stage's own)."""
     model: str = "claude-opus-5-5"
     effort: str = "low"
+    max_tokens: int | None = None
 
 
 @dataclass(frozen=True)

@@ -82,6 +82,11 @@ Both go into the stage's version. Changing extraction's re-reads every episode, 
 Changing the scores', sensitivity's or vocab's asks again about every idea, and the themes' about every idea that
 fits no theme. The matcher and the digest use a new one from then on; what they've already done stays.
 
+Each section also takes `max_tokens`, a request's output budget, reasoning included (OpenRouter counts it there).
+It isn't part of any version, so raising it changes nothing already done: a request that ran out is simply asked
+again. Unset, extraction and the stages get 32,000 (`llm.MAX_TOKENS`) and the matcher 4,000. `im trial
+--max-tokens` overrides `[extract]`'s for one trial.
+
 Set `CUDA_VISIBLE_DEVICES=""` on a box with a GPU to measure what the NAS's CPU will do.
 
 ## Real data on eeyore

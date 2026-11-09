@@ -142,7 +142,7 @@ def _extract(conn, cfg) -> dict:
     try:
         client = anthropic.Anthropic()
         return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
-                                 extract.system_prompt(x.prompt, x.interests))
+                                 extract.system_prompt(x.prompt, x.interests), x.max_tokens)
     except anthropic.AnthropicError as e:  # e.g. no credentials configured at all
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -320,7 +320,7 @@ def cmd_trial(args) -> None:
         out = {}
         if not args.report:
             out["trial"] = trial.run(conn, llm.client_for(model), system, model, effort, cap, args.limit,
-                                     args.sample, scrubber, args.replicate, schema)
+                                     args.sample, scrubber, args.replicate, schema, args.max_tokens or x.max_tokens)
         out["report"] = trial.report(conn, (trial.version(model, effort, system, args.replicate, schema), model),
                                      (trial.version(ref_model, ref_effort, system, schema=schema), ref_model), policy)
     _print(out)
@@ -766,6 +766,9 @@ def main(argv=None) -> None:
                     help="a further independent read by the same model (2, 3...): the reference against its own "
                          "replicate is the ceiling for every candidate's recall")
     tr.add_argument("--effort", help="the candidate's effort (default: the configured one)")
+    tr.add_argument("--max-tokens", type=int, help="each request's output budget, reasoning included; not part of "
+                    "the trial's version, so a failed read can be retried with more (default: [extract] max_tokens, "
+                    "else 32000)")
     tr.add_argument("--monthly-cap-usd", type=float, help="send nothing once the month's spend reaches this "
                     "(default: config)")
     tr.set_defaults(func=cmd_trial)

@@ -89,7 +89,8 @@ def ask(conn, client, chat: ModelConfig, system: str, schema: dict, text: str, p
     """A request about lattice ideas, on the stage's model (`chat`), logged with the segments behind the ideas it
     shows. Raises llm.Stop at the cap or when Claude can't answer now; a request that failed comes back failed."""
     return egress.ask(conn, client, chat.model, chat.effort, system, schema, text, prompt_version=prompt_version,
-                      segment_ids=egress.segments_of(conn, idea_ids), monthly_cap_usd=monthly_cap_usd)
+                      segment_ids=egress.segments_of(conn, idea_ids), monthly_cap_usd=monthly_cap_usd,
+                      max_tokens=chat.max_tokens)
 
 
 def _unthemed(conn, tv: str) -> list[tuple]:
