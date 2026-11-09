@@ -180,6 +180,21 @@ def test_a_lens_lights_its_seed_and_what_it_reaches(matched, admin):  # noqa: F8
     assert as_app(admin, web.sky, "00000000-0000-0000-0000-000000000000") is None
 
 
+def test_lighting_the_sky_in_place_fetches_what_loading_the_lens_page_shows(served, matched):  # noqa: F811
+    import json
+
+    build = str(idea(matched, "Broken builds as signal"))
+    _, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")
+    cookie = headers["Set-Cookie"].split(";")[0]
+    page = sky_data(request(served, "GET", f"/sky?seed={build}", cookie=cookie)[2])
+    status, headers, body = request(served, "GET", f"/sky/lens?seed={build}", cookie=cookie)
+    got = json.loads(body)
+    assert (status, headers["Content-Type"]) == (200, "application/json")
+    assert got == {"seed": build, "rel": page["rel"], "title": "Broken builds as signal"}   # the map isn't sent again
+    assert request(served, "GET", "/sky/lens?seed=00000000-0000-0000-0000-000000000000", cookie=cookie)[0] == 404
+    assert request(served, "GET", f"/sky/lens?seed={build}")[0] == 303   # no lens without logging in
+
+
 def test_demo_mode_blanks_a_sensitive_star_and_leaves_it_out_of_every_list(matched, admin):  # noqa: F811
     import json
 

@@ -165,9 +165,8 @@ SIZES = {"observation": 0, "candidate": 1, "idea": 2}   # a canonical idea is on
 def sky(conn, seed: str | None = None, demo: bool = False) -> str | None:
     """Every card at its place on the one map (decision 0005, amended). With a seed, a lens lights what's relevant to
     it; without one, the encodings light everything. None if the seed isn't on the map. In demo mode a sensitive
-    card keeps its star, blank."""
-    from im import lens
-
+    card keeps its star, blank. The page loads the map once: lighting it from another card fetches only that view's
+    relevance (sky_lens)."""
     v = _views(demo)
     rows = _rows(conn, f"""SELECT c.*, p.x, p.y FROM {v}cards c JOIN pub.card_positions p USING (idea_id)
                            ORDER BY c.idea_id""")
@@ -182,10 +181,28 @@ def sky(conn, seed: str | None = None, demo: bool = False) -> str | None:
     links = sorted({tuple(sorted((index[a], index[b]))) for a, b in conn.execute(
         """SELECT a::text, b::text FROM pub.card_links UNION ALL SELECT from_id::text, to_id::text FROM pub.card_lineage""")
         if a in index and b in index and a != b})
-    rel = {k: v for k, v in lens.relevance(conn, seed).items() if k in index} if seed else None
+    rel = _relevance(conn, seed, index) if seed else None
     data = json.dumps({"stars": stars, "links": links, "rel": rel, "seed": seed}, separators=(",", ":"))
     title = (rows[index[seed]]["title"] or "Sky") if seed else "Sky"
     return _SKY.replace("{title}", _e(title)).replace("{data}", data.replace("</", "<\\/"))
+
+
+def _relevance(conn, seed: str, on_map) -> dict[str, float]:
+    from im import lens
+
+    return {k: v for k, v in lens.relevance(conn, seed).items() if k in on_map}
+
+
+def sky_lens(conn, seed: str, demo: bool = False) -> dict | None:
+    """What the sky needs to light itself from `seed` without loading the map again: its relevance to every card on
+    the map, and the page's title. None if the seed isn't on the map."""
+    v = _views(demo)
+    rows = _rows(conn, f"""SELECT c.idea_id::text AS id, c.title FROM {v}cards c
+                           JOIN pub.card_positions p USING (idea_id)""")
+    on_map = {r["id"]: r["title"] for r in rows}
+    if seed not in on_map:
+        return None
+    return {"seed": seed, "rel": _relevance(conn, seed, on_map), "title": on_map[seed] or "Sky"}
 
 
 def act(conn, idea_id: str, action: str) -> None:
@@ -231,10 +248,11 @@ class Handler(BaseHTTPRequestHandler):
     def _demo(self) -> bool:
         return self.demo_only or _cookie(self.headers.get("Cookie"), DEMO_COOKIE) == "1"
 
-    def _send(self, code: int, body: str = "", headers: dict | None = None) -> None:
+    def _send(self, code: int, body: str = "", headers: dict | None = None,
+              content_type: str = "text/html; charset=utf-8") -> None:
         data = body.encode()
         self.send_response(code)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         for k, v in (headers or {}).items():
             self.send_header(k, v)
@@ -276,6 +294,11 @@ class Handler(BaseHTTPRequestHandler):
                 seed = q.get("seed")
                 body = sky(conn, seed, demo) if seed is None or _UUID.match(seed) else None
                 return self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))
+            if url.path == "/sky/lens":   # the page lighting itself from another card, without reloading the map
+                seed = q.get("seed", "")
+                got = sky_lens(conn, seed, demo) if _UUID.match(seed) else None
+                return self._send(200, json.dumps(got, separators=(",", ":")), content_type="application/json") \
+                    if got else self._send(404, "{}", content_type="application/json")
             m = re.fullmatch(r"/idea/([0-9a-f-]{36})", url.path)
             body = card(conn, m[1], demo) if m and _UUID.match(m[1]) else None
         self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))
