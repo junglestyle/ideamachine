@@ -11,6 +11,7 @@ import pytest
 
 from im import egress, jev, llm, names, probe_audit
 
+from helpers import system_of
 from test_edge_audit import lattice_with_clusters  # noqa: F401 (fixture)
 from test_lattice import seeded  # noqa: F401 (fixture)
 from test_triage import HashEmbedder
@@ -233,7 +234,7 @@ def test_a_model_answers_the_sheet_blind_and_is_scored_against_me(lattice_with_c
     d = probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-opus-5-5")
     assert d["pairs"] == out["pairs"] == len(model.calls)
     sent = "\n".join(c["messages"][0]["content"] for c in model.calls)
-    assert "mark:" not in sent and model.calls[0]["system"] == probe_audit.DRAFT_SYSTEM["tension"]
+    assert "mark:" not in sent and system_of(model.calls[0]) == probe_audit.DRAFT_SYSTEM["tension"]
     assert probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-opus-5-5")["pairs"] == out["pairs"]
     assert len(model.calls) == out["pairs"]   # a rerun asks nothing it has already answered
     r = probe_audit.score(tmp_path)["drafts"]["claude-opus-5-5-low-B1"]
@@ -271,7 +272,7 @@ def test_a_quotes_only_draft_never_shows_the_summaries(lattice_with_clusters, tm
     d = probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-sonnet-5-5", quotes_only=True)
     assert d["draft"].endswith("-low-B1-quotes.json") and model.calls
     assert not any("Claude's summary" in c["messages"][0]["content"] for c in model.calls)
-    assert "then a summary" not in model.calls[0]["system"]
+    assert "then a summary" not in system_of(model.calls[0])
     assert any("> \"" in c["messages"][0]["content"] for c in model.calls)   # quotes still go, where there are any
 
 

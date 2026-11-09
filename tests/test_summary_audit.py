@@ -4,7 +4,7 @@ import json
 
 from im import extract, names, probe_audit, summary_audit, trial
 
-from helpers import run
+from helpers import run, system_of
 from test_carry import DATABASE, capture
 from test_extract import FakeClaude
 from test_probe_audit import FakeProposer, fill
@@ -25,7 +25,7 @@ def test_a_summary_sheet_samples_every_models_captures_blind(pipe, cfg, stream, 
     fill(tmp_path, lambda p: "yes" if p["set"] == "claude-sonnet-5-5" else "no")
     model = FakeProposer()   # a checker that says every summary adds something
     d = probe_audit.draft(pipe, model, tmp_path, "claude-haiku-5-5")
-    assert d["pairs"] == 2 and model.calls[0]["system"] == probe_audit.DRAFT_SYSTEM["summary"]
+    assert d["pairs"] == 2 and system_of(model.calls[0]) == probe_audit.DRAFT_SYSTEM["summary"]
     r = probe_audit.score(tmp_path)
     assert r["by_set"]["claude-sonnet-5-5"]["hit_rate"] == 1.0 and r["by_set"]["claude-opus-5-5"]["hit_rate"] == 0.0
     assert r["drafts"]["claude-haiku-5-5-low-B1"]["precision"] == 0.5

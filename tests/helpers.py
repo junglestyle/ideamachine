@@ -10,6 +10,12 @@ def table(conn, sql, *args):
     return conn.execute(sql, args or None).fetchall()
 
 
+def system_of(call: dict) -> str:
+    """The system prompt a Claude request carried (llm.complete sends it as one cached text block)."""
+    (block,) = call["system"]
+    return block["text"]
+
+
 def episodes(conn):
     return table(conn, "SELECT * FROM im.episodes ORDER BY episode_id")
 
