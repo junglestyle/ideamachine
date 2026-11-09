@@ -32,8 +32,8 @@ times, and one by `diarization` 147 of 162 times (the misses are short interject
 - **Ideas** are what I keep, as **canonical** (weighted: it attracts and pulls linked clusters) or **pinned** (kept
   and visible, no weight). Pinning never changes weight, maturity or clustering. The system proposes; it never makes
   an idea.
-- **Lenses:** the way into the graph. A lens is a query (a definition Jev answers yes or no to per cluster, or
-  all/none), metadata filters and my pins, and returns which clusters belong; it changes nothing. Pinned or archived,
+- **Lenses:** the way into the graph. A lens is a query (of a pluggable kind, such as questions Jev answers per
+  cluster, or all/none), metadata filters and my pins, and returns which clusters belong; it changes nothing. Pinned or archived,
   never thrown away. Themes become lenses. A **board** groups lenses, placed by hand; a Trellis view draws one
   ([0013](decisions/0013-lenses-and-boards.md)). Viewing the graph from one cluster isn't a lens.
 

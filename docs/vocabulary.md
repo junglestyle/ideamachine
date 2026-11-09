@@ -418,8 +418,12 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Lens.** A stored question about clusters ([0013]): a lens query, lens filters and lens pins. A cluster is in a lens
   if it's pinned in, or it passes the query and the filters and isn't pinned out. A lens writes no connections, and
   never refers to another lens. **Status:** not built (M5).
-- **Lens query.** A definition in words that Jev answers yes or no to for each cluster, asked of the clusters nearest
-  it by meaning; or `all` (no meaning test) or `none` (only the pins) ([0013]).
+- **Lens query.** Whether a cluster fits a lens's meaning: a query of some kind, stored as its kind and parameters,
+  that names the clusters worth asking and judges each in or out with a score and a reason. Kinds: `all` (no meaning
+  test), `none` (only the pins), and `jev` (a set of questions, a rule combining them, and its own cut). A long one
+  is built offline and imported ([0013]).
+- **Judged share.** How much of the map a lens's query has asked about so far ("judged 300 of 3,100"): a run can stop
+  at the clusters nearest the definition, and a cluster not yet asked isn't a no ([0013]).
 - **Lens filter.** A condition on stored facts that narrows what a lens's query admits: sensitivity tags, maturity,
   kept status, recency, recurrence, arousal, who said it ([0013]).
 - **Lens pin.** A cluster I include in a lens or exclude from it by hand, beating the query and the filters. It's
@@ -431,6 +435,10 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **View from a cluster.** Lighting the sky from one cluster: personalized PageRank from it over connections (each 1
   plus `KIND_WEIGHT` per connection kind) and lineage (both ways), plus its 20 embedding neighbors, weighted by
   similarity (`lens.relevance`, `/sky?seed=`). Not stored, and not a lens ([0013]).
+- **Follow, depth.** Choices of a view, not of a lens ([0013]). Follow spreads from a lens's members over every
+  connection and lineage, fading with distance; depth shows only what's within some number of steps of the view's
+  focus (a lens's members or one cluster). A view keeps members apart from what's reached by following, and demo
+  mode still decides what's shown.
 - **Relevance.** The view from a cluster's number for each cluster, from 0 to 1: how closely the graph and meaning tie
   it to that cluster. The cluster itself is 1, the rest are scaled so the most relevant other is 1 too, and clusters
   it doesn't reach are 0 (`lens.relevance`). _Not_ weight, confidence or value.
