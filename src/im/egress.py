@@ -22,7 +22,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from im import llm
+from im import llm, mishearings
+from im.names import words
 from im.triage import _part_of_day
 
 POLICY_VERSION = "B1;speakers-pseudonymized;spoken-names-not-scrubbed;no-registry"
@@ -36,10 +37,13 @@ class Payload:
     speakers: dict              # pseudonym -> local speaker label (never sent)
     policy: str = POLICY_VERSION
     names: dict = field(default_factory=dict)   # name pseudonym -> the name as said (never sent), policy C
+    hints: str = ""             # the context line's known mishearings, as sent: hints, so not in sha256
 
     @property
     def sha256(self) -> str:
-        return hashlib.sha256(self.text.encode()).hexdigest()
+        """What decides whether this episode was read already: the text, without the mishearing hints."""
+        text = self.text.replace(" " + self.hints, "", 1) if self.hints else self.text
+        return hashlib.sha256(text.encode()).hexdigest()
 
 
 def pseudonyms(speakers) -> dict:
@@ -77,8 +81,13 @@ def build(conn, episode_id, scrubber=None) -> Payload:
 
     alias = pseudonyms((label, kind) for _, label, kind, *_ in rows)
     said, names, mine = [r[3] for r in rows], {}, []
+    found = mishearings.hints(conn, said)
     if scrubber:
-        said, names, mine = scrubber.scrub(said, scrubber.find(conn, [(r[0], r[3]) for r in rows]))
+        exempt = mishearings.not_names(conn)
+        seen = {n for n in scrubber.find(conn, [(r[0], r[3]) for r in rows]) if not set(words(n)) <= exempt}
+        out, names, mine = scrubber.scrub(said + [x for h, m, _ in found for x in (h, m)], seen)
+        said, pairs = out[:len(said)], out[len(said):]
+        found = [(pairs[2 * i], pairs[2 * i + 1], s) for i, (_, _, s) in enumerate(found)]
     lines = [f"[{n}] {alias[r[1]]}: {text}" for n, (r, text) in enumerate(zip(rows, said), 1)]
 
     start: datetime = min(r[4] for r in rows).astimezone()
@@ -90,9 +99,12 @@ def build(conn, episode_id, scrubber=None) -> Payload:
         context += " I tapped the pendant at " + ", ".join(f"{t.astimezone():%H:%M:%S}" for t in taps) + "."
     if names:
         context += " Names said are pseudonyms (P-...)" + (f"; mine is {' '.join(mine)}." if mine else ".")
+    hints = mishearings.line(found)
+    if hints:
+        context += " " + hints
     text = f"Context: {context}\n\nTranscript:\n" + "\n".join(lines)
     return Payload(episode_id, text, [r[0] for r in rows], {v: k for k, v in alias.items()},
-                   scrubber.policy if scrubber else POLICY_VERSION, names)
+                   scrubber.policy if scrubber else POLICY_VERSION, names, hints)
 
 
 def spent_this_month(conn) -> float:
