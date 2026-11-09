@@ -435,9 +435,11 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   - `outside_value`: an idea worth something to a thoughtful stranger.
 - **MCP connector.** The tool interface through which MCP clients, such as claude.ai, query Idea Machine and submit
   feedback events. Its tools' names, arguments and results are a contract (SPEC §2, [0005]).
-- **Sensitivity annotation, demo mode.** A sensitivity annotation is the categories a cluster or theme touches:
-  `sex`, `gender_politics`, `political_extremism`, `violence`, `racism`, `profanity`. A model proposes them, and my
-  marks win (027; `sensitivity.CATEGORIES`). Demo mode is a presentation mode that leaves out what's annotated.
+- **Sensitivity tags, demo mode.** Eight descriptive tags on a cluster or theme: `profanity`, `sex`,
+  `gender_politics`, `politics`, `drugs`, `offensive`, `violence`, `private_person` (anything about a specific private
+  individual). Jev answers one yes or no per tag, its probabilities kept beside them (`sensitivity.TAGS`; 027, 051).
+  They describe; which ones hide is the view's choice, and anything tagged counts as sensitive in `pub.sensitivity`
+  unless my mark says otherwise. My marks win. Demo mode is a presentation mode that leaves out what's sensitive.
 - **Vocabulary suggestion.** A rare word that Hearsay's transcription should know. Suggestions come from my
   corrections, the archive and misheard quotes, and I approve them (`im.vocab_candidates`, 028:1-13). Approved ones
   are written to `vocab.json` (ROADMAP.md:165, deploy.md:130).
@@ -455,7 +457,8 @@ Each role decides one thing. The model behind it can change, so models are liste
 | Tension judge | whether a pair is in tension, as a proposal | Jev, `pulls4` |
 | Name finder | name mentions, for policy C | GLiNER (`urchade/gliner_medium-v2.1`) |
 | Embedder | embeddings for neighbors, positions, lens search | `BAAI/bge-small-en-v1.5`, local |
-| Theme filer, scorer, sensitivity tagger, vocabulary checker, digest writer | as named | `[themes]`, `[scores]`, `[sensitivity]`, `[vocab]`, `[digest]`; default Opus (`config.ModelConfig`) |
+| Sensitivity tagger | the eight sensitivity tags on each idea and theme | Jev, at `sensitivity.CUT` per tag, policy C |
+| Theme filer, scorer, vocabulary checker, digest writer | as named | `[themes]`, `[scores]`, `[vocab]`, `[digest]`; default Opus (`config.ModelConfig`) |
 
 - **Opus, Sonnet, Haiku.** Anthropic's `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5` (`llm.PRICES`). A
   refusal falls back to `claude-opus-4-8` ([0004]).

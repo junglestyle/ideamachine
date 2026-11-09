@@ -1,35 +1,29 @@
-"""Demo mode: Claude tags what I'd hesitate to show in an interview; my own marks win, at once."""
+"""Sensitivity tags: Jev's yes or no per tag on each idea and theme, names pseudonymized; my own marks win, at once."""
 
 import json
-from types import SimpleNamespace
 
 import psycopg
 import pytest
 
-from im import sensitivity, themes
+from im import jev, names, sensitivity, themes
 
 from helpers import table
 from test_review import as_lattice
 
 
-class FakeTagger:
-    """Tags any line mentioning `word` as violence."""
+def tagger(word="coffee", broken=0):
+    """Jev saying `violence` of anything whose text mentions `word`, and no to every other tag; its first `broken`
+    answers come back without one."""
+    sent = []
 
-    def __init__(self, word="coffee"):
-        self.calls, self.word = [], word
-        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self.create))
-
-    def create(self, **kw):
-        self.calls.append(kw)
-        text = kw["messages"][0]["content"]
-        ideas, th = text.split("\n\nThemes:\n")
-        def tag(block):
-            return [{"n": int(ln.split(".")[0]), "categories": ["violence"] if self.word in ln.lower() else []}
-                    for ln in block.splitlines() if ln[:1].isdigit()]
-        out = {"ideas": tag(ideas), "themes": tag(th)}
-        return SimpleNamespace(content=[SimpleNamespace(type="text", text=json.dumps(out))], stop_reason="end_turn",
-                               model="claude-opus-5-5", _request_id="r",
-                               usage=SimpleNamespace(input_tokens=800, output_tokens=200))
+    def post(body):
+        sent.append(body)
+        hit = word in json.dumps(body["state"]).lower()
+        answers = {q: {"type": "noul", "noul": 0.9 if hit and q == "violence" else 0.1} for q in body["questions"]}
+        if len(sent) <= broken:
+            answers.pop("violence")
+        return {"model": "jev-1.14.0", "answers": answers, "usage": {"input_tokens": 300}}
+    return jev.Jev(post=post), sent
 
 
 def shown(admin):
@@ -37,27 +31,35 @@ def shown(admin):
         admin, 'SELECT kind, id, sensitive, categories, "by" FROM pub.sensitivity')}
 
 
-def test_claude_tags_once_and_again_when_the_text_changes(seeded_lattice, admin):
+def test_jev_tags_once_and_again_when_the_text_changes(seeded_lattice, admin):
     pipe = seeded_lattice
-    claude = FakeTagger()
-    n_ideas = table(pipe, "SELECT count(*) FROM pub.ideas")[0][0]
-    n_themes = table(pipe, "SELECT count(*) FROM im.themes")[0][0]
-    stats = sensitivity.tag_stage(pipe, claude)
-    assert stats["pending"] == stats["tagged"] == n_ideas + n_themes and stats["sensitive"] == 1
-    assert len(claude.calls) == 1
+    client, sent = tagger()
+    n = table(pipe, "SELECT (SELECT count(*) FROM pub.ideas) + (SELECT count(*) FROM im.themes)")[0][0]
+    stats = sensitivity.tag_stage(pipe, client, None)
+    assert stats["pending"] == stats["tagged"] == len(sent) == n and stats["sensitive"] == 1
+    assert set(sent[0]["questions"]) == set(sensitivity.TAGS)
     coffee = table(pipe, "SELECT idea_id FROM pub.ideas WHERE statement LIKE '%%coffee%%'")[0][0]
-    assert shown(admin) == {("idea", str(coffee)): (True, ["violence"], "claude")}   # untagged: not listed
-    assert sensitivity.tag_stage(pipe, claude)["pending"] == 0
+    assert shown(admin) == {("idea", str(coffee)): (True, ["violence"], "model")}   # untagged: not listed
+    (p,) = table(pipe, "SELECT probabilities FROM im.idea_sensitivity WHERE idea_id = %s", coffee)[0]
+    assert p == {t: 0.9 if t == "violence" else 0.1 for t in sensitivity.TAGS}   # kept, to set the cut from my marks
+    assert sensitivity.tag_stage(pipe, client, None)["pending"] == 0
 
     as_lattice(admin, "INSERT INTO pub.feedback_events (kind, idea_id, payload) VALUES ('idea_correct', %s, %s)",
                coffee, json.dumps({"title": "Tea runs it", "statement": "The tea order is the real meeting."}))
-    stats = sensitivity.tag_stage(pipe, claude)   # the changed idea alone, read again
-    assert (stats["pending"], stats["tagged"]) == (1, 1) and "The tea order" in claude.calls[-1]["messages"][0]["content"]
+    stats = sensitivity.tag_stage(pipe, client, None)   # the changed idea alone, asked again
+    assert (stats["pending"], stats["tagged"]) == (1, 1) and "The tea order" in json.dumps(sent[-1]["state"])
+
+
+def test_names_said_go_out_pseudonymized(seeded_lattice):
+    client, sent = tagger(word="lora")
+    scrubber = names.Scrubber(b"k", finder=lambda texts: ["LoRa"])   # the radio, taken for a name
+    sensitivity.tag_stage(seeded_lattice, client, scrubber)
+    assert "LoRa" not in json.dumps(sent) and names.token("LoRa", b"k") in json.dumps(sent)
 
 
 def test_my_marks_win_at_once_either_way(seeded_lattice, admin):
     pipe = seeded_lattice
-    sensitivity.tag_stage(pipe, FakeTagger())
+    sensitivity.tag_stage(pipe, tagger()[0], None)
     coffee = table(pipe, "SELECT idea_id FROM pub.ideas WHERE statement LIKE '%%coffee%%'")[0][0]
     jokes = themes.find(pipe, "jokes")
     mark = "INSERT INTO pub.feedback_events (kind, idea_id, theme_id, payload) VALUES (%s, %s, %s, %s)"
@@ -92,36 +94,20 @@ def test_my_latest_mark_is_what_demo_mode_hides(seeded_lattice, admin):
 
 def test_quotes_are_read_too(seeded_lattice, admin):
     pipe = seeded_lattice
-    claude = FakeTagger(word="lora")   # only the LoRa idea's quote says "LoRa"; its title doesn't
-    sensitivity.tag_stage(pipe, claude)
+    client, sent = tagger(word="lora")   # only the LoRa idea's quote says "LoRa"; its title doesn't
+    sensitivity.tag_stage(pipe, client, None)
     lora = table(pipe, "SELECT idea_id FROM pub.ideas WHERE title = 'Something new'")[0][0]
     assert ("idea", str(lora)) in shown(admin)
-    assert '[said: "' in claude.calls[0]["messages"][0]["content"]
+    assert any("said" in b["state"]["item"] for b in sent)
 
 
-class RefusesThenCutsOff(FakeTagger):
-    """FakeTagger, except that it refuses its first batch and its answer to the second is cut off mid-JSON."""
-
-    def create(self, **kw):
-        r = super().create(**kw)
-        if len(self.calls) == 1:
-            return SimpleNamespace(content=[], stop_reason="refusal", model="claude-opus-5-5", _request_id="r",
-                                   usage=r.usage)
-        if len(self.calls) == 2:
-            return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"ideas": [{"n"')],
-                                   stop_reason="max_tokens", model="claude-opus-5-5", _request_id="r", usage=r.usage)
-        return r
-
-
-def test_a_batch_refused_or_cut_off_is_tagged_next_run_and_the_batches_after_it_now(seeded_lattice, monkeypatch):
+def test_an_answer_that_fails_is_logged_and_asked_again_next_run(seeded_lattice):
     pipe = seeded_lattice
-    monkeypatch.setattr(sensitivity, "BATCH", 2)
-    claude = RefusesThenCutsOff()
-    stats = sensitivity.tag_stage(pipe, claude)
-    assert stats["pending"] > 4 and stats["tagged"] == stats["pending"] - 4   # the batches after them were tagged
-    assert (stats["refused"], stats["failed"]) == (1, 1)
-    logged = table(pipe, """SELECT count(*), count(*) FILTER (WHERE error IS NOT NULL AND cost_usd > 0)
-                            FROM im.egress_log WHERE prompt_version = %s""", f"sensitivity:{sensitivity.tagger_version()}")
-    assert logged == [(len(claude.calls), 1)]
-    again = sensitivity.tag_stage(pipe, FakeTagger())
-    assert again["pending"] == again["tagged"] == 4
+    client, sent = tagger(broken=2)
+    stats = sensitivity.tag_stage(pipe, client, None)
+    assert stats["failed"] == 2 and stats["tagged"] == stats["pending"] - 2   # the ones after them were tagged
+    logged = table(pipe, "SELECT count(*), count(error) FROM im.egress_log WHERE prompt_version = %s",
+                   f"sensitivity:{sensitivity.tagger_version(client)}")
+    assert logged == [(len(sent), 2)]
+    again = sensitivity.tag_stage(pipe, tagger()[0], None)
+    assert again["pending"] == again["tagged"] == 2

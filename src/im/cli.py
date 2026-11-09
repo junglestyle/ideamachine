@@ -192,15 +192,15 @@ def _scores(conn, cfg) -> dict:
 
 
 def _sensitivity(conn, cfg) -> dict:
-    """Tag what demo mode hides, or say why it couldn't; the run goes on either way."""
-    import anthropic
-
-    from im import sensitivity
+    """Tag ideas and themes for demo mode, or say why it couldn't; the run goes on either way. Jev isn't Anthropic, so
+    names said go out pseudonymized (policy C)."""
+    from im import jev, names, sensitivity
 
     try:
-        return sensitivity.tag_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd, cfg.sensitivity)
-    except anthropic.AnthropicError as e:
-        return {"stopped": f"Claude unavailable: {e}"}
+        client, scrubber = jev.Jev(), names.for_trials(conn, cfg.egress)
+    except SystemExit as e:   # no key for Jev, or none to pseudonymize names with
+        return {"stopped": str(e)}
+    return sensitivity.tag_stage(conn, client, scrubber, cfg.extract.monthly_cap_usd)
 
 
 def _vocab(conn, cfg) -> dict:
