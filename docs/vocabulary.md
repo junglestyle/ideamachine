@@ -415,32 +415,47 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Stored map position.** A cluster's 2D coordinates, projected from embeddings by the pipeline and kept stable from
   run to run (015, 038, `lattice.place`). _Not_ a view layout: where a view draws a cluster. The sky draws at stored
   positions; a lens opened on its own may lay its results out afresh ([0010]:66-69).
-- **Lens.** A defined relevance query over clusters, given a lens seed, or explicitly seedless ([0010]:45-49). It
-  returns relevance for every cluster and writes no connections. Today `lens.relevance` computes it as personalized
-  PageRank from the seed over connections (each 1 plus `KIND_WEIGHT` per connection kind) and lineage (both ways),
-  plus the seed's 20 embedding neighbors, weighted by similarity (`lens.py`). What a lens definition holds beyond
-  its seed is **not yet specified**.
-- **Relevance.** A lens's number for each cluster, from 0 to 1: how closely the graph and meaning tie that cluster to
-  the seed. The seed is 1, the rest are scaled so the most relevant other cluster is 1 too, and clusters the lens
-  doesn't reach are 0 (`lens.relevance`). A seedless lens gives every cluster the same relevance. _Not_ weight,
-  confidence or value.
-- **Lens seed.** The input that sets a lens's focus: a cluster, or a subject, sentence, question, correspondence or
-  structure ([0010]:45). **Status:** only a cluster can be a seed today.
+- **Lens.** A stored question about clusters ([0013]): a lens query, lens filters and lens pins. A cluster is in a lens
+  if it's pinned in, or it passes the query and the filters and isn't pinned out. A lens writes no connections, and
+  never refers to another lens. **Status:** not built (M5).
+- **Lens query.** Whether a cluster fits a lens's meaning: a query of some kind, stored as its kind and parameters,
+  that names the clusters worth asking and judges each in or out with a score and a reason. Kinds: `all` (no meaning
+  test), `none` (only the pins), and `jev` (a set of questions, a rule combining them, and its own cut). A long one
+  is built offline and imported ([0013]).
+- **Judged share.** How much of the map a lens's query has asked about so far ("judged 300 of 3,100"): a run can stop
+  at the clusters nearest the definition, and a cluster not yet asked isn't a no ([0013]).
+- **Lens filter.** A condition on stored facts that narrows what a lens's query admits: sensitivity tags, maturity,
+  kept status, recency, recurrence, arousal, who said it ([0013]).
+- **Lens pin.** A cluster I include in a lens or exclude from it by hand, beating the query and the filters. It's
+  anchored to the speech (the pinned capture's segments, or an archive or typed observation's source reference), so
+  it survives the rebuild ([0013]). _Not_ pinning a cluster (kept as pinned) or a pinned lens.
+- **Board.** A named set of lenses, each placed where I put it; one level, never a board of boards. A Trellis view
+  draws one. Lenses are combined on a board when it's viewed (union, or two intersected), and a filter can apply to
+  all its lenses ([0013]). **Status:** not built (M5).
+- **View from a cluster.** Lighting the sky from one cluster: personalized PageRank from it over connections (each 1
+  plus `KIND_WEIGHT` per connection kind) and lineage (both ways), plus its 20 embedding neighbors, weighted by
+  similarity (`lens.relevance`, `/sky?seed=`). Not stored, and not a lens ([0013]).
+- **Follow, depth.** Choices of a view, not of a lens ([0013]). Follow spreads from a lens's members over every
+  connection and lineage, fading with distance; depth shows only what's within some number of steps of the view's
+  focus (a lens's members or one cluster). A view keeps members apart from what's reached by following, and demo
+  mode still decides what's shown.
+- **Relevance.** The view from a cluster's number for each cluster, from 0 to 1: how closely the graph and meaning tie
+  it to that cluster. The cluster itself is 1, the rest are scaled so the most relevant other is 1 too, and clusters
+  it doesn't reach are 0 (`lens.relevance`). _Not_ weight, confidence or value.
 - **Pinned lens, archived lens.** A pinned lens is one I keep at hand. An archived lens is one I've left: never thrown
   away, but kept with its definition, its cost (what was paid to compute it) and the graph version it read
   ([0010]:47-49). What a graph version is, is **not yet specified**. **Status:** lens storage isn't built.
 - **Subject.** What something is about. A shared subject is what a lens gathers, and is no connection ([0010]
   §Context; `edge_audit.HEADER`, `none`).
-- **Subject lens.** A lens seeded with a subject ([0010]:47, SPEC.md:36). **Status:** not built. Themes are to
-  migrate into subject lenses.
 - **Theme.** A stored category of clusters: `im.themes(name, description, origin, pinned)`, with membership in
   `im.idea_themes` (008:65-80). Its provenance is `archive`, `clustered` (proposed by Claude) or `mine`. Theme events
-  edit it (024).
+  edit it (024). **Status:** to become a lens: its name and description the query, my filing corrections its pins
+  ([0013]).
 - **Lattice.** The legacy app, in its own repo, that reads `pub`: the map, review and the first MCP server ([0005]).
   **Status:** feature-frozen at `v1`, and archived at M6.
-- **Trellis.** The stable family of views in which pinned lenses are arranged by hand: a lens board. Called Lattice
-  v2 in [0010] ([0010]:70-73, ROADMAP-v2 §4). The first are a grid of lenses and the Tree of Life. _Not_ the graph,
-  and _not_ a collection of lenses. **Status:** not built.
+- **Trellis.** The stable family of views, each drawing one board: lenses arranged by hand. Called Lattice v2 in
+  [0010] ([0010]:70-73, ROADMAP-v2 §4). The first are a grid of lenses and the Tree of Life. _Not_ the graph.
+  **Status:** not built.
 - **Tree of Life, correspondence.** The Tree of Life is the Qabalistic correspondence table, condensed into
   definitions and laid out on the sephirot and the paths between them. A correspondence is one entry of that table,
   such as 1/Kether, and each becomes a lens (ROADMAP-v2.md:57-58, [0010]:70-73).
@@ -648,8 +663,7 @@ that views give every stored connection (owner's decision, 2026-11-07).
 ### theme, topic, subject
 
 - A theme is an `im.themes` row (008:65-73). A capture's `themes` field is capture tags (007:35).
-- "Subject" is what a lens gathers ([0010] §Context), a subject lens's seed ([0010]:47), and Jev's
-  `different_subjects`.
+- "Subject" is what a lens gathers ([0010] §Context), and Jev's `different_subjects`.
 - "Topic" has no definition. In use it means subject, measured by embedding similarity (`analogy_spike`,
   `probe_audit`), and it's also a prefix a gist shouldn't open with (`extract.SYSTEM_V4`).
 
@@ -707,8 +721,8 @@ ordered by when last said, latest first.
 
 - Keep: `idea_keep` (031:4). Also a capture verdict `keep` (007:69), the legacy events `keep` and `item_keep`,
   `pub.ideas.kept` (a count of verdicts), and the triage question `keep_score`.
-- Pin: keeping a cluster as pinned (031). Also `themes.pinned` and `pin_theme` (008:71), and a pinned lens
-  ([0010]:47).
+- Pin: keeping a cluster as pinned (031). Also `themes.pinned` and `pin_theme` (008:71), a pinned lens
+  ([0010]:47), and a lens pin, a cluster included in or excluded from a lens ([0013]).
 - Star: the `star` event, which is a pin (031:17-18). Also the capture verdict `star` (010:3-5), `digest_star`, and
   a cluster drawn on the sky.
 - Dismiss: `idea_dismiss`, `digest_dismiss`, and the outcome `dismissed`.
@@ -891,8 +905,8 @@ These terms are in use, but no doc or file defines them:
   Emanation need not stay put.
 - Derived maturity vs stored status: [0006]:31 and 49-50 describe `im.ideas` with a `status` column, "promotions" and
   provisional ideas. Maturity is derived (031:34-44), and no status column exists.
-- Lens storage: [0010]:94-95 says it replaces `im.lens_cache` "in SPEC §3". SPEC §3 no longer names that, and no such
-  table exists.
+- Lens storage and seeds: [0010]:45-49 and 94-95 describe a lens "seeded by anything" replacing `im.lens_cache`.
+  [0013] replaced both: a lens is a query, filters and pins, and viewing from a cluster isn't a lens.
 - Segment identity vs annotations: ROADMAP.md:47 says the speaker is part of a segment's identity. It's frozen at V1;
   [M1 design] made the speaker an annotation.
 - The episode identity recipe: 001:20 gives `uuid5(stage_version, input_hash)`. The code adds the speakers' aliases
@@ -913,6 +927,7 @@ These terms are in use, but no doc or file defines them:
 [0008]: decisions/0008-other-providers-and-names.md
 [0009]: decisions/0009-edges-connection-graded-kind-suggested.md
 [0010]: decisions/0010-connections-kinds-lenses.md
+[0013]: decisions/0013-lenses-and-boards.md
 [M1 design]: design/m1-segment-identity.md
 [M2 design]: design/m2-observations-candidates-ideas.md
 [M6 notes]: design/m6-emanation.md

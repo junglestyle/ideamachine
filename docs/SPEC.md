@@ -32,8 +32,10 @@ times, and one by `diarization` 147 of 162 times (the misses are short interject
 - **Ideas** are what I keep, as **canonical** (weighted: it attracts and pulls linked clusters) or **pinned** (kept
   and visible, no weight). Pinning never changes weight, maturity or clustering. The system proposes; it never makes
   an idea.
-- **Lenses:** the way into the graph, from any seed. They return relevance and change nothing; pinned or archived,
-  never thrown away. Themes become subject lenses.
+- **Lenses:** the way into the graph. A lens is a query (of a pluggable kind, such as questions Jev answers per
+  cluster, or all/none), metadata filters and my pins, and returns which clusters belong; it changes nothing. Pinned or archived,
+  never thrown away. Themes become lenses. A **board** groups lenses, placed by hand; a Trellis view draws one
+  ([0013](decisions/0013-lenses-and-boards.md)). Viewing the graph from one cluster isn't a lens.
 
 It's a refactor of V1, not a rewrite: the ledger (`im.source_*`, `im.items`, `im.egress_log`), versioned inference
 and event-sourced human input are what V2 needs, and they stay.
@@ -99,7 +101,7 @@ Proposed shapes. Each is settled in its milestone's design doc, and every new ta
 | Weight | `im.weights`: cluster, formula version, weight, the signals it read, when | M2 |
 | Proposals | `im.proposals`: cluster, weight, formula version, when, outcome (canonical, pinned, dismissed) | M2 |
 | Edges | One connection per pair (`cited_observation_ids`, `confidence`, `method` with the model version, so a rerun can be diffed); kinds (`supports`, `tension`, `elaborates`, `sympathy`, more later) are optional rows on a connection, with their own direction and method; lineage (`evolves`, `synthesizes`) is kept apart from both ([0010](decisions/0010-connections-kinds-lenses.md); built in migration 045, [design](design/connections-storage.md)) | M2, M4 |
-| Lenses | A lens: seed and definition, pinned or archived, its results by graph version; themes migrate into it | M5 |
+| Lenses | A lens: query (or all/none), filters, pins anchored to speech, pinned or archived, its answers cached by cluster text and lens version; boards of placed lenses; themes migrate into lenses ([0013](decisions/0013-lenses-and-boards.md)) | M5 |
 
 ## 4. Proposals
 
