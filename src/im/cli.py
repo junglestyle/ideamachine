@@ -137,12 +137,13 @@ def _extract(conn, cfg) -> dict:
 
     x = cfg.extract
     if x.prompt not in extract.LIVE:
-        return {"stopped": f"extract.prompt {x.prompt} is for `im trial` only: im.items can't hold its reading and "
-                           "attribution yet"}
+        return {"stopped": f"extract.prompt {x.prompt} is for `im trial` only: the matcher can't read its captures "
+                           "yet (decision 0012)"}
     try:
         client = anthropic.Anthropic()
         return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
-                                 extract.system_prompt(x.prompt, x.interests), x.max_tokens)
+                                 extract.system_prompt(x.prompt, x.interests), x.max_tokens,
+                                 extract.schema_for(x.prompt))
     except anthropic.AnthropicError as e:  # e.g. no credentials configured at all
         return {"stopped": f"Claude unavailable: {e}"}
 

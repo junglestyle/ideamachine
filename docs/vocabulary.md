@@ -145,22 +145,28 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   doesn't mean the latest read.
 - **Capture source citation.** The payload lines a capture cites, stored as the segments they map to
   (`items.source_segment_ids`; [0004]:18). _Not_ an edge observation citation.
-- **Prompt revision.** One of the extraction prompts' texts, `v1` to `v4` (`extract.PROMPTS`). `im.items` can hold
-  captures from `v1` to `v3` (`extract.LIVE`). **Status:** `v4` is for trials only.
+- **Prompt revision.** One of the extraction prompts' texts, `v1` to `v5` (`extract.PROMPTS`). Live extraction runs
+  `v1` to `v3` (`extract.LIVE`): the matcher reads nothing later. **Status:** `v4` is for trials only; `v5` is for
+  trials and the rebuild (decision 0012), and `im.items` holds its captures (047).
 - **Extraction fingerprint.** A hash of the system prompt, schema, model and effort (`extract.prompt_version`). It's
   stored as `prompt_version` (007:40), and changing any part of it re-reads every episode. _Not_ the prompt revision.
 - **Quote.** The capture's excerpt of its cited lines. Under `v4` it's exactly what the transcript says, character
   for character. Under `v1` to `v3` it could fix obvious transcription errors (`extract.SYSTEM_V3`, `SYSTEM_V4`).
-- **Reading.** `v4` only: the quote repaired and resolved, with transcription fixed, fillers dropped and what "it" or
-  "he" refers to spelled out (`extract.SYSTEM_V4`). **Status:** not stored yet.
+- **Reading.** `v4` and `v5`: the quote repaired and resolved, with transcription fixed, fillers dropped and what
+  "it" or "he" refers to spelled out (`extract.SYSTEM_V4`, `SYSTEM_V5`; `im.items.reading`, 047). NULL before `v5`.
 - **Gist.** The thought restated in one line, with the context it needs to stand alone for someone who wasn't
   there (`im.items.gist`). Under `v4` it carries no label ("Joke:"), no transcription note and no attribution. _Not_
   a statement: a gist is this one occurrence's, and a statement is the cluster's.
 - **Said by.** Who said the capture here: the current speaker label of the capture's `said_by_segment_id`, read at
   query time through `im.item_said_by` (029, [M1 design]).
-- **Attributed to.** `v4` only: whose thought the speaker is passing on ("a nurse"), or empty. Said by stays whoever
-  said it here (`extract.SYSTEM_V4`). **Status:** not stored yet.
-- **Capture kind.** What sort of thought a capture expresses (`im.items.kind`, no CHECK, 007:31).
+- **Attributed to.** `v4` and `v5`: whose thought the speaker is passing on ("a nurse"), or empty. Said by stays
+  whoever said it here (`extract.SYSTEM_V4`, `SYSTEM_V5`; `im.items.attributed_to`, 047). NULL before `v5`.
+- **Mishearings.** `v5`: the (heard, meant) pairs the reading fixed (`im.items.mishearings`, 047). NULL before
+  `v5`.
+- **Capture checks.** `v5`: the code checks a capture failed against the transcript as sent, empty when it passed
+  (`capture_checks.FAIL`; `im.items.checks`, 047). NULL before `v5`.
+- **Capture kind.** What sort of thought a capture expresses (`im.items.kind`, no CHECK, 007:31). `v5` has none: NULL
+  (047).
   - `extract.KINDS` (`v1`-`v3`): `idea`, `aphorism`, `joke`, `observation`, `project`, `task`, `decision`. Under `v3`
     a question is filed as `observation` unless it's an idea put as a question.
   - `extract.KINDS_V4`: `idea`, `aphorism`, `observation`, `question`, `technique`, `project`, `task`, `decision`.
@@ -170,7 +176,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   The boundaries between the other capture kinds are **not yet specified**.
 - **Capture tags.** The free-text strings a model returns with each capture, in the `themes` field (`extract.SCHEMA`;
   `im.items.themes`, 007:35). What they should be is **not yet specified**: no prompt says. _Not_ themes.
-- **Capture confidence.** The model's number, from 0 to 1. What it measures depends on the prompt revision:
+- **Capture confidence.** The model's number, from 0 to 1; `v5` has none (NULL, 047). What it measures depends on the
+  prompt revision:
   - `v1` and `v2`: keep probability, the chance I'd keep the capture;
   - `v3` and `v4`: fidelity confidence, how sure the model is that the quote (or reading) and gist are what was said
     and meant (`extract.SYSTEM`, `SYSTEM_V2`, `SYSTEM_V3`, `SYSTEM_V4`).

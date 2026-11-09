@@ -352,6 +352,31 @@ def test_a_model_with_no_known_price_is_never_sent_to(pipe, cfg, stream):
     assert table(pipe, "SELECT count(*) FROM im.egress_log") == [(0,)]
 
 
+def test_a_v5_capture_keeps_its_reading_attribution_mishearings_and_checks(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+
+    def respond(text):   # the first line I said, read with one mishearing fixed, and once tidied
+        mine = [(int(r[1:].split("]")[0]), r.split(": ", 1)[1]) for r in text.splitlines()
+                if r.startswith("[") and r.split(": ", 1)[0].endswith(" me")]
+        if not mine:
+            return []
+        n, said = mine[0]
+        word = said.split()[-1]
+        base = {"lines": [n], "attributed_to": "my lead", "reading": said.replace(word, "WORD"),
+                "mishearings": [{"heard": word, "meant": "WORD"}], "gist": "A thought."}
+        return [base | {"quote": said}, base | {"quote": said.upper()}]
+
+    v5 = extract.system_prompt("v5")
+    stats = extract.run_stage(pipe, FakeClaude(respond), system=v5, schema=extract.schema_for("v5"))
+    assert stats["read"] > 0 and stats["failed"] == 0
+    rows = table(pipe, """SELECT kind, confidence, said_by, attributed_to, reading LIKE '%%WORD%%', mishearings,
+                                 checks FROM im.items WHERE prompt_version = %s ORDER BY checks""",
+                 stats["prompt_version"])
+    first = rows[0]
+    assert first[:5] == (None, None, "me", "my lead", True) and first[5][0]["meant"] == "WORD" and first[6] == []
+    assert {tuple(r[6]) for r in rows} == {(), ("quote_inexact", "mishearing_not_in_quote")}   # recorded, not refused
+
+
 def status_error(cls, code, body=None):
     return cls("rejected", body=body, response=httpx2.Response(code, request=httpx2.Request("POST", "https://x")))
 
