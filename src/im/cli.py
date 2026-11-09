@@ -387,6 +387,22 @@ def cmd_audit_gate(args) -> None:
         _print(gate_audit.write(conn, folder, jev.Jev(), read, policy, args.seed, args.size))
 
 
+def cmd_mishearings(args) -> None:
+    """The transcription's mishearings: list them, or confirm, add or reject a pair."""
+    from im import mishearings
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        if args.action == "list":
+            for heard, meant, status, seen in mishearings.pairs(conn):
+                print(f"{status:<12} {seen:>4}  {heard} -> {meant}")
+            return
+        if not (args.heard and args.meant):
+            raise SystemExit(f"{args.action} needs what was heard and what was meant: im mishearings {args.action} "
+                             "HEARD MEANT")
+        mishearings.decide(conn, args.heard, args.meant, "rejected" if args.action == "reject" else "confirmed")
+        print(f"{args.heard} -> {args.meant}: {'rejected' if args.action == 'reject' else 'confirmed'}")
+
+
 def cmd_tune(args) -> None:
     """Preview what changing the weight knobs would do. Writes nothing; paste the printed [weight] into im.toml."""
     from im import weight
@@ -867,6 +883,12 @@ def main(argv=None) -> None:
     ag.add_argument("--monthly-cap-usd", type=float, help="draft: send nothing once the month's spend reaches this "
                     "(default: config)")
     ag.set_defaults(func=cmd_audit_gate)
+    mh = sub.add_parser("mishearings", help="the transcription's mishearings, as hints for later reads: list them, "
+                        "or confirm (or add) or reject a pair")
+    mh.add_argument("action", choices=["list", "confirm", "reject"])
+    mh.add_argument("heard", nargs="?", help="confirm, reject: the words as transcribed")
+    mh.add_argument("meant", nargs="?", help="confirm, reject: what was meant")
+    mh.set_defaults(func=cmd_mishearings)
     tu = sub.add_parser("tune", help="preview weight and proposal settings, e.g. recurrence_minutes=45 (writes nothing)")
     tu.add_argument("knobs", nargs="*", metavar="knob=value")
     tu.add_argument("--top", type=int, default=10)

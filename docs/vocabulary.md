@@ -163,8 +163,12 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   query time through `im.item_said_by` (029, [M1 design]).
 - **Attributed to.** `v4` and `v5`: whose thought the speaker is passing on ("a nurse"), or empty. Said by stays
   whoever said it here (`extract.SYSTEM_V4`, `SYSTEM_V5`; `im.items.attributed_to`, 047). NULL before `v5`.
-- **Mishearings.** `v5`: the (heard, meant) pairs the reading fixed (`im.items.mishearings`, 047). NULL before
-  `v5`.
+- **Mishearings.** `v5`: the (heard, meant) pairs the reading fixed (`im.items.mishearings`, 047; NULL before `v5`).
+  A pair is `provisional` when captures propose it, and `confirmed` or `rejected` when I decide it, or `confirmed`
+  when I add it (`im mishearings`; `im.mishearings`, `im.mishearing_decisions`, 050). A rejected pair stays rejected.
+  A read's context line lists the confirmed and provisional pairs whose heard words occur in its transcript, as
+  hints: they aren't part of what decides whether an episode was read (`egress.Payload.sha256`), so a new pair
+  re-reads nothing. A confirmed pair's words are never taken for names (`mishearings.not_names`).
 - **Capture checks.** `v5`: the code checks a capture failed against the transcript as sent, empty when it passed
   (`capture_checks.FAIL`; `im.items.checks`, 047). NULL before `v5`.
 - **Capture kind.** What sort of thought a capture expresses (`im.items.kind`, no CHECK, 007:31). `v5` has none: NULL
