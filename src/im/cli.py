@@ -332,6 +332,26 @@ def cmd_trial(args) -> None:
     _print(out)
 
 
+def cmd_gate(args) -> None:
+    """Jev's checks on one trial read's captures (the capture gate, decision 0012), and what the gate would do."""
+    from im import egress, extract, gate, jev, names, trial
+
+    cfg = config.load()
+    x = cfg.extract
+    system, schema = extract.system_prompt(args.prompt, x.interests), extract.schema_for(args.prompt)
+    model, effort = args.model or x.model, args.effort or x.effort
+    cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
+    with db.connect(db.pipeline_dsn()) as conn:
+        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
+        policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+        read = (trial.version(model, effort, system, args.replicate, schema), model)
+        judge, out = jev.Jev(), {}
+        if not args.report:
+            out["asked"] = gate.run(conn, judge, read, policy, scrubber, cap, args.limit)
+        out["summary"] = gate.summary(conn, judge, read, policy)
+    _print(out)
+
+
 def cmd_tune(args) -> None:
     """Preview what changing the weight knobs would do. Writes nothing; paste the printed [weight] into im.toml."""
     from im import weight
@@ -781,6 +801,18 @@ def main(argv=None) -> None:
                     help="also count as found a capture the other model quoted from different lines, where Jev says "
                          "they make the same point (sends those pairs to Jev, even with --report; answers are kept)")
     tr.set_defaults(func=cmd_trial)
+    ga = sub.add_parser("gate", help="Jev's checks on a trial's captures: does the gist go past its lines, is the "
+                        "point mine, is it mocked? (sends to Jev; answers are kept)")
+    ga.add_argument("prompt", help="the trial's prompt, e.g. v5")
+    ga.add_argument("--model", help="the trial's model, as it named it (default: the configured one)")
+    ga.add_argument("--effort", help="its effort in the trial (default: the configured one)")
+    ga.add_argument("--replicate", type=int, default=1, help="which of its reads (default the first)")
+    ga.add_argument("--limit", type=int, help="ask about at most this many captures this time")
+    ga.add_argument("--report", action="store_true", help="only summarize what Jev has answered; send nothing")
+    ga.add_argument("--policy", choices=["B", "C"], default="C", help="the trial's policy (default C)")
+    ga.add_argument("--monthly-cap-usd", type=float, help="send nothing once the month's spend reaches this "
+                    "(default: config)")
+    ga.set_defaults(func=cmd_gate)
     tu = sub.add_parser("tune", help="preview weight and proposal settings, e.g. recurrence_minutes=45 (writes nothing)")
     tu.add_argument("knobs", nargs="*", metavar="knob=value")
     tu.add_argument("--top", type=int, default=10)

@@ -88,6 +88,28 @@ QUESTIONS = {
                      "false": "No real connection, or only a shared subject or broad area (relationships, emotions, "
                               "work)"}),
     },
+    # The capture gate (im.gate, decision 0012): one capture, the transcript around it (`context`, lines as `[n]
+    # speaker: text`, `me` being me), the lines it cites, its quote and its gist. The gist checks are the summary
+    # sheet's two and the two ways v5's review found gists going past the lines; `not_mine` and `mocked` drop a
+    # capture, `two_points` only flags one. Each is decided at its own cut (gate.CUTS), so `p` means nothing here.
+    "gate": {
+        "adds": ("Does `gist` state something that `lines` don't say?",
+                 {"true": "It adds an inference, conclusion, motive or outcome that isn't in the lines",
+                  "false": "Everything it says is in the lines, perhaps more briefly"}),
+        "misstates": ("Does `gist` contradict or misstate what `lines` say?", None),
+        "overstates": ("Does `gist` say it more strongly, more broadly or more certainly than `lines` do?",
+                       {"true": "It drops a hedge, a doubt or a qualifier, or turns one case into a rule",
+                        "false": "It's as strong, as broad and as sure as the lines"}),
+        "completes": ("Does `gist` finish a thought that `lines` leave unfinished?",
+                      {"true": "It says where a sentence that trails off was going",
+                       "false": "The lines finish the thought, or the gist stops where they stop"}),
+        "not_mine": ("In `context`, is the point of `gist` someone else's, which `me` only agrees with, answers or "
+                     "repeats back?",
+                     {"true": "Someone else makes the point, and me only goes along with it",
+                      "false": "me makes the point, or passes on someone's view as worth telling"}),
+        "mocked": ("In `context`, does `me` voice the point of `gist` only to mock, parody or reject it?", None),
+        "two_points": ("Does `gist` make two separate points, each of which could stand on its own?", None),
+    },
 }
 
 
