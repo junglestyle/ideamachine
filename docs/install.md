@@ -20,6 +20,7 @@ uv run im trial v3 --model openai/gpt-6.1-sol   # B3: a model on the trial sampl
 uv run im trial v3 --model claude-opus-5-5 --replicate 2   # Opus against itself: the ceiling for recall
 uv run im trial v5 --replicate 2   # extraction v5 (decision 0012) on the trial sample, read twice; the report counts the capture checks each read fails
 uv run im audit-misses sheet saved/misses-terra v3 --model openai/gpt-6.1-terra   # its misses among Opus's solid captures, blind beside ones it found; score my marks
+uv run im audit-misses sheet saved/bar-sol v5 --model openai/gpt-6.1-sol --both-ways   # 20 captures only Sol made, 20 only Opus made, 20 both made, blind: whose bar is right?
 uv run im hard-set saved/hard-1 --per-case 6 --controls 20   # a deliberate hard set of episodes (irony, fragments, relayed thoughts, short thoughts, ones I only acknowledge, ones answering someone), plus controls from the trials' random sample, each as extraction would send it under policy C; sends nothing
 uv run im audit-edges sheet saved/b4-4 --size 75 --seed 7 --exclude saved/b4-1 saved/b4-2 saved/b4-3   # B4: a fresh sheet with no pair I've marked before
 uv run im audit-edges draft saved/b4-3 --model jev-1.14.0   # B4: Jev answers a sheet; score shows connection at every cut

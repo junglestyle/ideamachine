@@ -52,3 +52,18 @@ def test_a_misses_sheet_needs_the_references_second_read(pipe, cfg, stream, tmp_
                          (trial.version(opus, "medium", v3), opus), (trial.version(opus, "medium", v3, 2), opus),
                          egress.POLICY_VERSION)
     assert not (tmp_path / "sheet.md").exists()
+
+
+def test_a_both_ways_sheet_puts_what_only_one_model_caught_beside_what_both_did(pipe, cfg, stream, tmp_path):
+    run(pipe, cfg, stream)
+    v3 = extract.system_prompt("v3")
+    trial.run(pipe, FakeClaude(both(DATABASE, "coffee")), v3)                         # no second read needed
+    trial.run(pipe, FakeClaude(both(DATABASE, "lockfile")), v3, model="claude-sonnet-5-5")
+    opus, sonnet = "claude-opus-5-5", "claude-sonnet-5-5"
+    out = miss_audit.write(pipe, tmp_path, (trial.version(sonnet, "medium", v3), sonnet),
+                           (trial.version(opus, "medium", v3), opus), None, egress.POLICY_VERSION)
+    assert out["by_set"] == {"candidate_only": 1, "reference_only": 1, "both": 1}
+    key = json.loads((tmp_path / "key.json").read_text())
+    assert {p["set"]: p["gist"] for p in key["pairs"].values()} == \
+        {"candidate_only": "lockfile", "reference_only": "coffee", "both": DATABASE}
+    assert key["benchmark"] == "both-ways" and "replicate" not in key["prompt_versions"]

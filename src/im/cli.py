@@ -437,7 +437,8 @@ def cmd_hard_set(args) -> None:
 
 
 def cmd_audit_misses(args) -> None:
-    """A blind sheet of the reference's solid captures, missed or found by a cheaper model in a trial; my marks."""
+    """A blind sheet of the reference's solid captures, missed or found by a cheaper model in a trial, or (--both-ways)
+    of the captures only one of them made and those both made; my marks."""
     from pathlib import Path
 
     from im import egress, extract, miss_audit, names, probe_audit, trial
@@ -458,6 +459,7 @@ def cmd_audit_misses(args) -> None:
     with db.connect(db.pipeline_dsn()) as conn:
         _print(miss_audit.write(conn, folder, (trial.version(args.model, effort, system, schema=schema), args.model),
                                 (trial.version(ref_model, ref_effort, system, schema=schema), ref_model),
+                                None if args.both_ways else
                                 (trial.version(ref_model, ref_effort, system, 2, schema), ref_model), policy,
                                 args.seed, args.size))
 
@@ -833,17 +835,22 @@ def main(argv=None) -> None:
         pa.add_argument("--exclude", nargs="*", default=[], help="sheet: leave out pairs on these earlier sheets")
         pa.set_defaults(func=cmd_audit_probe, question=question)
     am = sub.add_parser("audit-misses", help="a blind sheet of the reference's solid captures in a trial, missed or "
-                        "found by a cheaper model: are the misses worth having? (sends nothing); score my marks")
+                        "found by a cheaper model: are the misses worth having? Or --both-ways: whose bar is right? "
+                        "(sends nothing); score my marks")
     am.add_argument("action", choices=["sheet", "score"])
     am.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
     am.add_argument("prompt", nargs="?", help="sheet: the trial's prompt, a name in extract.PROMPTS, e.g. v3")
     am.add_argument("--model", help="sheet: the candidate, as its trial named it, e.g. openai/gpt-6.1-terra")
     am.add_argument("--effort", help="sheet: the candidate's effort in its trial (default: the configured one)")
-    am.add_argument("--against", help="sheet: the reference, model[:effort], read twice (--replicate 2) "
-                    "(default: the configured model and effort)")
+    am.add_argument("--against", help="sheet: the reference, model[:effort], read twice (--replicate 2) unless "
+                    "--both-ways (default: the configured model and effort)")
+    am.add_argument("--both-ways", action="store_true",
+                    help="sheet: captures only the candidate made, only the reference made, and both made, side by "
+                         "side; needs no second read")
     am.add_argument("--policy", choices=["B", "C"], default="C", help="sheet: the trials' policy (default C)")
     am.add_argument("--seed", type=int, default=13, help="sheet: the sample and shuffle's seed")
-    am.add_argument("--size", type=int, help="sheet: how many misses (default: all), beside as many found")
+    am.add_argument("--size", type=int, help="sheet: how many misses (default: all), beside as many found; "
+                    "--both-ways: how many from each set (default 20)")
     am.set_defaults(func=cmd_audit_misses)
     hs = sub.add_parser("hard-set", help="a deliberate hard set of episodes (irony, fragments, relayed thoughts, short "
                         "thoughts, ones I only acknowledge, ones answering someone), each as extraction would send "
