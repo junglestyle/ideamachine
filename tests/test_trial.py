@@ -1,14 +1,16 @@
 """Candidate extraction prompts and models: v1 never changes, and a trial reads a fixed sample without touching
 the lattice, scored against a reference model."""
 
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 
-from im import cli, egress, extract, names, trial
+from im import cli, egress, extract, jev, names, trial
 
 from helpers import run, table
 from test_carry import DATABASE, capture
 from test_extract import FakeClaude
+from test_jev import fake
 from test_lattice import items_for, seeded, seeded_lattice  # noqa: F401 (fixtures)
 
 
@@ -90,6 +92,32 @@ def test_a_trial_scores_a_candidate_against_a_reference_on_the_same_sample(pipe,
                       (pv("claude-opus-5-5"), "claude-opus-5-5"), egress.POLICY_VERSION)
     assert r2["recall"] == 0.5 and trial.version("claude-opus-5-5", "medium", v3, 2) == pv("claude-opus-5-5") + "~2"
     assert trial.run(pipe, opus, extract.system_prompt("v3", "x"), monthly_cap_usd=0)["stopped"]
+
+
+def test_a_thought_quoted_from_the_next_line_counts_as_found_once_jev_says_its_the_same_point(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    v3 = extract.system_prompt("v3")
+    trial.run(pipe, FakeClaude(both(DATABASE, "coffee")), v3)
+    trial.run(pipe, FakeClaude(both(DATABASE, "lockfile")), v3, model="claude-sonnet-5-5")   # the next line
+    pv = lambda model: extract.prompt_version(model, "medium", v3)  # noqa: E731
+    cand, ref = (pv("claude-sonnet-5-5"), "claude-sonnet-5-5"), (pv("claude-opus-5-5"), "claude-opus-5-5")
+    policy = egress.POLICY_VERSION
+    by_quote = trial.report(pipe, cand, ref, policy)
+
+    def counted(nouls):
+        judge, sent = fake(nouls)
+        stats = trial.same_point(pipe, judge, cand, ref, policy, None, 20.0)
+        return stats, sent, trial.report(pipe, cand, ref, policy, jev.kept(pipe, jev.question_set(judge, "match")))
+
+    stats, sent, unsure = counted({"same": 0.7, "same_v2": 0.6})   # below the cut
+    assert stats["pairs"] == stats["asked"] == len(sent) == 1 and unsure["found_by_same_point"] == 0
+    assert "coffee" in json.dumps(sent[0]["state"]) and "lockfile" in json.dumps(sent[0]["state"])
+
+    pipe.execute("DELETE FROM im.jev_answers")
+    stats, sent, r = counted({"same": 0.9, "same_v2": 0.8})
+    assert r["found_by_same_point"] == 1 and r["found"] == by_quote["found"] + 1
+    assert r["extra"] == by_quote["extra"] - 1
+    assert trial.same_point(pipe, fake({})[0], cand, ref, policy, None, 20.0)["asked"] == 0   # kept, not asked again
 
 
 def test_under_policy_c_names_said_go_out_pseudonymized_and_come_back(pipe, cfg, stream):

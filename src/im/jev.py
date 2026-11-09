@@ -88,6 +88,28 @@ QUESTIONS = {
                      "false": "No real connection, or only a shared subject or broad area (relationships, emotions, "
                               "work)"}),
     },
+    # The capture gate (im.gate, decision 0012): one capture, the transcript around it (`context`, lines as `[n]
+    # speaker: text`, `me` being me), the lines it cites, its quote and its gist. The gist checks are the summary
+    # sheet's two and the two ways v5's review found gists going past the lines; `not_mine` and `mocked` drop a
+    # capture, `two_points` only flags one. Each is decided at its own cut (gate.CUTS), so `p` means nothing here.
+    "gate": {
+        "adds": ("Does `gist` state something that `lines` don't say?",
+                 {"true": "It adds an inference, conclusion, motive or outcome that isn't in the lines",
+                  "false": "Everything it says is in the lines, perhaps more briefly"}),
+        "misstates": ("Does `gist` contradict or misstate what `lines` say?", None),
+        "overstates": ("Does `gist` say it more strongly, more broadly or more certainly than `lines` do?",
+                       {"true": "It drops a hedge, a doubt or a qualifier, or turns one case into a rule",
+                        "false": "It's as strong, as broad and as sure as the lines"}),
+        "completes": ("Does `gist` finish a thought that `lines` leave unfinished?",
+                      {"true": "It says where a sentence that trails off was going",
+                       "false": "The lines finish the thought, or the gist stops where they stop"}),
+        "not_mine": ("In `context`, is the point of `gist` someone else's, which `me` only agrees with, answers or "
+                     "repeats back?",
+                     {"true": "Someone else makes the point, and me only goes along with it",
+                      "false": "me makes the point, or passes on someone's view as worth telling"}),
+        "mocked": ("In `context`, does `me` voice the point of `gist` only to mock, parody or reject it?", None),
+        "two_points": ("Does `gist` make two separate points, each of which could stand on its own?", None),
+    },
 }
 
 
@@ -246,3 +268,41 @@ def read(question: str, r: dict, probes: bool = False) -> dict[str, float]:
     deciding = {k: got[k] for k in QUESTIONS[question]}
     combos = {k: f(got) for k, f in COMBOS.get(question, {}).items()} if probes else {}
     return got | combos | {"p": combine(question, deciding)}
+
+
+def question_set(client: Jev, question: str) -> str:
+    """The version of `question`'s deciding questions as this client asks them: their wording and the model. What
+    a request is logged under, and its kept answers filed under."""
+    from im import themes
+
+    return themes.version(json.dumps(client.body(question, {})["questions"], sort_keys=True), {}, client.model, "")
+
+
+def kept(conn, qs: str) -> dict[str, dict[str, float]]:
+    """Every answer kept for a question set: key -> {name: p, ..., "p": p}."""
+    return {k: a for k, a in conn.execute(
+        "SELECT key_sha256, answers FROM im.jev_answers WHERE question_set = %s", (qs,))}
+
+
+def ask(conn, client: Jev, question: str, key: str, state, *, segment_ids, policy: str,
+        monthly_cap_usd: float) -> tuple[dict[str, float] | None, float, bool]:
+    """Jev's answer to `question` (jev.read) about the state `state()` builds, already pseudonymized, as (answer,
+    cost, sent). `key` is a hash of what the state is built from: an answer kept for it (im.jev_answers) is used
+    without building or sending anything. A failed answer is logged by egress.send and comes back None, to be asked
+    again next time; the cap raises llm.Stop."""
+    from im import egress
+
+    qs = question_set(client, question)
+    row = conn.execute("SELECT answers FROM im.jev_answers WHERE question_set = %s AND key_sha256 = %s",
+                       (qs, key)).fetchone()
+    if row:
+        return row[0], 0.0, False
+    body = client.body(question, state())
+    a = egress.send(conn, lambda: client.complete(body), model=client.model, payload=json.dumps(body),
+                    segment_ids=segment_ids, prompt_version=qs, policy=policy, monthly_cap_usd=monthly_cap_usd,
+                    read=lambda r: read(question, r))
+    if a.failed:
+        return None, a.cost_usd, True
+    conn.execute("""INSERT INTO im.jev_answers (question_set, key_sha256, answers, egress_id) VALUES (%s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING""", (qs, key, json.dumps(a.data), a.egress_id))
+    return a.data, a.cost_usd, True

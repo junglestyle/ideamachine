@@ -18,17 +18,26 @@ place in a cluster are counted apart.
 A replicate (`replicate=2`) is a second, independent read by the same model and prompt, filed apart. The reference
 against its own replicate is the ceiling: models don't capture exactly the same things twice, so a candidate's
 recall means something only next to it.
+
+Quote matching misses the same thought quoted from a neighboring line: on v5 (2026-11-09) every model, Opus against
+itself included, "missed" a capture it had made from the next line. `same_point` asks Jev, of each capture only one
+of them made against each only the other made in the same episode, whether they make the same point (two wordings of
+jev.QUESTIONS["match"]'s `same`, averaged); its answers are kept, and the report then counts a pair at SAME_CUT or
+above as found, best first, each capture once.
 """
 
+import hashlib
 import json
 import re
 
-from im import egress, extract, llm
+from im import egress, extract, jev, llm
 from im.feedback import CARRY_MIN_SCORE, quote_score
 
 SAMPLE = 150
 EXAMPLES = 15
 KEEP = ("kind", "said_by", "attributed_to", "quote", "reading", "mishearings", "gist", "confidence", "checks")
+SAME = ("same", "same_v2")
+SAME_CUT = jev.YES   # not yet set from marks: Jev's own threshold for a confident yes
 
 
 def sample(conn, n: int = SAMPLE) -> list:
@@ -107,6 +116,60 @@ def _matched(ref: list[dict], cand: list[dict]) -> dict:
     return out
 
 
+def _pair_key(a: dict, b: dict) -> str:
+    return hashlib.sha256(json.dumps([a["quote"], a["gist"], b["quote"], b["gist"]]).encode()).hexdigest()
+
+
+def _unmatched(ref: list[dict], cand: list[dict], m: dict) -> list[tuple[int, int]]:
+    used = set(m.values())
+    return [(i, j) for i in range(len(ref)) if i not in m for j in range(len(cand)) if j not in used]
+
+
+def _same_point(ref: list[dict], cand: list[dict], m: dict, answers: dict) -> dict:
+    """`m` with the unmatched pairs Jev says make the same point added, likeliest first, each capture once."""
+    scored = sorted(((sum(a[q] for q in SAME) / len(SAME), i, j) for i, j in _unmatched(ref, cand, m)
+                     if (a := answers.get(_pair_key(ref[i], cand[j])))), reverse=True)
+    out, used = dict(m), set(m.values())
+    for p, i, j in scored:
+        if p >= SAME_CUT and i not in out and j not in used:
+            out[i] = j
+            used.add(j)
+    return out
+
+
+def same_point(conn, client, candidate: tuple[str, str], reference: tuple[str, str], policy: str, scrubber,
+               monthly_cap_usd: float) -> dict:
+    """Ask Jev about every pair quote matching left apart in the episodes both read (see the module's docstring),
+    names said pseudonymized by `scrubber` (None under policy B); answers already kept aren't asked again."""
+    cand, ref = _reads(conn, *candidate, policy), _reads(conn, *reference, policy)
+    stats = {"pairs": 0, "asked": 0, "failed": 0, "cost_usd": 0.0, "stopped": None}
+    for eid in (e for e in cand if e in ref and cand[e][0] == ref[e][0]):
+        r_items, c_items = ref[eid][1], cand[eid][1]
+        for i, j in _unmatched(r_items, c_items, _matched(r_items, c_items)):
+            a, b = r_items[i], c_items[j]
+
+            def state(a=a, b=b):
+                texts = [a["quote"], a["gist"], b["quote"], b["gist"]]
+                aq, ag, bq, bg = scrubber.scrub(texts)[0] if scrubber else texts
+                return {"a": {"quote": aq, "summary": ag}, "b": {"quote": bq, "summary": bg}}
+
+            stats["pairs"] += 1
+            try:
+                got, cost, sent = jev.ask(conn, client, "match", _pair_key(a, b), state,
+                                          segment_ids=a["source_segment_ids"] + b["source_segment_ids"],
+                                          policy=policy, monthly_cap_usd=monthly_cap_usd)
+            except llm.Stop as e:
+                stats["stopped"] = str(e)[:200]
+                break
+            stats["asked"] += sent
+            stats["failed"] += got is None
+            stats["cost_usd"] += cost
+        if stats["stopped"]:
+            break
+    stats["cost_usd"] = round(stats["cost_usd"], 6)
+    return stats
+
+
 REACHES = ("recurring", "one_off", "unplaced")
 
 
@@ -149,18 +212,25 @@ def by_reach(conn, found: list) -> dict:
     return {r: {"captures": t, "recall": round(f / t, 3) if t else None} for r, (t, f) in n.items()}
 
 
-def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy: str) -> dict:
+def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy: str,
+           same: dict | None = None) -> dict:
     """How a candidate's captures compare with a reference's, on the episodes both read with the same payload.
-    `candidate` and `reference` are (prompt_version, model)."""
+    `candidate` and `reference` are (prompt_version, model). With `same` (Jev's kept answers, jev.kept), a pair
+    making the same point counts as found too, and `found_by_same_point` says how many did."""
     cand, ref = _reads(conn, *candidate, policy), _reads(conn, *reference, policy)
     both = [eid for eid in cand if eid in ref and cand[eid][0] == ref[eid][0]]
     n = {"reference_captures": 0, "found": 0, "candidate_captures": 0, "extra": 0,
-         "episodes_reference_captured_in": 0, "of_those_candidate_captured_nothing": 0}
+         "episodes_reference_captured_in": 0, "of_those_candidate_captured_nothing": 0} \
+        | ({"found_by_same_point": 0} if same is not None else {})
     by_kind: dict = {}
     missed, extra, found_by_reach = [], [], []
     for eid in both:
         r_items, c_items = ref[eid][1], cand[eid][1]
         m = _matched(r_items, c_items)
+        if same is not None:
+            quoted = len(m)
+            m = _same_point(r_items, c_items, m, same)
+            n["found_by_same_point"] += len(m) - quoted
         n["reference_captures"] += len(r_items)
         n["found"] += len(m)
         n["candidate_captures"] += len(c_items)
