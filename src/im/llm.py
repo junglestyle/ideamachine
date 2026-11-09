@@ -15,9 +15,13 @@ from dataclasses import dataclass
 FALLBACK_MODEL = "claude-opus-4-8"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # A request's output budget, reasoning included where the provider counts it there (OpenRouter does). 16,000 left
-# DeepSeek V4.1 Flash at medium effort no room for its answer on 9 of 150 trial episodes (2026-11-08); only what's
-# spent is billed, and the budget isn't part of a prompt's version, so raising it re-reads nothing.
+# DeepSeek V4.1 Flash at medium effort no room for its answer on 9 of 150 trial episodes (2026-11-08), so OpenRouter
+# models get 32,000. Claude keeps 16,000: the SDK refuses, unsent, a request that isn't streamed and could run past 10
+# minutes, which it takes to be over CLAUDE_CEILING. Only what's spent is billed, and the budget isn't part of a
+# prompt's version, so changing it re-reads nothing.
 MAX_TOKENS = 32000
+CLAUDE_MAX_TOKENS = 16000
+CLAUDE_CEILING = 21333   # anthropic._base_client: 3600 s * max_tokens / 128,000 must stay within 600 s
 # $ per million tokens (input, output) for Anthropic's models; a refusal fallback may answer on another model.
 PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-opus-4-8": (5.0, 25.0), "claude-sonnet-5-5": (2.0, 10.0),
           "claude-haiku-5-5": (0.10, 0.50)}   # Haiku 5.5: prompts up to 100K tokens, which every episode is
@@ -88,14 +92,23 @@ def client_for(model: str):
     return anthropic.Anthropic()
 
 
+def max_tokens_for(model: str) -> int:
+    return MAX_TOKENS if via_openrouter(model) else CLAUDE_MAX_TOKENS
+
+
 def complete(client, model: str, effort: str, system: str, schema: dict, text: str,
-             max_tokens: int = MAX_TOKENS) -> Reply:
-    """Ask once. Opus falls back to FALLBACK_MODEL on a refusal; other models don't, so their refusal counts as one.
-    Raises Unavailable when it's worth retrying later, and Stop when no request would get through (the credentials,
-    the account's credit, a model id that doesn't exist). An exception raised after an earlier attempt was paid for
-    carries that cost as `cost_usd`, for the egress log."""
+             max_tokens: int | None = None) -> Reply:
+    """Ask once, with `max_tokens` of output (None: max_tokens_for the model). Opus falls back to FALLBACK_MODEL on a
+    refusal; other models don't, so their refusal counts as one. Raises Unavailable when it's worth retrying later,
+    and Stop when no request would get through (the credentials, the account's credit, a model id that doesn't exist,
+    a budget Claude would need streamed). An exception raised after an earlier attempt was paid for carries that cost
+    as `cost_usd`, for the egress log."""
+    max_tokens = max_tokens or max_tokens_for(model)
     if via_openrouter(model):
         return client.complete(model, effort, system, schema, text, max_tokens)
+    if max_tokens > CLAUDE_CEILING:
+        raise Stop(f"max_tokens {max_tokens} is over {CLAUDE_CEILING}, past which Claude needs a streamed request: "
+                   "nothing sent")
     import anthropic
     fallback = {"betas": ["server-side-fallback-2026-06-01"], "fallbacks": [{"model": FALLBACK_MODEL}]} \
         if model.startswith("claude-opus") else {}
