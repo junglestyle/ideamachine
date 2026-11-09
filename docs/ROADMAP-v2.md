@@ -48,9 +48,12 @@ drawn through lenses ([0010](decisions/0010-connections-kinds-lenses.md)), and a
 
 - **Emanation: cluster-based cloud views, for association and promotion.** The fluid one: it need not stay put
   between runs. The sky is the first: lenses that light it, proposals promoted from it. Others follow the encodings
-  in the [M6 notes](design/m6-emanation.md). Navigation is slow today: panning redraws every star with a fresh radial
-  gradient each frame (draw each kind of star once and stamp it instead), and a lens reloads the whole page (load
-  the map once and fetch only a lens's relevance). Measure the server's time for `/sky` before changing it.
+  in the [M6 notes](design/m6-emanation.md). Navigation was made faster on 2026-11-09, measured on a synthetic map:
+  each kind of star is drawn once and stamped, which halved a frame at 15,000 stars on an emulated phone (from 33 to
+  17 ms, 30 to 60 fps); and lighting the sky from a card fetches only its relevance (`/sky/lens`) instead of
+  reloading the page (at 3,000 cards: 147 ms and 138 KB, against 295 ms and 613 KB). The server's `/sky` took 155 ms
+  at 3,000 cards and 1.5 s at 15,000, mostly the cards query and the lens's PageRank; links are now most of a
+  frame's drawing.
 - **Trellis: pinned lenses, laid out by hand, for organization.** The stable one, called Lattice v2 in
   [0010](decisions/0010-connections-kinds-lenses.md). Not the Lattice app, which is still archived at M6. First two:
   - a conceptual or thematic grid of lenses;
