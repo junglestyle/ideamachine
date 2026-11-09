@@ -480,7 +480,8 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
 
 
 def run_stage(conn, client, model: str = ExtractConfig.model, effort: str = ExtractConfig.effort,
-              monthly_cap_usd: float = 20.0, limit: int | None = None, system: str = SYSTEM) -> dict:
+              monthly_cap_usd: float = 20.0, limit: int | None = None, system: str = SYSTEM,
+              max_tokens: int | None = None) -> dict:
     pv = prompt_version(model, effort, system)
     todo = _pending(conn, model, pv)
     stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "reused": 0, "items": 0,
@@ -494,7 +495,8 @@ def run_stage(conn, client, model: str = ExtractConfig.model, effort: str = Extr
         try:
             a = egress.ask(conn, client, model, effort, system, SCHEMA, p.text, segment_ids=p.segment_ids,
                            prompt_version=pv, monthly_cap_usd=monthly_cap_usd, policy=p.policy,
-                           episode_id=p.episode_id, read=lambda answer: _items(p, answer["items"]))
+                           episode_id=p.episode_id, max_tokens=max_tokens,
+                           read=lambda answer: _items(p, answer["items"]))
         except llm.Stop as e:
             stats["stopped"] = str(e)[:200]
             break
