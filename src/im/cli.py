@@ -305,7 +305,7 @@ def cmd_pending(args) -> None:
 
 def cmd_trial(args) -> None:
     """Try a candidate extraction model or prompt on a fixed sample of episodes, and compare it with a reference."""
-    from im import egress, extract, llm, names, trial
+    from im import egress, extract, jev, llm, names, trial
 
     cfg = config.load()
     x = cfg.extract
@@ -318,11 +318,17 @@ def cmd_trial(args) -> None:
         scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
         policy = scrubber.policy if scrubber else egress.POLICY_VERSION
         out = {}
+        candidate = (trial.version(model, effort, system, args.replicate, schema), model)
+        reference = (trial.version(ref_model, ref_effort, system, schema=schema), ref_model)
         if not args.report:
             out["trial"] = trial.run(conn, llm.client_for(model), system, model, effort, cap, args.limit,
                                      args.sample, scrubber, args.replicate, schema, args.max_tokens or x.max_tokens)
-        out["report"] = trial.report(conn, (trial.version(model, effort, system, args.replicate, schema), model),
-                                     (trial.version(ref_model, ref_effort, system, schema=schema), ref_model), policy)
+        same = None
+        if args.same_point:
+            judge = jev.Jev()
+            out["same_point"] = trial.same_point(conn, judge, candidate, reference, policy, scrubber, cap)
+            same = jev.kept(conn, jev.question_set(judge, "match"))
+        out["report"] = trial.report(conn, candidate, reference, policy, same)
     _print(out)
 
 
@@ -771,6 +777,9 @@ def main(argv=None) -> None:
                     "else 32000)")
     tr.add_argument("--monthly-cap-usd", type=float, help="send nothing once the month's spend reaches this "
                     "(default: config)")
+    tr.add_argument("--same-point", action="store_true",
+                    help="also count as found a capture the other model quoted from different lines, where Jev says "
+                         "they make the same point (sends those pairs to Jev, even with --report; answers are kept)")
     tr.set_defaults(func=cmd_trial)
     tu = sub.add_parser("tune", help="preview weight and proposal settings, e.g. recurrence_minutes=45 (writes nothing)")
     tu.add_argument("knobs", nargs="*", metavar="knob=value")

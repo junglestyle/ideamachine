@@ -246,3 +246,41 @@ def read(question: str, r: dict, probes: bool = False) -> dict[str, float]:
     deciding = {k: got[k] for k in QUESTIONS[question]}
     combos = {k: f(got) for k, f in COMBOS.get(question, {}).items()} if probes else {}
     return got | combos | {"p": combine(question, deciding)}
+
+
+def question_set(client: Jev, question: str) -> str:
+    """The version of `question`'s deciding questions as this client asks them: their wording and the model. What
+    a request is logged under, and its kept answers filed under."""
+    from im import themes
+
+    return themes.version(json.dumps(client.body(question, {})["questions"], sort_keys=True), {}, client.model, "")
+
+
+def kept(conn, qs: str) -> dict[str, dict[str, float]]:
+    """Every answer kept for a question set: key -> {name: p, ..., "p": p}."""
+    return {k: a for k, a in conn.execute(
+        "SELECT key_sha256, answers FROM im.jev_answers WHERE question_set = %s", (qs,))}
+
+
+def ask(conn, client: Jev, question: str, key: str, state, *, segment_ids, policy: str,
+        monthly_cap_usd: float) -> tuple[dict[str, float] | None, float, bool]:
+    """Jev's answer to `question` (jev.read) about the state `state()` builds, already pseudonymized, as (answer,
+    cost, sent). `key` is a hash of what the state is built from: an answer kept for it (im.jev_answers) is used
+    without building or sending anything. A failed answer is logged by egress.send and comes back None, to be asked
+    again next time; the cap raises llm.Stop."""
+    from im import egress
+
+    qs = question_set(client, question)
+    row = conn.execute("SELECT answers FROM im.jev_answers WHERE question_set = %s AND key_sha256 = %s",
+                       (qs, key)).fetchone()
+    if row:
+        return row[0], 0.0, False
+    body = client.body(question, state())
+    a = egress.send(conn, lambda: client.complete(body), model=client.model, payload=json.dumps(body),
+                    segment_ids=segment_ids, prompt_version=qs, policy=policy, monthly_cap_usd=monthly_cap_usd,
+                    read=lambda r: read(question, r))
+    if a.failed:
+        return None, a.cost_usd, True
+    conn.execute("""INSERT INTO im.jev_answers (question_set, key_sha256, answers, egress_id) VALUES (%s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING""", (qs, key, json.dumps(a.data), a.egress_id))
+    return a.data, a.cost_usd, True
