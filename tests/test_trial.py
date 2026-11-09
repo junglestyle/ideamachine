@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from im import cli, egress, extract, jev, names, trial
 
-from helpers import run, table
+from helpers import run, system_of, table
 from test_carry import DATABASE, capture
 from test_extract import FakeClaude
 from test_jev import fake
@@ -66,7 +66,7 @@ def test_a_trial_scores_a_candidate_against_a_reference_on_the_same_sample(pipe,
 
     v3 = extract.system_prompt("v3")
     opus = FakeClaude(both(DATABASE, "coffee"))
-    assert trial.run(pipe, opus, v3)["read"] == episodes and all(c["system"] == v3 for c in opus.calls)
+    assert trial.run(pipe, opus, v3)["read"] == episodes and all(system_of(c) == v3 for c in opus.calls)
     assert "fallbacks" in opus.calls[0]
     sonnet = FakeClaude(both(DATABASE, "lockfile"))   # finds one of Opus's two, and one of its own
     assert trial.run(pipe, sonnet, v3, model="claude-sonnet-5-5")["read"] == episodes

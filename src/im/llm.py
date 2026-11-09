@@ -114,7 +114,10 @@ def complete(client, model: str, effort: str, system: str, schema: dict, text: s
         if model.startswith("claude-opus") else {}
     try:
         r = client.beta.messages.create(
-            model=model, max_tokens=max_tokens, system=system, messages=[{"role": "user", "content": text}],
+            # The system prompt is the same for every request of a stage, so it's cached: a read costs a tenth of the
+            # input price and a write 1.25 times (cost). One shorter than the model's minimum just isn't cached.
+            model=model, max_tokens=max_tokens, messages=[{"role": "user", "content": text}],
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}}, **fallback)
     except anthropic.APIConnectionError as e:
         raise Unavailable(f"{type(e).__name__}: {e}") from e
