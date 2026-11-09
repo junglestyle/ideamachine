@@ -46,6 +46,21 @@ def test_the_same_line_captured_twice_in_one_read_is_one_observation(pipe, cfg, 
     assert sorted(len(v) for v in by_quote.values()) == [1, 1]   # both database captures share one
 
 
+def test_an_observation_carries_the_arousal_its_segments_were_said_with(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    extract.run_stage(pipe, FakeClaude(lambda text: capture("LoRa")(text) + capture("coffee")(text)))
+    observations.assign_stage(pipe)
+    arousal = dict(table(pipe, """SELECT i.quote, a.arousal FROM im.items i
+                                  LEFT JOIN im.observation_arousal a USING (observation_id)"""))
+    assert round(arousal[LORA], 2) == 0.72                      # my line, as Hearsay scored it
+    assert arousal["Who's got the coffee order?"] is None       # someone else's: never scored
+
+    stream.score_affect("c-mono", 0, 0.4)                       # re-measured: the view follows at once
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    assert round(table(pipe, "SELECT arousal FROM im.observation_arousal")[0][0], 2) == 0.4
+
+
 def test_speaker_follows_the_segment_label(pipe, cfg, stream):
     run(pipe, cfg, stream)
     extract.run_stage(pipe, FakeClaude(lambda text: [i for i in items_for(text) if "LoRa" in i["quote"]]))
