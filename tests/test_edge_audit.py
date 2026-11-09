@@ -10,7 +10,7 @@ import pytest
 from im import edge_audit, egress, jev, names, observations
 
 from helpers import table
-from test_lattice import lat_setup
+from test_lattice import lat_setup, legacy_evolves
 
 NAMED = "Did you see the build broke again, Bob?"   # a captured line that names someone
 
@@ -18,6 +18,7 @@ NAMED = "Did you see the build broke again, Bob?"   # a captured line that names
 @pytest.fixture
 def lattice_with_clusters(seeded, cfg, stream):
     lat_setup(seeded, cfg, stream)   # three archive ideas, plus captured clusters, one evolving an archive idea
+    legacy_evolves(seeded)           # (lineage matcher v1 wrote; the sheets still draw what the live lattice holds)
     observations.assign_stage(seeded)
     return seeded
 

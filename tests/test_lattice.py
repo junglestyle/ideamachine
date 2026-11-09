@@ -1,6 +1,7 @@
 """The idea lattice: seeding, matching captures into ideas, the pub contract, and forgetting."""
 
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,7 +9,7 @@ import numpy as np
 import psycopg
 import pytest
 
-from im import extract, fixtures, lattice, observations, pipeline
+from im import citations, extract, fixtures, lattice, observations, pipeline
 from im.checks import run_checks
 from im.config import ModelConfig
 
@@ -42,8 +43,8 @@ REAL_SEED = Path.home() / ".local/share/ideamachine/seeds/chatgpt-archive.md"
 
 
 class FakeMatcher:
-    """Decides by keyword: 'coffee' items are the same as the coffee idea, 'build' items evolve the signal
-    idea, everything else is new. Records every request."""
+    """Matcher v2 by keyword: a 'coffee' capture makes the same point as every coffee cluster, a 'build' capture
+    starts the broken-builds cluster, everything else a new one. Records every request."""
 
     def __init__(self):
         self.calls = []
@@ -52,16 +53,14 @@ class FakeMatcher:
     def create(self, **kw):
         self.calls.append(kw)
         text = kw["messages"][0]["content"]
-        item, cands = text.split("Candidates:")
-        numbered = {line.split(". ", 1)[1].lower(): int(line.split(".")[0]) for line in cands.strip().splitlines()}
-        pick = lambda word: next(n for c, n in numbered.items() if word in c)  # noqa: E731
-        if "coffee" in item.lower():
-            answer = {"decision": "same_as", "candidate": pick("coffee"), "title": "", "statement": ""}
-        elif "build" in item.lower():
-            answer = {"decision": "evolves", "candidate": pick("signal"), "title": "Broken builds as signal",
-                      "statement": "A broken build is a signal about the system."}
-        else:
-            answer = {"decision": "new", "candidate": 0, "title": "Something new", "statement": "A new thing."}
+        item, cands = text.split("\nCandidates\n")
+        shown = re.findall(r"^(\d+)\. title(?: \(mine\))?: (.*)\n\s+statement(?: \(mine\))?: (.*)$", cands, re.M)
+        coffee = "coffee" in item.lower()
+        answer = {"judgments": [{"candidate": int(n), "same_point": coffee and "coffee" in f"{t} {s}".lower()}
+                                for n, t, s in shown], "title": "", "statement": ""}
+        if not any(j["same_point"] for j in answer["judgments"]):
+            answer |= {"title": "Broken builds as signal", "statement": "A broken build is a signal about the system."} \
+                if "build" in item.lower() else {"title": "Something new", "statement": "A new thing."}
         content = [SimpleNamespace(type="text", text=json.dumps(answer))]
         return SimpleNamespace(content=content, stop_reason="end_turn", model="claude-opus-5-5", _request_id="r",
                                usage=SimpleNamespace(input_tokens=300, output_tokens=50))
@@ -102,6 +101,15 @@ def seeded_lattice(seeded, cfg, stream):
     return lat_setup(seeded, cfg, stream)
 
 
+def legacy_evolves(conn):
+    """An evolves edge as matcher v1 wrote them, from the broken-builds cluster to the archive's signal idea: lineage
+    the live lattice still holds, though matcher v2 writes none."""
+    conn.execute("""INSERT INTO im.lineage (from_id, to_id, kind, method)
+                    SELECT b.idea_id, s.idea_id, 'evolves', 'match-1:legacy' FROM im.ideas b, im.ideas s
+                    WHERE b.title = 'Broken builds as signal' AND s.statement LIKE '%%always correct%%'""")
+    citations.cite(conn)
+
+
 def test_parse_and_seed(seeded, tmp_path):
     entries, clusters = lattice.parse_archive(ARCHIVE)
     assert [e["n"] for e in entries] == [1, 2, 3] and entries[1]["notes"].startswith("Theme: truth")
@@ -121,21 +129,87 @@ def test_the_real_archive_parses():
     assert [c["letter"] for c in clusters] == list("ABCDE") and len(clusters[0]["members"]) == 13
 
 
-def test_matching_new_same_and_evolves(seeded, cfg, stream):
+def test_matching_joins_the_same_point_and_writes_no_lineage(seeded, cfg, stream):
     run(seeded, cfg, stream)
     extract.run_stage(seeded, FakeClaude(items_for))
     claude = FakeMatcher()
     stats = lattice.match_stage(seeded, claude, HashEmbedder())
-    assert (stats["new"], stats["same_as"], stats["evolves"]) == (1, 1, 1)
+    assert (stats["new"], stats["same_as"], stats["possible_duplicates"]) == (2, 1, 0)
     coffee = table(seeded, """SELECT n_evidence, title FROM pub.ideas WHERE statement LIKE '%%coffee%%'""")
     assert coffee == [(1, "The coffee order is the real meeting.")]
     assert table(seeded, "SELECT said_by FROM pub.evidence ORDER BY said_by") == [("anon A",), ("me",), ("me",)]
-    evolved = table(seeded, """SELECT b.statement FROM pub.connections c JOIN pub.ideas a ON a.idea_id = c.a
-                               JOIN pub.ideas b ON b.idea_id = c.b WHERE c.kind = 'evolves'""")
-    assert evolved == [("\u201cSignal may not be true, but it is always correct.\u201d",)]
+    assert table(seeded, "SELECT count(*) FROM im.lineage") == [(0,)]   # building on a point is the connection judge's
     sent = json.dumps([c["messages"] for c in claude.calls])
-    assert "anon A" not in sent and "Alice" not in sent and "said by someone else" in sent
+    assert "anon A" not in sent and "Alice" not in sent and "relayed from: someone else" in sent
     assert lattice.match_stage(seeded, claude, HashEmbedder())["pending"] == 0 and len(claude.calls) == 3
+
+
+def test_a_capture_making_the_same_point_as_two_clusters_joins_the_nearest_and_logs_them(seeded, cfg, stream):
+    seeded.execute("""INSERT INTO im.ideas (title, statement, origin, segment_ids)
+                      VALUES ('Coffee runs the meeting', 'Who gets the coffee order runs the meeting.', 'captured', '{}')""")
+    run(seeded, cfg, stream)
+    extract.run_stage(seeded, FakeClaude(lambda text: [i for i in items_for(text) if "coffee" in i["quote"]]))
+    stats = lattice.match_stage(seeded, FakeMatcher(), HashEmbedder())
+    assert (stats["same_as"], stats["possible_duplicates"]) == (1, 1)
+    ((ideas,),) = table(seeded, "SELECT idea_ids FROM im.merge_review WHERE kind = 'duplicate'")
+    (joined,) = table(seeded, "SELECT idea_id FROM im.item_matches WHERE decision = 'same_as'")[0]
+    assert len(ideas) == 2 and ideas[0] == joined   # the nearest is joined; both go to my merge review
+
+
+class Scripted(FakeMatcher):
+    """Answers with `answers` in turn, each a function of the request text."""
+
+    def __init__(self, *answers):
+        super().__init__()
+        self.answers = list(answers)
+
+    def create(self, **kw):
+        self.calls.append(kw)
+        a = self.answers.pop(0)(kw["messages"][0]["content"])
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text=json.dumps(a))], stop_reason="end_turn",
+                               model="claude-opus-5-5", _request_id="r",
+                               usage=SimpleNamespace(input_tokens=300, output_tokens=50))
+
+
+def candidates(text):
+    return [int(n) for n in re.findall(r"^(\d+)\. title", text, re.M)]
+
+
+def test_a_relayed_thought_is_matched_only_among_relayed_clusters(seeded, cfg, stream):
+    run(seeded, cfg, stream)
+    lines = []
+
+    def respond(text):   # v5: my LoRa and build lines, both relayed from my teacher
+        out = []
+        for row in text.splitlines():
+            if row.startswith("[") and ("LoRa" in row or "build broke" in row) and row.split(": ", 1)[0].endswith(" me"):
+                said = row.split(": ", 1)[1]
+                out.append({"quote": said, "lines": [int(row[1:].split("]")[0])], "attributed_to": "my teacher",
+                            "reading": said, "mishearings": [], "gist": said})
+                lines.append(said)
+        return out
+
+    extract.run_stage(seeded, FakeClaude(respond), system=extract.system_prompt("v5"), schema=extract.schema_for("v5"))
+    claude = Scripted(lambda text: {"judgments": [{"candidate": n, "same_point": False} for n in candidates(text)],
+                                    "title": "My teacher's point", "statement": "My teacher says this."})
+    stats = lattice.match_stage(seeded, claude, HashEmbedder())
+    # The first relayed capture is the first cluster on its side: no candidates, so nothing to ask. The second sees
+    # only that one, never the archive's clusters of my own.
+    assert stats["new"] == 2 and len(claude.calls) == 1
+    shown = claude.calls[0]["messages"][0]["content"]
+    assert candidates(shown) == [1] and "relayed from: my teacher" in shown and "coffee" not in shown.lower()
+
+
+def test_an_answer_missing_a_candidate_is_asked_again_and_a_statement_shown_as_said_falls_back(seeded, cfg, stream):
+    run(seeded, cfg, stream)
+    extract.run_stage(seeded, FakeClaude(lambda text: [i for i in items_for(text) if "LoRa" in i["quote"]]))
+    short = lambda text: {"judgments": [], "title": "x", "statement": "y"}  # noqa: E731
+    quoted = lambda text: {"judgments": [{"candidate": n, "same_point": False} for n in candidates(text)],  # noqa: E731
+                           "title": "Garden sensors over LoRa", "statement": "Idea: sensors could report over LoRa."}
+    stats = lattice.match_stage(seeded, Scripted(short, quoted), HashEmbedder())
+    assert (stats["asked_again"], stats["new"]) == (1, 1)
+    assert table(seeded, "SELECT title, statement FROM pub.ideas WHERE title LIKE 'Garden%%'") == [
+        ("Garden sensors over LoRa", LORA)]   # a labeled statement falls back to the gist
 
 
 def test_a_re_read_joins_its_observations_cluster_unasked(seeded, cfg, stream):
@@ -210,7 +284,7 @@ def test_a_match_cut_off_is_logged_and_paid_for_and_the_other_captures_are_match
     extract.run_stage(seeded, FakeClaude(items_for))
     claude = CutsOffFirst()
     stats = lattice.match_stage(seeded, claude, HashEmbedder())
-    assert len(claude.calls) == 3 and stats["failed"] == 1 and stats["new"] + stats["same_as"] + stats["evolves"] == 2
+    assert len(claude.calls) == 3 and stats["failed"] == 1 and stats["new"] + stats["same_as"] == 2
     logged = table(seeded, """SELECT count(*), count(*) FILTER (WHERE error IS NOT NULL AND cost_usd > 0)
                               FROM im.egress_log WHERE prompt_version = %s""", lattice.matcher_version())
     assert logged == [(3, 1)]
@@ -219,8 +293,8 @@ def test_a_match_cut_off_is_logged_and_paid_for_and_the_other_captures_are_match
 
 
 def test_the_matchers_version_follows_its_configured_model():
-    # Every match so far is filed under this; the defaults must keep it.
-    assert lattice.matcher_version() == lattice.matcher_version(ModelConfig()) == "match-1:f9f0f4514533"
+    # Every match is filed under this; the defaults must keep it.
+    assert lattice.matcher_version() == lattice.matcher_version(ModelConfig()) == "match-2:812666437509"
     for other in (ModelConfig(model="claude-sonnet-5-5"), ModelConfig(effort="medium")):
         assert lattice.matcher_version(other) != lattice.matcher_version()
 

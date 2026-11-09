@@ -144,9 +144,11 @@ Then, outside that transaction:
   them. A line label copied into the quote ("[23] me: ") is dropped. `im.items.quote_in_lines` keeps the share of
   the quote's words found; under 0.6 the quote isn't from its lines. The first run after migration 044 does this
   for every existing capture.
-- **Lattice.** Each new capture is matched against the nearest existing ideas (local embeddings), and Claude
-  decides new / same as / evolves. Related-idea edges are rebuilt. Lattice, the separate presentation app, reads
-  the result through schema `pub` ([ROADMAP §3.5](ROADMAP.md)).
+- **Lattice.** Each new capture is shown the nearest clusters on its side (relayed or my own; local embeddings), and
+  the matcher says of each whether the capture makes the same point. It joins the nearest that does, else starts a
+  new cluster. Two or more matches are logged in `im.merge_review` as a possible duplicate, for my review. Related-
+  idea edges are rebuilt. Lattice, the separate presentation app, reads the result through schema `pub`
+  ([ROADMAP §3.5](ROADMAP.md)).
 - **Digest.** Claude writes the last completed week's digest (Monday to Monday) once every episode of that week
   has been read and its captures matched; until then the run leaves it, with `"waiting": true` in its stats, and a
   later run writes it.

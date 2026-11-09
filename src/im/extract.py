@@ -226,7 +226,7 @@ shaky transcription or a reading that depends on guessing the context."""
 SYSTEM_V5 = resources.files("im.prompts").joinpath("extract_v5.txt").read_text().rstrip("\n")
 
 PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3, "v4": SYSTEM_V4, "v5": SYSTEM_V5}
-LIVE = ("v1", "v2", "v3")   # the prompts im.items can hold; a later one is for `im trial` until it can
+LIVE = ("v1", "v2", "v3")   # the prompts the matcher can read; a later one is for `im trial` and the rebuild until then
 
 
 def system_prompt(name: str = "v1", interests: str = "") -> str:
@@ -364,14 +364,17 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict
     line = {sid: n for n, sid in enumerate(old.segment_ids)}
     alias = {label: pseudo for pseudo, label in old.speakers.items()}
     rows = conn.execute(
-        """SELECT item_id, kind, w.said_by, quote, gist, themes, confidence, source_segment_ids
+        """SELECT item_id, kind, w.said_by, quote, gist, themes, confidence, source_segment_ids, reading, attributed_to,
+                  mishearings, checks
            FROM im.items JOIN im.item_said_by w USING (item_id)
            WHERE episode_id = %s AND model = %s AND prompt_version = %s AND privacy_policy_version = %s
            ORDER BY item_id""", (row[0], model, pv, p.policy)).fetchall()
+    v5 = ("reading", "attributed_to", "mishearings", "checks")
     return row[1], [{"from_item_id": i, "kind": k, "said_by": p.speakers.get(alias.get(by), by), "quote": q,
                      "gist": g, "themes": t, "confidence": c,
                      "source_segment_ids": [p.segment_ids[line[s]] for s in segs]}
-                    for i, k, by, q, g, t, c, segs in rows]
+                    | {f: v for f, v in zip(v5, more) if v is not None}
+                    for i, k, by, q, g, t, c, segs, *more in rows]
 
 
 def _items(p: egress.Payload, raw: list[dict]) -> list[dict]:
@@ -435,7 +438,7 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
         old = conn.execute("""SELECT item_id, kind, quote, source_segment_ids FROM im.items
                               WHERE episode_id = %s AND model = %s AND prompt_version = %s
                                 AND privacy_policy_version = %s""", (p.episode_id, model, pv, p.policy)).fetchall()
-        scored = sorted((-feedback.quote_score(quote, it["quote"]), kind != it["kind"], str(item_id), n, item_id)
+        scored = sorted((-feedback.quote_score(quote, it["quote"]), kind != it.get("kind"), str(item_id), n, item_id)
                         for item_id, kind, quote, segs in old for n, it in enumerate(items)
                         if set(segs) & set(it["source_segment_ids"]))
         kept: dict[int, uuid.UUID] = {}
@@ -460,15 +463,18 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
             conn.execute(
                 """INSERT INTO im.items (item_id, episode_id, kind, said_by, quote, gist, themes, confidence,
                      source_segment_ids, egress_id, model, prompt_version, privacy_policy_version,
-                     schema_version, stage_version, input_hash, said_by_segment_id)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                     schema_version, stage_version, input_hash, reading, attributed_to, mishearings, checks,
+                     said_by_segment_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                      (SELECT u.seg FROM unnest(%s::uuid[]) WITH ORDINALITY AS u(seg, n)
                       JOIN im.source_segments s ON s.segment_id = u.seg
                       WHERE s.speaker_label = %s ORDER BY u.n LIMIT 1))""",
                 (ids[-1],
-                 p.episode_id, it["kind"], it["said_by"], it["quote"], it["gist"], it["themes"], it["confidence"],
-                 it["source_segment_ids"], egress_id, model, pv, p.policy, SCHEMA_VERSION,
-                 STAGE_VERSION, p.sha256, it["source_segment_ids"], it["said_by"]))
+                 p.episode_id, it.get("kind"), it["said_by"], it["quote"], it["gist"], it["themes"],
+                 it.get("confidence"), it["source_segment_ids"], egress_id, model, pv, p.policy, SCHEMA_VERSION,
+                 STAGE_VERSION, p.sha256, it.get("reading"), it.get("attributed_to"),
+                 None if "mishearings" not in it else json.dumps(it["mishearings"]), it.get("checks"),
+                 it["source_segment_ids"], it["said_by"]))
         conn.execute(
             """INSERT INTO im.extractions (episode_id, model, prompt_version, privacy_policy_version, input_hash,
                  egress_id, n_items) VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -481,8 +487,10 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
 
 def run_stage(conn, client, model: str = ExtractConfig.model, effort: str = ExtractConfig.effort,
               monthly_cap_usd: float = 20.0, limit: int | None = None, system: str = SYSTEM,
-              max_tokens: int | None = None) -> dict:
-    pv = prompt_version(model, effort, system)
+              max_tokens: int | None = None, schema: dict = SCHEMA) -> dict:
+    """Read every episode not yet read under this model, prompt and schema (schema_for the prompt), and keep what
+    it captures in im.items."""
+    pv = prompt_version(model, effort, system, schema)
     todo = _pending(conn, model, pv)
     stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "reused": 0, "items": 0,
              "refused": 0, "failed": 0, "cost_usd": 0.0, "stopped": None}
@@ -493,7 +501,7 @@ def run_stage(conn, client, model: str = ExtractConfig.model, effort: str = Extr
             stats["items"] += len(reused[1])
             continue
         try:
-            a = egress.ask(conn, client, model, effort, system, SCHEMA, p.text, segment_ids=p.segment_ids,
+            a = egress.ask(conn, client, model, effort, system, schema, p.text, segment_ids=p.segment_ids,
                            prompt_version=pv, monthly_cap_usd=monthly_cap_usd, policy=p.policy,
                            episode_id=p.episode_id, max_tokens=max_tokens,
                            read=lambda answer: _items(p, answer["items"]))

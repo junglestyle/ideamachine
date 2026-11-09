@@ -6,7 +6,7 @@ from im import citations, extract, lattice, observations
 
 from helpers import assert_invariants, run, table
 from test_extract import FakeClaude
-from test_lattice import FakeMatcher, items_for, seeded  # noqa: F401
+from test_lattice import FakeMatcher, items_for, legacy_evolves, seeded  # noqa: F401
 from test_triage import HashEmbedder
 
 # Every edge with what the old table called its kind: a connection is the archive's or an embedding neighbor's.
@@ -23,11 +23,13 @@ BUILD_OBSERVATION = """SELECT i.observation_id FROM im.items i WHERE i.quote LIK
 
 
 def matched(conn, cfg, stream, observe_first=True):
+    """Captures matched, and the evolves edge matcher v1 would have written between them."""
     run(conn, cfg, stream)
     extract.run_stage(conn, FakeClaude(items_for))
     if observe_first:
         observations.assign_stage(conn)
     lattice.match_stage(conn, FakeMatcher(), HashEmbedder())
+    legacy_evolves(conn)
 
 
 def test_an_edge_cites_what_exists(seeded, cfg, stream):

@@ -145,22 +145,28 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   doesn't mean the latest read.
 - **Capture source citation.** The payload lines a capture cites, stored as the segments they map to
   (`items.source_segment_ids`; [0004]:18). _Not_ an edge observation citation.
-- **Prompt revision.** One of the extraction prompts' texts, `v1` to `v4` (`extract.PROMPTS`). `im.items` can hold
-  captures from `v1` to `v3` (`extract.LIVE`). **Status:** `v4` is for trials only.
+- **Prompt revision.** One of the extraction prompts' texts, `v1` to `v5` (`extract.PROMPTS`). Live extraction runs
+  `v1` to `v3` (`extract.LIVE`): the matcher reads nothing later. **Status:** `v4` is for trials only; `v5` is for
+  trials and the rebuild (decision 0012), and `im.items` holds its captures (047).
 - **Extraction fingerprint.** A hash of the system prompt, schema, model and effort (`extract.prompt_version`). It's
   stored as `prompt_version` (007:40), and changing any part of it re-reads every episode. _Not_ the prompt revision.
 - **Quote.** The capture's excerpt of its cited lines. Under `v4` it's exactly what the transcript says, character
   for character. Under `v1` to `v3` it could fix obvious transcription errors (`extract.SYSTEM_V3`, `SYSTEM_V4`).
-- **Reading.** `v4` only: the quote repaired and resolved, with transcription fixed, fillers dropped and what "it" or
-  "he" refers to spelled out (`extract.SYSTEM_V4`). **Status:** not stored yet.
+- **Reading.** `v4` and `v5`: the quote repaired and resolved, with transcription fixed, fillers dropped and what
+  "it" or "he" refers to spelled out (`extract.SYSTEM_V4`, `SYSTEM_V5`; `im.items.reading`, 047). NULL before `v5`.
 - **Gist.** The thought restated in one line, with the context it needs to stand alone for someone who wasn't
   there (`im.items.gist`). Under `v4` it carries no label ("Joke:"), no transcription note and no attribution. _Not_
   a statement: a gist is this one occurrence's, and a statement is the cluster's.
 - **Said by.** Who said the capture here: the current speaker label of the capture's `said_by_segment_id`, read at
   query time through `im.item_said_by` (029, [M1 design]).
-- **Attributed to.** `v4` only: whose thought the speaker is passing on ("a nurse"), or empty. Said by stays whoever
-  said it here (`extract.SYSTEM_V4`). **Status:** not stored yet.
-- **Capture kind.** What sort of thought a capture expresses (`im.items.kind`, no CHECK, 007:31).
+- **Attributed to.** `v4` and `v5`: whose thought the speaker is passing on ("a nurse"), or empty. Said by stays
+  whoever said it here (`extract.SYSTEM_V4`, `SYSTEM_V5`; `im.items.attributed_to`, 047). NULL before `v5`.
+- **Mishearings.** `v5`: the (heard, meant) pairs the reading fixed (`im.items.mishearings`, 047). NULL before
+  `v5`.
+- **Capture checks.** `v5`: the code checks a capture failed against the transcript as sent, empty when it passed
+  (`capture_checks.FAIL`; `im.items.checks`, 047). NULL before `v5`.
+- **Capture kind.** What sort of thought a capture expresses (`im.items.kind`, no CHECK, 007:31). `v5` has none: NULL
+  (047).
   - `extract.KINDS` (`v1`-`v3`): `idea`, `aphorism`, `joke`, `observation`, `project`, `task`, `decision`. Under `v3`
     a question is filed as `observation` unless it's an idea put as a question.
   - `extract.KINDS_V4`: `idea`, `aphorism`, `observation`, `question`, `technique`, `project`, `task`, `decision`.
@@ -170,7 +176,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   The boundaries between the other capture kinds are **not yet specified**.
 - **Capture tags.** The free-text strings a model returns with each capture, in the `themes` field (`extract.SCHEMA`;
   `im.items.themes`, 007:35). What they should be is **not yet specified**: no prompt says. _Not_ themes.
-- **Capture confidence.** The model's number, from 0 to 1. What it measures depends on the prompt revision:
+- **Capture confidence.** The model's number, from 0 to 1; `v5` has none (NULL, 047). What it measures depends on the
+  prompt revision:
   - `v1` and `v2`: keep probability, the chance I'd keep the capture;
   - `v3` and `v4`: fidelity confidence, how sure the model is that the quote (or reading) and gist are what was said
     and meant (`extract.SYSTEM`, `SYSTEM_V2`, `SYSTEM_V3`, `SYSTEM_V4`).
@@ -194,9 +201,10 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   context (036:1-23). Observations are neutral and never judged (SPEC.md:27).
 - **Source context.** What a non-speech observation is grouped by for recurrence: the ChatGPT conversation, or the
   `idea_add` event (`observations.conversation`, 036:7). _Not_ a Hearsay conversation.
-- **Same point, distinct points.** Two occurrences make the same point when one is "the same idea" as the other:
-  "restated, repeated, or a near-paraphrase", in the matcher's definition of `same_as` (`lattice.SYSTEM`). Points
-  that aren't the same are distinct points.
+- **Same point, distinct points.** Two occurrences make the same point when they make "the same claim about the same
+  thing, with the same stance, conditions and roughly the same scope": a restatement, a repeat or a near-paraphrase
+  (matcher v2's `same_point`, `lattice.MATCH_SYSTEM`). A point that builds on another, or merely contains it, is a
+  distinct point. A thought I relay and one I hold are never the same point. Points that aren't the same are distinct.
 - **Cluster.** The observations that make the same point, stored as an `im.ideas` row. Its id column is `idea_id`
   everywhere (030:3-4; SPEC §3). The matcher decides what clusters together; no threshold does ([M2 design]
   §Weight).
@@ -208,11 +216,14 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   the cluster was made from, or `same_as`.
 - **Cluster evidence.** The material a cluster shows as support: one capture for each member observation
   (`pub.evidence`, 037:1-5; `n_evidence`).
-- **Matcher.** The role, and the process, that decides each new capture against its nearest clusters: `new`, `same_as`
-  one, or `evolves` one (`lattice.match_stage`; `item_matches.decision`, 008:30, which adds `skipped`).
+- **Matcher.** The role, and the process, that decides each new capture against its nearest clusters on its side
+  (relayed or my own): whether it makes the same point as each (`same_point`), the nearest that does being joined
+  (`same_as`), else `new` (`lattice.match_stage`; `item_matches.decision`, 008:30, which adds `skipped`). Matcher v1
+  could also decide `evolves`; v2 writes no lineage (decision 0012). When a capture makes the same point as two or
+  more clusters, they're logged for my review as a possible duplicate (`im.merge_review`, 049).
 - **Match provenance.** What placed a capture in its cluster (`judged_by`, 008:21). It's either the matcher's version
-  (`match-1:…`) or `carried:observation` (`lattice.CARRIED`). The second records that the capture followed its
-  observation into the cluster, without a matcher judgment.
+  (`match-1:…` or `match-2:…`) or `carried:observation` (`lattice.CARRIED`). The second records that the capture
+  followed its observation into the cluster, without a matcher judgment.
 - **Recurrence.** An independent occurrence of a cluster's point by me. I count once for each distinct conversation
   (or source context) my `me` observations are in, and again within one conversation whenever an observation comes at
   least `recurrence_minutes` (30) after the last one counted. The first occurrence counts, so a cluster I said once
@@ -253,12 +264,13 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **ChatGPT archive.** The ideas and messages of my first "Idea Machine", a ChatGPT conversation: 36 seeded clusters
   (`archive_ref` `chatgpt#n`), their cross-references, and five themes (ROADMAP.md:142). Its messages are
   observations with source `archive` (036).
-- **Title.** A cluster's short name, at most 8 words (`im.ideas.title`). The generated title is the matcher's
-  (`lattice.SYSTEM`), and it's kept as `claude_title`. My latest correction overrides it (`im.idea_text`,
-  011:15-27).
-- **Statement.** A cluster's shared point, in one line, in the founding capture's distinctive wording
-  (`im.ideas.statement`). The generated statement is written by the matcher, falling back to the gist
-  (`lattice.match_stage`), and it's kept as `claude_statement`. My latest correction overrides it.
+- **Title.** A cluster's short name, at most 8 words, the point itself with its scope and hedges (`im.ideas.title`).
+  The generated title is the matcher's (`lattice.MATCH_SYSTEM`), and it's kept as `claude_title`. My latest
+  correction overrides it (`im.idea_text`, 011:15-27).
+- **Statement.** A cluster's shared point, in one sentence in my voice, saying only what the founding capture's gist
+  and reading say (`im.ideas.statement`). It's written once, by the matcher, falling back to the gist when it reads as
+  said (`lattice.match_stage`), and it's kept as `claude_statement`; it changes only when I correct it, so it's a
+  stable anchor for retrieval. My latest correction overrides it.
 - **My note.** My latest `idea_note` on a cluster (`my_note`, 011:23-24).
 - **Archive elaboration.** What the ChatGPT archive developed around one of its ideas (`im.ideas.notes`, 008:12).
 - **Correction.** An `idea_correct` event that replaces a cluster's title or statement (011).
@@ -335,7 +347,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   (`im.lineage(from_id, to_id, kind)`, 045:37-46). Lenses follow it both ways; cluster weight doesn't count it. The
   lineage kinds:
   - `evolves`: a new cluster derived from an earlier cluster, developing it into a distinct idea of its own. It
-    points from the new cluster to the earlier one (`lattice.SYSTEM`, [connections storage] §Tables);
+    points from the new cluster to the earlier one ([connections storage] §Tables). **Status:** matcher v1 wrote it;
+    nothing writes it now. Whether one point builds on another is a connection (`elaborates`, with a direction);
   - `synthesizes`: a synthesized cluster derived from each of its source clusters ([0010]:75-79).
 - **Edge-generation method.** What wrote a connection, connection kind or lineage link (the `method` column): a model
   and question version, embedding parameters, `chatgpt-archive`, the matcher's version, or `feedback` (SPEC §3; 045).
@@ -449,7 +462,7 @@ Each role decides one thing. The model behind it can change, so models are liste
 | Role | Decides | Model now |
 |---|---|---|
 | Extractor | the captures in an episode | `claude-opus-5-5`, effort `medium` (`config.ExtractConfig`) |
-| Matcher | `new`, `same_as` or `evolves` for each capture | `[match]`, default `claude-opus-5-5` (`config.ModelConfig`); Jev planned (ROADMAP-v2 M4) |
+| Matcher | `same_point` against each candidate, so `new` or `same_as` | `[match]`, default `claude-opus-5-5` (`config.ModelConfig`); Jev planned (ROADMAP-v2 M4) |
 | Connection judge | whether a pair is connected | Terra, chosen on B4 (SPEC §5). **Status:** not writing yet; stand-ins hold |
 | Connection-kind judge | the connection kinds on a connection | none yet |
 | Tension judge | whether a pair is in tension, as a proposal | Jev, `pulls4` |
@@ -575,7 +588,7 @@ already have their own capture kind under `v4`.
   maturity (043:27-28).
 - "Idea" is also the maturity `idea` (031:36), the capture kind and triage kind `idea`, and "You extract ideas" in
   the `v1` prompt (`extract.SYSTEM`).
-- "Candidate" is also the nearest clusters shown to the matcher ("Candidates:", `lattice.SYSTEM`), a model under
+- "Candidate" is also the nearest clusters shown to the matcher ("Candidates", `lattice.MATCH_SYSTEM`), a model under
   trial ([0008]:40) and `im.vocab_candidates` (028).
 - "Cluster" is also the archive's five clusters (ROADMAP.md:143), a theme's provenance `clustered` (008:69), and
   Hearsay's voice clusters (`speaker_basis` `cluster`, 002:28; [M1 design]:41).
@@ -776,8 +789,8 @@ graph or a set of lenses a trellis. The module's name stays.
 
 ### evolves, elaborates, develops, extends
 
-- `evolves`: lineage from a new cluster to the earlier one it develops, refines, extends or applies
-  (`lattice.SYSTEM`, 045:40).
+- `evolves`: lineage from a new cluster to the earlier one it develops, refines, extends or applies (045:40). Matcher
+  v1 wrote it; matcher v2 doesn't (decision 0012).
 - The B4 pilot folded `evolves` into `extends`. Labels 2 renamed `extends` to `elaborates`, saying "a later version
   stays `evolves`". But the sheet's header tells me to mark a later version `elaborates` if it refines the earlier
   one (`edge_audit`).
@@ -813,8 +826,8 @@ is what an observation says; a graph node is a cluster, not a point; a digest's 
 - The edge-generation method (045). The supersession rule (002:51, whose comment omits `rekey`), which records how a
   correspondence was established, not what wrote it. `feedback.CARRY_METHOD`, and the positioning method
   (`lattice.POSITIONS_METHOD`).
-- Match provenance (`judged_by`, 008:21). The matcher's version is also the edge-generation method of the `evolves`
-  rows it writes (`lattice.match_stage`). `carried:observation` sits in `judged_by` without being a judgment.
+- Match provenance (`judged_by`, 008:21). Matcher v1's version is also the edge-generation method of the `evolves`
+  rows it wrote. `carried:observation` sits in `judged_by` without being a judgment.
 
 **Use:** edge-generation method, supersession rule, positioning method, match provenance.
 

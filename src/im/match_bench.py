@@ -1,12 +1,13 @@
 """B1: could Jev make the matcher's decisions? Opus's logged decisions, replayed through Jev (ROADMAP-v2 B1, M4).
 
-The matcher (lattice.match_stage) shows Opus each new capture and the ideas nearest it, and Opus answers new, the same
-as one, or develops one. Each request is logged with exactly what was sent. This reads them back and asks Jev about
-the capture against each candidate: is it the same idea, and does it develop it (jev.QUESTIONS["match"], two wordings
-each). Scoring decides as the matcher would, at a grid of cut-offs: the same as the likeliest candidate if that's
-likely enough, else developing the likeliest, else new. Agreement with Opus is B1's first measure. Its bar also
-needs the `same_as` decisions checked by me, since agreeing with Opus only shows a switch is safe where Opus was
-right.
+The matcher (lattice.match_stage) shows Opus each new capture and the ideas nearest it. Matcher v1 answered new, the
+same as one, or develops one; v2 answers, of each candidate, whether the capture makes the same point, and code joins
+the nearest that does. Each request is logged with exactly what was sent. This reads them back, in either form, and
+asks Jev about the capture against each candidate: is it the same idea, and does it develop it
+(jev.QUESTIONS["match"], two wordings each). Scoring decides as matcher v1 would, at a grid of cut-offs: the same as
+the likeliest candidate if that's likely enough, else developing the likeliest, else new. Agreement with Opus is B1's
+first measure. Its bar also needs the `same_as` decisions checked by me, since agreeing with Opus only shows a switch
+is safe where Opus was right.
 
 A decision is replayed only if its request is still logged in full (forgetting blanks a payload). Which candidate
 Opus chose is found by text: the idea it joined (or developed) as its text reads now, or as Claude first wrote it.
@@ -24,15 +25,23 @@ from pathlib import Path
 from im import egress, probe_audit
 
 ITEM = re.compile(r"^Item \((?P<kind>[^,]+), said by (?P<who>[^)]+)\): “(?P<quote>.*)” — (?P<gist>.*)$", re.S)
+ITEM_V2 = re.compile(r"^New capture\ngist: (?P<gist>.*)\nreading: .*\nrelayed from: (?P<relayed>.*)\n"
+                     r"quote \(evidence only\): (?P<quote>.*)$", re.S)
 LINE = re.compile(r"^(\d+)\. (.*)$")
+TITLE_V2 = re.compile(r"^(\d+)\. title(?: \(mine\))?: (.*)$")
+FIELD_V2 = re.compile(r"^   (statement|my note)(?: \(mine\))?: (.*)$")
 NOTE = " (my note: "
+OWN = "nobody (my own)"
 SAME, DEVELOPS = ("same", "same_v2"), ("develops", "develops_v2")
 CUTS = (0.4, 0.5, 0.6, 0.7, 0.8)
 PRECISION = 0.95   # B1's bar for `same_as`; the best cut-offs are the most agreement at or above it
 
 
 def parse(payload: str) -> tuple[dict, list[dict]] | None:
-    """The capture and the candidates as the matcher showed them (lattice._text), or None if it can't be read."""
+    """The capture and the candidates as the matcher showed them (lattice._text, v1 or v2), or None if it can't be
+    read. A candidate's text is "title: statement", as im.idea_text has it."""
+    if payload.startswith("New capture\n"):
+        return _parse_v2(payload)
     head, sep, rest = payload.partition("\n\nCandidates:\n")
     m = ITEM.match(head)
     if not sep or not m:
@@ -50,6 +59,23 @@ def parse(payload: str) -> tuple[dict, list[dict]] | None:
             c["note"] = note[:-1]
     item = {"kind": m["kind"], "said_by": m["who"], "quote": m["quote"], "summary": m["gist"]}
     return item, candidates
+
+
+def _parse_v2(payload: str) -> tuple[dict, list[dict]] | None:
+    head, sep, rest = payload.partition("\n\nCandidates\n")
+    m = ITEM_V2.match(head)
+    if not sep or not m:
+        return None
+    candidates: list[dict] = []
+    for line in rest.splitlines():
+        if (t := TITLE_V2.match(line)) and int(t.group(1)) == len(candidates) + 1:
+            candidates.append({"title": t.group(2)})
+        elif candidates and (f := FIELD_V2.match(line)):
+            candidates[-1]["statement" if f.group(1) == "statement" else "note"] = f.group(2)
+    shown = [{"text": f"{c['title']}: {c.get('statement', '')}"} | ({"note": c["note"]} if "note" in c else {})
+             for c in candidates]
+    item = {"quote": m["quote"], "summary": m["gist"]} | ({} if m["relayed"] == OWN else {"relayed_from": m["relayed"]})
+    return item, shown
 
 
 def decisions(conn) -> list[dict]:

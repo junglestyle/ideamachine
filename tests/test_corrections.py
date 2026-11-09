@@ -55,7 +55,7 @@ def test_matching_and_embeddings_use_the_correction(seeded_lattice, admin, cfg, 
     claude = FakeMatcher()
     lattice.match_stage(pipe, claude, HashEmbedder())
     sent = json.dumps([c["messages"] for c in claude.calls])
-    assert "Coffee runs are where the real meeting happens. (my note: office ritual)" in sent
+    assert "statement (mine): Coffee runs are where the real meeting happens.\\n   my note: office ritual" in sent
 
 
 def test_a_correction_refiles_the_idea_but_keeps_archive_themes(seeded_lattice, admin):
