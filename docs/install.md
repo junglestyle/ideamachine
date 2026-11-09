@@ -60,7 +60,8 @@ Settings are env vars:
   and says so. What's sent, and how, is in [decisions/0004-claude-extraction.md](decisions/0004-claude-extraction.md).
 - `LATTICE_DATABASE_URL` and `LATTICE_TOKEN`: for `im web`, the neutral view (every cluster past the gates, newest
   first, no score; [decision 0007](decisions/0007-neutral-proposals.md)). It reads `pub` and appends feedback as
-  Lattice's role, logs in with Lattice's token, and listens on 127.0.0.1:8792.
+  Lattice's role, logs in with Lattice's token, and listens on 127.0.0.1:8792. A link toggles demo mode, where
+  nothing sensitive shows and nothing can be kept or dismissed; `im web --demo` serves demo mode only.
 - `IM_DEV_ADMIN_URL`: the local dev superuser, used only by tests to create and drop `im_test`. Code refuses it
   unless every host it (or `PGHOST`) names is localhost, a loopback address or a socket directory. Each test gets a
   fresh `im_test` database and stream directory, and none of the other settings here.

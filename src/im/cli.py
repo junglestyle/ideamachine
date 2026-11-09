@@ -594,7 +594,7 @@ def cmd_web(args) -> None:
     """Serve the neutral view as Lattice's role (LATTICE_DATABASE_URL), never as im_pipeline."""
     from im import web
 
-    web.serve(args.host, args.port)
+    web.serve(args.host, args.port, args.demo)
 
 
 def cmd_seed(args) -> None:
@@ -1013,6 +1013,8 @@ def main(argv=None) -> None:
     wb = sub.add_parser("web", help="serve the neutral view (every cluster, newest first, no score)")
     wb.add_argument("--host", default="127.0.0.1")
     wb.add_argument("--port", type=int, default=8792)
+    wb.add_argument("--demo", action="store_true", help="demo mode on every page, with no way out of it: nothing "
+                    "sensitive is shown (the demo views)")
     wb.set_defaults(func=cmd_web)
     args = p.parse_args(argv)
     args.func(args)

@@ -435,11 +435,14 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   - `outside_value`: an idea worth something to a thoughtful stranger.
 - **MCP connector.** The tool interface through which MCP clients, such as claude.ai, query Idea Machine and submit
   feedback events. Its tools' names, arguments and results are a contract (SPEC §2, [0005]).
-- **Sensitivity tags, demo mode.** Eight descriptive tags on a cluster or theme: `profanity`, `sex`,
-  `gender_politics`, `politics`, `drugs`, `offensive`, `violence`, `private_person` (anything about a specific private
-  individual). Jev answers one yes or no per tag, its probabilities kept beside them (`sensitivity.TAGS`; 027, 051).
-  They describe; which ones hide is the view's choice, and anything tagged counts as sensitive in `pub.sensitivity`
-  unless my mark says otherwise. My marks win. Demo mode is a presentation mode that leaves out what's sensitive.
+- **Sensitivity tags.** Eight descriptive tags on a cluster or theme: `profanity`, `sex`, `gender_politics`,
+  `politics`, `drugs`, `offensive`, `violence`, `private_person` (anything about a specific private individual). Jev
+  answers one yes or no per tag, its probabilities kept beside them (`sensitivity.TAGS`; 027, 051). They describe;
+  anything tagged counts as sensitive in `pub.sensitivity` unless my mark says otherwise. My marks win.
+- **Demo mode.** A mode of any presentation layer in which nothing sensitive is shown, enforced in the data it reads
+  (`pub.demo_*`, 052): a sensitive card keeps its place, counts and edges with no words (`redacted`), and its quotes
+  and sensitive themes aren't listed. A map blanks such a card; a list leaves it out. The neutral view has a toggle,
+  and `im web --demo` serves nothing else.
 - **Vocabulary suggestion.** A rare word that Hearsay's transcription should know. Suggestions come from my
   corrections, the archive and misheard quotes, and I approve them (`im.vocab_candidates`, 028:1-13). Approved ones
   are written to `vocab.json` (ROADMAP.md:165, deploy.md:130).

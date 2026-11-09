@@ -1,13 +1,14 @@
-"""Sensitivity tags (decision 0012): eight descriptive tags on each idea and theme, so a view can hide what I'd rather
-not show, as Lattice's demo mode does.
+"""Sensitivity tags (decision 0012): eight descriptive tags on each idea and theme, so demo mode, in any presentation
+layer, can leave out what I'd rather not show (the `demo` schema).
 
 Jev answers one yes or no per tag (jev.QUESTIONS["sensitivity"]) about each shown idea (title, statement, the
 archive's notes and my note, my corrections winning, and up to three of its quotes, since swearing is usually in what
-was said) and each theme (name and description). A tag holds at CUT or above, and Jev's probabilities are kept beside
-the tags, so the cut can be set later from my own marks. The tags describe; which of them hide is the view's choice
-(pub.sensitivity lists them, and counts anything with a tag as sensitive). My own marks (idea_sensitive,
-theme_sensitive) win there, either way. Names said are pseudonymized before anything goes out (policy C, 0008: Jev
-isn't Anthropic). An idea or theme is asked about again when its text changes, at most MAX_PER_RUN a run.
+was said) and each theme (name and description). A shown idea is any presentation's: in pub.ideas or on a card,
+which also shows a cluster whose every capture I discarded. A tag holds at CUT or above, and Jev's probabilities are
+kept beside the tags, so the cut can be set later from my own marks. The tags describe; pub.sensitivity counts
+anything with a tag as sensitive, and my own marks (idea_sensitive, theme_sensitive) win there, either way. Names
+said are pseudonymized before anything goes out (policy C, 0008: Jev isn't Anthropic). An idea or theme is asked
+about again when its text changes, at most MAX_PER_RUN a run.
 """
 
 import hashlib
@@ -33,11 +34,12 @@ def _todo(conn, tv: str) -> list[tuple]:
     """(kind, id, the item as Jev is shown it, its hash) for each idea and theme not tagged under `tv` for its text."""
     out = []
     for i, t, st, n, m, q, h, v in conn.execute(
-            """SELECT d.idea_id, d.title, d.statement, coalesce(d.notes, ''), coalesce(d.my_note, ''),
-                      ARRAY(SELECT left(ev.quote, 200) FROM pub.evidence ev WHERE ev.idea_id = d.idea_id
-                              AND ev.verdict IS DISTINCT FROM 'discard' ORDER BY ev.said_at, ev.item_id LIMIT %s),
+            """SELECT d.idea_id, x.title, x.statement, coalesce(d.notes, ''), coalesce(x.my_note, ''),
+                      ARRAY(SELECT left(ce.quote, 200) FROM pub.card_evidence ce WHERE ce.idea_id = d.idea_id
+                            ORDER BY ce.said_at, ce.item_id LIMIT %s),
                       s.input_hash, s.tagger_version
-               FROM pub.ideas d LEFT JOIN im.idea_sensitivity s USING (idea_id)
+               FROM im.ideas d JOIN im.idea_text x USING (idea_id) LEFT JOIN im.idea_sensitivity s USING (idea_id)
+               WHERE d.idea_id IN (SELECT idea_id FROM pub.ideas UNION SELECT idea_id FROM pub.cards)
                ORDER BY d.created_at, d.idea_id""", (QUOTES,)):
         if v != tv or h != _hash(t, st, n, m, q):
             item = {"title": t, "statement": st} | ({"notes": n} if n else {}) | ({"my_note": m} if m else {}) \
