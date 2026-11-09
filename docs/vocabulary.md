@@ -76,11 +76,13 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Places.** The places I named for a conversation, with their times (013:3-5).
 - **Affect, arousal.** Affect is the stream's container for measures of how I sounded. Arousal is the measure in it:
   how animated I sounded, about 0 to 1, from the audio alone, meaning tone of voice and not sentiment (013:7-9).
-  Idea Machine stores arousal per segment; there's no `affect` column. **Status:** nothing reads it.
+  Idea Machine stores arousal per segment; there's no `affect` column. An observation carries the mean over its
+  segments that have one (`im.observation_arousal`, 048), and the neutral view's quotes carry it
+  (`pub.card_evidence.arousal`), as a fact to show and filter by that decides nothing (decision 0012).
 - **Valence.** Whether what I said was positive or negative. Not recorded: Hearsay's stream has no valence, so
-  recording it would start as a change to Hearsay's contract. Open (2026-11-07): if valence and arousal both reach
-  Idea Machine, an observation would carry them from its segments, as facts to show, filter or light a lens by, not a
-  rating ([0007]).
+  recording it would start as a change to Hearsay's contract. If it reaches Idea Machine, an observation would carry
+  it from its segments the way it carries arousal, as a fact to show, filter or light a lens by, not a rating
+  ([0007]).
 - **Delivery.** How I spoke: words per second, pauses and stutters, measured from word timings, not judged (019:1-6).
   A stutter kind is `repeat`, `restart` or `filler`. **Status:** nothing reads it (ROADMAP.md:49).
 - **Open flag.** Hearsay's index flag for a conversation that's still growing. **Status:** SPEC.md:69-70 says V2
