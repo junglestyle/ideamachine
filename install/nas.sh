@@ -242,10 +242,8 @@ SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'im_names') AS missing
 CREATE ROLE im_names LOGIN;
 \endif
 ALTER ROLE im_names PASSWORD :'pw';
-GRANT USAGE ON SCHEMA im TO im_names;
-GRANT SELECT ON im.episodes, im.episode_segments, im.source_segments TO im_names;
-GRANT SELECT, INSERT, UPDATE ON im.segment_names TO im_names;
 SQL
+grant_names im
 # Where `ssh nas` (the clones' owner) can read it, and nobody else.
 CLONE_OWNER="$(stat -c %U "$REPO_DIR")"
 install -d -o "$CLONE_OWNER" -m 700 "$NAS_ROOT/gpu"
@@ -349,8 +347,11 @@ say "Nightly backups (TrueNAS cron job, output to the journal)"
 # flock skips a run while one is going. No % in either command: cron would treat it as a newline.
 RUN_JOB="( (flock -n -E 75 $RUN_LOCK ${COMPOSE[*]} run --rm -T run </dev/null || echo \"run did not finish: exit \$? (75: skipped, the last run was still going)\") 2>&1 | logger -t ideamachine-run )"
 # Your labels, verdicts, stars and pins are the irreplaceable part. Two weeks of nightly dumps, written whole or not
-# at all; fast is snapshotted at 4:00 and replicated to storage, so each night's dump is in that night's copy.
-BACKUP_JOB="( (f=$NAS_BACKUPS/im-\$(date -I).dump; ${COMPOSE[*]} exec -T db pg_dump -U postgres -d im -Fc > \$f.part && mv \$f.part \$f && ls -l \$f && find $NAS_BACKUPS -name 'im-*.dump' -mtime +14 -delete || echo \"backup failed: exit \$?\") 2>&1 | logger -t ideamachine-backup )"
+# at all; fast is snapshotted at 4:00 and replicated to storage, so each night's dump is in that night's copy. After
+# im's, the rebuild database's (install/rebuild.sh) while there is one, in files of its own (im_rebuild-*.dump, which
+# im-*.dump doesn't match), kept as long, and pruned after cutover too.
+REBUILD_BACKUP="r=$NAS_BACKUPS/$REBUILD_DB-\$(date -I).dump; if ${COMPOSE[*]} exec -T db psql -U postgres -d im -tAc \"SELECT 1 FROM pg_database WHERE datname = '$REBUILD_DB'\" | grep -qx 1; then ${COMPOSE[*]} exec -T db pg_dump -U postgres -d $REBUILD_DB -Fc > \$r.part && mv \$r.part \$r && ls -l \$r || echo \"backup of $REBUILD_DB failed: exit \$?\"; fi; find $NAS_BACKUPS -name '$REBUILD_DB-*.dump' -mtime +14 -delete"
+BACKUP_JOB="( (f=$NAS_BACKUPS/im-\$(date -I).dump; ${COMPOSE[*]} exec -T db pg_dump -U postgres -d im -Fc > \$f.part && mv \$f.part \$f && ls -l \$f && find $NAS_BACKUPS -name 'im-*.dump' -mtime +14 -delete || echo \"backup failed: exit \$?\"; $REBUILD_BACKUP) 2>&1 | logger -t ideamachine-backup )"
 cron_ensure "ideamachine backup" 15 3 "$BACKUP_JOB"
 echo "logs: journalctl -t ideamachine-run, journalctl -t ideamachine-backup"
 
@@ -377,6 +378,13 @@ dump="$NAS_BACKUPS/im-$(date -I).dump"
     || die "no new dump at $dump (journalctl -t ideamachine-backup --since @$since)"
 docker exec -i "$DB_CONTAINER" pg_restore -l < "$dump" >/dev/null || die "$dump isn't a readable dump"
 echo "backup: $dump ($(du -h "$dump" | cut -f1), readable)"
+if rebuild_exists; then
+    dump="$NAS_BACKUPS/$REBUILD_DB-$(date -I).dump"
+    [ "$(stat -c %Y "$dump" 2>/dev/null || echo 0)" -ge "$since" ] \
+        || die "no new dump at $dump (journalctl -t ideamachine-backup --since @$since)"
+    docker exec -i "$DB_CONTAINER" pg_restore -l < "$dump" >/dev/null || die "$dump isn't a readable dump"
+    echo "backup of $REBUILD_DB: $dump ($(du -h "$dump" | cut -f1), readable)"
+fi
 
 [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8790/login)" = 200 ] || die "Lattice isn't answering on 127.0.0.1:8790"
 echo "Lattice: answering on 127.0.0.1:8790"
@@ -393,6 +401,12 @@ say "The im command, for root"
 # home; the next run of this script adds the line again.
 IM_PATH_LINE="export PATH=\"\$PATH:$REPO_DIR/install/bin\"   # Idea Machine's im (install/nas.sh)"
 grep -qxF "$IM_PATH_LINE" /root/.zshrc 2>/dev/null || echo "$IM_PATH_LINE" >> /root/.zshrc
+
+if rebuild_exists; then
+    say "The rebuild database, $REBUILD_DB (install/rebuild.sh)"
+    # Its setup and migrations, brought up to date with the live one's. It's run with im-rebuild (install/bin).
+    "$REPO_DIR/install/rebuild.sh"
+fi
 
 say "Done"
 cat <<EOF
