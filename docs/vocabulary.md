@@ -924,10 +924,10 @@ These terms are in use, but no doc or file defines them:
 [0005]: decisions/0005-presentation-inside-idea-machine.md
 [0006]: decisions/0006-graph-in-postgres.md
 [0007]: decisions/0007-neutral-proposals.md
-[0012]: decisions/0012-rebuild-with-v5.md
 [0008]: decisions/0008-other-providers-and-names.md
 [0009]: decisions/0009-edges-connection-graded-kind-suggested.md
 [0010]: decisions/0010-connections-kinds-lenses.md
+[0012]: decisions/0012-rebuild-with-v5.md
 [0013]: decisions/0013-lenses-and-boards.md
 [M1 design]: design/m1-segment-identity.md
 [M2 design]: design/m2-observations-candidates-ideas.md
