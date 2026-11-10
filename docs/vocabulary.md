@@ -117,9 +117,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   `B1;speakers-pseudonymized;spoken-names-not-scrubbed;no-registry` (`egress.POLICY_VERSION`).
 - **Speaker-and-name pseudonymization policy (policy C).** Policy B, plus every name mention replaced by a name
   pseudonym ([0008]). Its identifier names the name finder (`names.POLICY`), so changing the finder re-sends.
-  **Status:** used for trials and audits, the sensitivity tags, and live extraction with a prompt after `v3`
-  (`extract.POLICY_B`), which is v5.3 in the rebuild. There is no policy A: the rule B replaced was "other people's
-  words never leave the box" ([0004]:24-25).
+  **Status:** used for trials and audits, the sensitivity tags, the matcher, and live extraction with a prompt after
+  `v3` (`extract.POLICY_B`), which is v5.3 in the rebuild. Themes and the digest still send statements as stored.
+  There is no policy A: the rule B replaced was "other people's words never leave the box" ([0004]:24-25).
 - **Pseudonym.** A stand-in for an identity in a request, mapped back locally, so stored text keeps real names. There
   are two:
   - **speaker alias**: what stands for a speaker in one request: `me` for the owner, then `S1`, `S2`... in order of
