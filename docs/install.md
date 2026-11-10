@@ -79,12 +79,11 @@ Every stage that asks Claude takes its model and effort from the file:
 | `[extract]` | extraction (also `prompt`, `interests`, `monthly_cap_usd`, `max_episodes_per_run`) | `claude-opus-5-5` | `medium` |
 | `[match]` | the lattice's matcher | `claude-opus-5-5` | `low` |
 | `[themes]` | describing, filing and proposing themes | `claude-opus-5-5` | `low` |
-| `[scores]` | the rubric | `claude-opus-5-5` | `low` |
 | `[vocab]` | vocabulary repairs and archive picks | `claude-opus-5-5` | `low` |
 | `[digest]` | the weekly digest | `claude-opus-5-5` | `low` |
 
 Both go into the stage's version. Changing extraction's re-reads every episode, so try it first with `im trial`.
-Changing the scores' or vocab's asks again about every idea, and the themes' about every idea that fits no theme.
+Changing vocab's asks again about every idea, and the themes' about every idea that fits no theme.
 The matcher and the digest use a new one from then on; what they've already done stays.
 
 The sensitivity tags have no section: Jev (`jev.MODEL`) answers one yes or no per tag, with names said pseudonymized
@@ -164,7 +163,7 @@ Then, outside that transaction:
   captured an item above the confidence bar; the rest is auto-filed (`src/im/router.py`; v1 used the local LLM's flags instead, see
   [decisions/0003-router-v1.md](decisions/0003-router-v1.md)).
 
-Every stage that asks a model (extraction, matching, themes, scores, sensitivity, vocab, the digest) stops, saying
+Every stage that asks a model (extraction, matching, themes, sensitivity, vocab, the digest) stops, saying
 why in its stats, when the month's spend reaches `extract.monthly_cap_usd`, when the API can't answer now, or when
 no request would get through (the credentials or the account's credit rejected, a model id that doesn't exist); the
 stages after it still run. A request whose reply fails (an error response, no answer, one cut off or not in the

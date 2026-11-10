@@ -7,13 +7,12 @@ from types import SimpleNamespace
 import psycopg
 import pytest
 
-from im import digest, extract, lattice, scores
+from im import digest, extract, lattice
 
 from helpers import run, table
 from test_extract import FakeClaude
 from test_lattice import FakeMatcher, items_for
 from test_review import as_lattice
-from test_scores import FakeScorer
 from test_triage import HashEmbedder
 
 WEEK = date(2026, 8, 31)   # the fixture stream is said on Tuesday 2026-09-01
@@ -45,7 +44,6 @@ def test_last_week_is_the_previous_monday_to_monday():
 
 def test_a_week_is_digested_once_from_ideas_not_speech(seeded_lattice, admin):
     pipe = seeded_lattice
-    scores.score_stage(pipe, FakeScorer())
     claude = FakeDigester()
     stats = digest.digest_stage(pipe, claude, week=WEEK)
     assert stats["written"] and stats["points"] == 2   # the point citing nothing it was shown is dropped

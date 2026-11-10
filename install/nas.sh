@@ -155,7 +155,7 @@ if [ ! -f "$NAS_CONFIG/im/im.toml" ]; then
 # Idea Machine's config. Every key and its default is in src/im/config.py. Kept out of the repo: it can hold
 # personal details, such as extract.interests. Changing extract.prompt or extract.interests re-reads every
 # episode with Claude, so try a prompt first: im trial <prompt>. A stage's model and effort are part of its
-# version: changing them re-asks scores, sensitivity and vocab about every idea, and themes about every idea
+# version: changing them re-asks sensitivity and vocab about every idea, and themes about every idea
 # that fits no theme; the matcher and the digest use them from then on.
 [extract]
 # prompt = "v1"
@@ -166,10 +166,6 @@ if [ ! -f "$NAS_CONFIG/im/im.toml" ]; then
 # effort = "low"
 
 [themes]
-# model = "claude-opus-5-5"
-# effort = "low"
-
-[scores]
 # model = "claude-opus-5-5"
 # effort = "low"
 

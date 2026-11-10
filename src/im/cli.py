@@ -112,7 +112,6 @@ def _run_stages(conn, cfg) -> dict:
         if cfg.lattice.enabled:
             stats["lattice"] = _lattice(conn, cfg)
             stats["themes"] = _themes(conn, cfg)
-            stats["scores"] = _scores(conn, cfg)
             stats["sensitivity"] = _sensitivity(conn, cfg)
             stats["vocab"] = _vocab(conn, cfg)
             stats["digest"] = _digest(conn, cfg)
@@ -180,18 +179,6 @@ def _themes(conn, cfg) -> dict:
     return out
 
 
-def _scores(conn, cfg) -> dict:
-    """Score ideas on the rubric, or say why it couldn't run; the run goes on either way."""
-    import anthropic
-
-    from im import scores
-
-    try:
-        return scores.score_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd, cfg.scores)
-    except anthropic.AnthropicError as e:
-        return {"stopped": f"Claude unavailable: {e}"}
-
-
 def _sensitivity(conn, cfg) -> dict:
     """Tag ideas and themes for demo mode, or say why it couldn't; the run goes on either way. Jev isn't Anthropic, so
     names said go out pseudonymized (policy C)."""
@@ -243,16 +230,6 @@ def cmd_digest(args) -> None:
             week = week or digest.last_week()
             print(json.dumps(_digest(conn, config.load(), week, args.again), default=str))
         print(digest.show(conn, week))
-
-
-def cmd_scores(args) -> None:
-    """The top of the ranking Lattice shows (pub.idea_scores)."""
-    from im import scores
-
-    with db.connect(db.pipeline_dsn()) as conn:
-        for score, rubric, g, n, c, o, rec, starred, title, why in scores.top(conn, args.top):
-            print(f"{score:.3f}  g{g} n{n} c{c} o{o}  rec {rec:.2f}{'  ★' if starred else ''}  {title}\n"
-                  f"       {why}")
 
 
 def cmd_themes(args) -> None:
@@ -822,9 +799,6 @@ def main(argv=None) -> None:
                     help="exit 1 if any already-extracted episode would be sent again (use after a move)")
     pe.add_argument("--prompt", help="as if extract.prompt were this one (e.g. v3): what switching would re-read")
     pe.set_defaults(func=cmd_pending)
-    sc = sub.add_parser("scores", help="the top-ranked ideas, with their rubric scores")
-    sc.add_argument("--top", type=int, default=20)
-    sc.set_defaults(func=cmd_scores)
     dg = sub.add_parser("digest", help="the weekly digest: what the lattice gained, synthesized by Claude")
     dg.add_argument("--week", help="any date in the week (default: the latest digest, or last week with --write)")
     dg.add_argument("--write", action="store_true", help="write the week's digest if it isn't written (sends to Claude)")
