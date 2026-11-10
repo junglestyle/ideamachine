@@ -234,9 +234,12 @@ SYSTEM_V5_1 = resources.files("im.prompts").joinpath("extract_v5_1.txt").read_te
 # made 34 twice). A judgment says what someone is like or should do; a complaint about what they did once is venting.
 # A personal reaction stays personal, not what anyone owes or should do.
 SYSTEM_V5_2 = resources.files("im.prompts").joinpath("extract_v5_2.txt").read_text().rstrip("\n")
+# v5.3 (trial, 2026-11-10): v5.2, and the reading also spells out what "that kind of …", "this approach" or "the same
+# way" points back to: all three earlier versions left "that kind of overview" (Astra's review) unresolved.
+SYSTEM_V5_3 = resources.files("im.prompts").joinpath("extract_v5_3.txt").read_text().rstrip("\n")
 
 PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3, "v4": SYSTEM_V4, "v5": SYSTEM_V5, "v5.1": SYSTEM_V5_1,
-           "v5.2": SYSTEM_V5_2}
+           "v5.2": SYSTEM_V5_2, "v5.3": SYSTEM_V5_3}
 LIVE = ("v1", "v2", "v3")   # the prompts the matcher can read; a later one is for `im trial` and the rebuild until then
 
 
@@ -329,7 +332,7 @@ SCHEMA_V5 = {
     "required": ["items"],
     "additionalProperties": False,
 }
-SCHEMAS = {"v4": SCHEMA_V4, "v5": SCHEMA_V5, "v5.1": SCHEMA_V5, "v5.2": SCHEMA_V5}   # others answer in SCHEMA
+SCHEMAS = {"v4": SCHEMA_V4, "v5": SCHEMA_V5, "v5.1": SCHEMA_V5, "v5.2": SCHEMA_V5, "v5.3": SCHEMA_V5}   # else SCHEMA
 TEXT = ("quote", "reading", "gist", "attributed_to")   # what a capture says, names unscrubbed back (policy C)
 
 
