@@ -56,7 +56,7 @@ it once, when `fast/ideamachine` has no database yet and `storage/ideamachine` h
 2. counts the rows of every table in the running database (`/mnt/fast/ideamachine/rowcounts-before-move.txt`);
 3. stops Lattice and Postgres, snapshots `config`, `backups` and `pg` together (`@to-fast-<time>`), and copies
    each with `zfs send -p | zfs recv`, so their properties come along;
-4. copies `vocab/`, and any file in `logs/` that isn't a `*.log` into `saved/` (there were two, kept by hand: an
+4. copies any file in `logs/` that isn't a `*.log` into `saved/` (there were two, kept by hand: an
    `im trial` report and a text export). The old logs stay on `storage`;
 5. starts Postgres from `fast`, checks every table has the same row count before anything writes, then carries on
    as an update, switching the cron jobs back on.
@@ -82,8 +82,6 @@ The importer reads a conversation missing from `index.json` as removed and drops
 `fast` that doesn't yet list every conversation the one on `storage` does is refused rather than read. If
 conversations were forgotten on purpose in between, choose by hand:
 `sudo HEARSAY_STREAM=/mnt/fast/hearsay/stream /mnt/fast/repos/ideamachine/install/nas.sh`.
-
-Hearsay mounts `/mnt/fast/ideamachine/vocab` read-only for my vocabulary (Hearsay's `IDEAMACHINE_VOCAB_DIR`).
 
 ## Updates
 
@@ -127,7 +125,6 @@ corral job:
 | Config | `/mnt/fast/ideamachine/config/im/im.toml` (e.g. `extract.interests`; read by the run container) |
 | Database | `/mnt/fast/ideamachine/pg` |
 | Nightly dumps (14 days) | `/mnt/fast/ideamachine/backups/` |
-| My vocabulary (for Hearsay) | `/mnt/fast/ideamachine/vocab/vocab.json` |
 | Kept by hand (trial reports, exports) | `/mnt/fast/ideamachine/saved/` (root and apps only: they quote people) |
 | Clones | `/mnt/fast/repos/ideamachine`, `/mnt/fast/repos/lattice` (admin) |
 | Logs | `journalctl -t ideamachine-run` (and `-t ideamachine-backup`, `-t ideamachine-db`, `-t lattice`, `-t lattice-tunnel`) |

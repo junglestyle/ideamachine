@@ -113,7 +113,6 @@ def _run_stages(conn, cfg) -> dict:
             stats["lattice"] = _lattice(conn, cfg)
             stats["themes"] = _themes(conn, cfg)
             stats["sensitivity"] = _sensitivity(conn, cfg)
-            stats["vocab"] = _vocab(conn, cfg)
             stats["digest"] = _digest(conn, cfg)
         from im import weight
 
@@ -189,19 +188,6 @@ def _sensitivity(conn, cfg) -> dict:
     except SystemExit as e:   # no key for Jev, or none to pseudonymize names with
         return {"stopped": str(e)}
     return sensitivity.tag_stage(conn, client, scrubber, cfg.extract.monthly_cap_usd)
-
-
-def _vocab(conn, cfg) -> dict:
-    """Refresh my vocabulary for Hearsay and write its file; without Claude, everything but the repairs."""
-    import anthropic
-
-    from im import vocab
-
-    try:
-        client = anthropic.Anthropic()
-    except anthropic.AnthropicError:
-        client = None
-    return vocab.refresh(conn, client, cfg.extract.monthly_cap_usd, chat=cfg.vocab)
 
 
 def _digest(conn, cfg, week=None, again=False) -> dict:

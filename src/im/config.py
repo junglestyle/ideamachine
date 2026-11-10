@@ -53,8 +53,8 @@ class ExtractConfig:
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """The model a stage asks, and its effort: [match], [themes], [vocab], [digest]. Both go into the stage's version:
-    a change re-asks what that stage keys on its version (every vocab check; every idea that fits
+    """The model a stage asks, and its effort: [match], [themes], [digest]. Both go into the stage's version: a change
+    re-asks what that stage keys on its version (every idea that fits
     no theme); the matcher and the digest use it from then on. `max_tokens`, a request's output budget, isn't in the
     version (None: the stage's own)."""
     model: str = "claude-opus-5-5"
@@ -102,7 +102,6 @@ class Config:
     lattice: LatticeConfig = LatticeConfig()
     match: ModelConfig = ModelConfig()          # the lattice's matcher
     themes: ModelConfig = ModelConfig()
-    vocab: ModelConfig = ModelConfig()
     digest: ModelConfig = ModelConfig()
     weight: WeightConfig = WeightConfig()
     egress: EgressConfig = EgressConfig()
@@ -118,7 +117,7 @@ def load() -> Config:
     if "backends" in triage:
         triage["backends"] = tuple(triage["backends"])
     egress = {k: tuple(v) for k, v in data.get("egress", {}).items()}
-    models = {k: ModelConfig(**data.get(k, {})) for k in ("match", "themes", "vocab", "digest")}
+    models = {k: ModelConfig(**data.get(k, {})) for k in ("match", "themes", "digest")}
     return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
                   extract=ExtractConfig(**data.get("extract", {})), lattice=LatticeConfig(**data.get("lattice", {})),
                   weight=WeightConfig(**data.get("weight", {})), egress=EgressConfig(**egress), **models)

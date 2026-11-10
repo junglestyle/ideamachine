@@ -36,7 +36,7 @@ chmod 644 "$REPO_DIR/install/.env"
 
 say "Datasets under $NAS_POOL_DATASET"
 if ! zfs list -H -o name "$NAS_POOL_DATASET" >/dev/null 2>&1; then
-    # ZFS won't mount over a non-empty directory (e.g. a vocab/ folder another install made here first).
+    # ZFS won't mount over a non-empty directory (e.g. a folder another install made here first).
     [ -z "$(ls -A "$NAS_ROOT" 2>/dev/null)" ] || die "$NAS_ROOT exists and isn't empty, but isn't a dataset. Move it
     aside (sudo mv $NAS_ROOT $NAS_ROOT.old), then re-run this."
     # midclt (not raw zfs) so the TrueNAS UI knows about them.
@@ -80,12 +80,6 @@ if ! zfs list -H -o name "$NAS_POOL_DATASET/pg" >/dev/null 2>&1 && [ -f "$OLD_RO
         zfs send -p "$OLD_POOL_DATASET/$child@$snap" | zfs recv -x mountpoint "$NAS_POOL_DATASET/$child"
         echo "copied: $OLD_POOL_DATASET/$child -> $NAS_POOL_DATASET/$child ($(zfs list -H -o used "$NAS_POOL_DATASET/$child"))"
     done
-    # vocab/ is a plain directory, as before.
-    if [ -d "$OLD_ROOT/vocab" ] && [ ! -e "$NAS_VOCAB/vocab.json" ]; then
-        mkdir -p "$NAS_VOCAB"
-        cp -a "$OLD_ROOT/vocab/." "$NAS_VOCAB/"
-        echo "copied: vocab/"
-    fi
     # logs/ held log output (now in the journal) and files kept by hand (an `im trial` report, a text export).
     # Those move to saved/; the old *.log files stay on storage.
     mkdir -p "$NAS_SAVED"
@@ -110,9 +104,6 @@ chown root:root "$NAS_CONFIG"; chmod 700 "$NAS_CONFIG"
 # Backups hold everyone's words: root and the apps group only. setgid + group-writable so a member of the apps
 # group (the operator, over ssh) can drop the database from eeyore here.
 chown "root:$APPS_GID" "$NAS_BACKUPS"; chmod 2770 "$NAS_BACKUPS"
-# vocab: the run (apps user) writes vocab.json; Hearsay mounts it read-only, so anyone may read it. It holds terms
-# only (names, rare words, and a few misheard spans), never whole quotes.
-mkdir -p "$NAS_VOCAB"; chown "$APPS_UID:$APPS_GID" "$NAS_VOCAB"; chmod 755 "$NAS_VOCAB"
 # saved/: root and apps only (it quotes people). Group-writable, so `im audit-* sheet /saved/<new folder>` can make it.
 mkdir -p "$NAS_SAVED"; chown "root:$APPS_GID" "$NAS_SAVED"; chmod 770 "$NAS_SAVED"
 # pg: Postgres runs as the apps user (install/compose.yaml). Data from before that change belongs to uid 999
@@ -155,7 +146,7 @@ if [ ! -f "$NAS_CONFIG/im/im.toml" ]; then
 # Idea Machine's config. Every key and its default is in src/im/config.py. Kept out of the repo: it can hold
 # personal details, such as extract.interests. Changing extract.prompt or extract.interests re-reads every
 # episode with Claude, so try a prompt first: im trial <prompt>. A stage's model and effort are part of its
-# version: changing them re-asks sensitivity and vocab about every idea, and themes about every idea
+# version: changing them re-asks sensitivity about every idea, and themes about every idea
 # that fits no theme; the matcher and the digest use them from then on.
 [extract]
 # prompt = "v1"
@@ -170,10 +161,6 @@ if [ ! -f "$NAS_CONFIG/im/im.toml" ]; then
 # effort = "low"
 
 [sensitivity]
-# model = "claude-opus-5-5"
-# effort = "low"
-
-[vocab]
 # model = "claude-opus-5-5"
 # effort = "low"
 
@@ -407,7 +394,7 @@ if zfs list -H -o name "$OLD_POOL_DATASET" >/dev/null 2>&1; then
     cat <<EOF
 
 The old copy on storage is still there, unused. Once you've confirmed everything works from fast, remove it (the
-old database, dumps, logs and config, the root-owned clones in it, and vocab/):
+old database, dumps, logs and config, and the root-owned clones in it):
     sudo zfs destroy -r $OLD_POOL_DATASET
     sudo git config --global --unset-all safe.directory '^$OLD_ROOT/'
 EOF

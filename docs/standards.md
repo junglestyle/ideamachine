@@ -55,8 +55,7 @@ What the pipeline keeps true, whatever the stage:
 - Tests run on synthetic streams from `im.fixtures` and never read the real one. Each gets a fresh `im_test`
   database; the code refuses a dev admin URL that isn't localhost or a local socket, in any DSN form. Each runs
   without the developer's `IM_*`, `ANTHROPIC_*`, `LATTICE_*`, `CORRAL_*`, OpenRouter and Typesafe variables
-  (`tests/conftest.py`), so a shell that exports the deployment's settings can't send a test to Claude or overwrite
-  Hearsay's vocabulary.
+  (`tests/conftest.py`), so a shell that exports the deployment's settings can't send a test to Claude.
 
 ## Running it
 
@@ -94,7 +93,6 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
   `dev/systemd/ideamachine-run.service` (lines 10-11) and `~/data/code/lattice` in [ROADMAP.md](ROADMAP.md) (line 149).
 - Privacy: the NAS layout (`/mnt/fast/ideamachine/...`) is committed, and nothing here overrides the org rule for it, as
   hearsay's and lattice's standards do.
-- Privacy: `IM_VOCAB_PATH` isn't in `.env.example`. `install/compose.yaml` sets it, and `im.vocab` reads it.
 - Privacy: the owner's time zone, `America/New_York`, is the default for reading a ChatGPT export's times
   (`im seed-observations --tz`, and `tz` in `archive_observations.parse` and `plan`).
 - Secrets: `install/nas.sh` prints Lattice's login token (`LATTICE_TOKEN`) at the end of every run (line 325).

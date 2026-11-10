@@ -3,7 +3,7 @@ developer's settings.
 
 Uses IM_DEV_ADMIN_URL (must be localhost) and IM_DATABASE_URL's role and
 password, with the database name swapped to im_test. Both are read once, here; each test then runs without every
-variable the code reads to find real files and services (Hearsay's vocabulary, the config, the stream, the
+variable the code reads to find real files and services (the config, the stream, the
 databases, Claude and the other model APIs). A test that needs one sets it.
 """
 

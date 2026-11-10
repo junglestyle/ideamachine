@@ -288,9 +288,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
     `star`, `unstar`, `link`, `unlink`, `idea_note`, `idea_correct`, `idea_sensitive`;
   - on themes: `pin_theme`, `unpin_theme`, `rename_theme`, `reject_theme`, `merge_theme`, `split_theme`,
     `file_idea`, `unfile_idea`, `theme_sensitive`;
-  - on vocabulary suggestions: `vocab_add`, `vocab_remove`;
   - legacy, still in the ledger but read by nothing that orders or gates ([0007]): `keep` and `discard` (nothing
-    writes these), `item_keep`, `item_discard`, `item_star`, `idea_compare`, `digest_star`, `digest_dismiss`.
+    writes these), `item_keep`, `item_discard`, `item_star`, `idea_compare`, `digest_star`, `digest_dismiss`, and `vocab_add`, `vocab_remove`
+    (vocabulary suggestions, retired by [0012]).
 - **Keep, unkeep, dismiss.** To keep a cluster is to make it an idea, or to switch how it's kept (`idea_keep`), and to
   unkeep is to undo that (`idea_unkeep`). To dismiss is to turn a cluster proposal down: the cluster stays a
   candidate (`idea_dismiss`, 031:4-5).
@@ -478,9 +478,6 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   (`pub.demo_*`, 052): a sensitive card keeps its place, counts and edges with no words (`redacted`), and its quotes
   and sensitive themes aren't listed. A map blanks such a card; a list leaves it out. The neutral view has a toggle,
   and `im web --demo` serves nothing else.
-- **Vocabulary suggestion.** A rare word that Hearsay's transcription should know. Suggestions come from my
-  corrections, the archive and misheard quotes, and I approve them (`im.vocab_candidates`, 028:1-13). Approved ones
-  are written to `vocab.json` (ROADMAP.md:165, deploy.md:130).
 
 ## Models and measurement
 
@@ -496,7 +493,7 @@ Each role decides one thing. The model behind it can change, so models are liste
 | Name finder | name mentions, for policy C | GLiNER (`urchade/gliner_medium-v2.1`) |
 | Embedder | embeddings for neighbors, positions, lens search | `BAAI/bge-small-en-v1.5`, local |
 | Sensitivity tagger | the eight sensitivity tags on each idea and theme | Jev, at `sensitivity.CUT` per tag, policy C |
-| Theme filer, vocabulary checker, digest writer | as named | `[themes]`, `[vocab]`, `[digest]`; default Opus (`config.ModelConfig`) |
+| Theme filer, digest writer | as named | `[themes]`, `[digest]`; default Opus (`config.ModelConfig`) |
 
 - **Opus, Sonnet, Haiku.** Anthropic's `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5` (`llm.PRICES`). A
   refusal falls back to `claude-opus-4-8` ([0004]).
@@ -617,12 +614,12 @@ already have their own capture kind under `v4`.
 - "Idea" is also the maturity `idea` (031:36), the capture kind and triage kind `idea`, and "You extract ideas" in
   the `v1` prompt (`extract.SYSTEM`).
 - "Candidate" is also the nearest clusters shown to the matcher ("Candidates", `lattice.MATCH_SYSTEM`), a model under
-  trial ([0008]:40) and `im.vocab_candidates` (028).
+  trial ([0008]:40).
 - "Cluster" is also the archive's five clusters (ROADMAP.md:143), a theme's provenance `clustered` (008:69), and
   Hearsay's voice clusters (`speaker_basis` `cluster`, 002:28; [M1 design]:41).
 
 **Use:** an idea is a kept cluster, a cluster is any `im.ideas` row (`idea_id` is a cluster id), and a candidate is
-the maturity. For the others: the matcher's nearest clusters, the trial model, vocabulary suggestions, archive
+the maturity. For the others: the matcher's nearest clusters, the trial model, archive
 themes and voice clusters. Whether the capture kind `idea` means "a suggestion" is not established.
 
 ### summary, statement, gist, title
@@ -756,8 +753,7 @@ qualified: typed by me, linked by me, a theme created by me.
 
 ### archive
 
-- The ChatGPT archive: cluster provenance, `observations.source`, `chatgpt-archive`, the old link kind, and the
-  vocabulary source `archive` (028:13).
+- The ChatGPT archive: cluster provenance, `observations.source`, `chatgpt-archive`, and the old link kind.
 - An archived lens ([0010]:48), and the Lattice repo, archived at M6.
 - My whole collection: "my idea archive" in the `v1` and `v2` prompts (`extract.SYSTEM`).
 

@@ -9,7 +9,6 @@ NAS_ROOT="/mnt/fast/ideamachine"
 NAS_CONFIG="$NAS_ROOT/config"
 NAS_PG="$NAS_ROOT/pg"
 NAS_BACKUPS="$NAS_ROOT/backups"
-NAS_VOCAB="$NAS_ROOT/vocab"   # my vocabulary file, written by the run, read by Hearsay (read-only mount)
 NAS_SAVED="$NAS_ROOT/saved"   # outputs kept by hand, e.g. `im trial` reports (they quote people: root and apps only)
 NAS_LATTICE_REPO="/mnt/fast/repos/lattice"
 NAS_DB_ENV="$NAS_CONFIG/db.env"
