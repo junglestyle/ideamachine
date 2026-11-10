@@ -60,15 +60,15 @@ def _words(text: str) -> list[str]:
     return [w for w in re.findall(r"[^\W_]+", text.lower().replace("'", "").replace("’", "")) if w not in FILLERS]
 
 
-def quote_score(a: str, b: str) -> float:
+def quote_score(a: str, b: str, floor: int = MIN_WORDS) -> float:
     """The share of the shorter quote's words found, in order, in the other. A re-extraction often quotes more or
-    less of the same speech, and re-transcription changes fillers and small words. Quotes count as at least
-    MIN_WORDS long, so one shared word in a two-word quote isn't a match."""
+    less of the same speech, and re-transcription changes fillers and small words. Quotes count as at least `floor`
+    words long, so one shared word in a two-word quote isn't a match."""
     A, B = _words(a), _words(b)
     if not A or not B:
         return 0.0
     matched = sum(m.size for m in difflib.SequenceMatcher(None, A, B, autojunk=False).get_matching_blocks())
-    return matched / max(min(len(A), len(B)), MIN_WORDS)
+    return matched / max(min(len(A), len(B)), floor)
 
 
 def carry_verdicts(conn) -> dict:

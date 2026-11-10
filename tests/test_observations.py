@@ -46,6 +46,13 @@ def test_the_same_line_captured_twice_in_one_read_is_one_observation(pipe, cfg, 
     assert sorted(len(v) for v in by_quote.values()) == [1, 1]   # both database captures share one
 
 
+def test_a_clause_quoted_beside_its_whole_line_is_its_own_observation(pipe, cfg, stream):
+    run(pipe, cfg, stream)
+    clause = lambda text: [dict(i, quote="hosting line doubled") for i in capture(DATABASE)(text)]  # noqa: E731
+    extract.run_stage(pipe, FakeClaude(lambda text: capture(DATABASE)(text) + clause(text)))
+    assert observations.assign_stage(pipe)["new"] == 2   # three shared words don't make them one
+
+
 def test_an_observation_carries_the_arousal_its_segments_were_said_with(pipe, cfg, stream):
     run(pipe, cfg, stream)
     extract.run_stage(pipe, FakeClaude(lambda text: capture("LoRa")(text) + capture("coffee")(text)))
