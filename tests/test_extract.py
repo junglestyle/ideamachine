@@ -9,7 +9,7 @@ import anthropic
 import httpx2
 import pytest
 
-from im import egress, extract, feedback, importer, router
+from im import egress, extract, feedback, importer, names, router
 
 from helpers import assert_invariants, episodes_with_text, run, table
 from test_label import script
@@ -369,6 +369,7 @@ def test_a_v5_capture_keeps_its_reading_attribution_mishearings_and_checks(pipe,
                 "mishearings": [{"heard": word, "meant": "WORD"}], "gist": "A thought."}
         return [base | {"quote": said}, base | {"quote": said.upper()}]
 
+    monkeypatch.setattr(names, "for_trials", lambda conn, egress_config: names.Scrubber(b"k", egress.known_names(conn)))
     monkeypatch.setattr(anthropic, "Anthropic", lambda: FakeClaude(respond))
     stats = cli._extract(pipe, replace(cfg, extract=replace(cfg.extract, prompt="v5.3")))   # the rebuild's, live
     assert stats["read"] > 0 and stats["failed"] == 0
@@ -383,6 +384,43 @@ def test_a_v5_capture_keeps_its_reading_attribution_mishearings_and_checks(pipe,
     read, write, out = script("k", "q")
     assert cli._review_items(pipe, extract, read, write) == 1
     assert any("said by me" in line for line in out) and not any("confidence" in line for line in out)
+
+
+def test_v5_3_reads_under_policy_c_and_v3_stays_on_b(pipe, cfg, stream, monkeypatch, capsys):
+    from im import cli
+
+    turns = stream.conversations["c-conv"].turns
+    turns[0] = replace(turns[0], text="Did you see the build broke again, Alice?")
+    stream.write(stream.dir)
+    run(pipe, cfg, stream)
+    alice = names.token("Alice", b"k")
+    monkeypatch.setattr(names, "for_trials", lambda conn, egress_config: names.Scrubber(b"k", egress.known_names(conn)))
+
+    def respond(text):   # my line about the build, as sent
+        for line in text.splitlines():
+            if line.startswith("[") and "build broke" in line:
+                n, said = int(line[1:].split("]")[0]), line.split(": ", 1)[1]
+                return [{"lines": [n], "quote": said, "attributed_to": "", "reading": said, "mishearings": [],
+                         "gist": f"I asked {alice} whether the build broke again."}]
+        return []
+
+    v53, v3 = FakeClaude(respond), FakeClaude()
+    monkeypatch.setattr(anthropic, "Anthropic", lambda: v53)
+    assert cli._extract(pipe, replace(cfg, extract=replace(cfg.extract, prompt="v5.3")))["read"] == 9
+    sent = json.dumps([c["messages"] for c in v53.calls])
+    assert "Alice" not in sent and alice in sent   # the name said went out pseudonymized
+    assert table(pipe, "SELECT quote, gist, privacy_policy_version LIKE 'C%%' FROM im.items") == \
+        [("Did you see the build broke again, Alice?", "I asked Alice whether the build broke again.", True)]
+
+    # Read under C counts as read: nothing would go out again.
+    monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
+    cli.main(["pending", "--prompt", "v5.3", "--expect-none-resent"])
+    assert json.loads(capsys.readouterr().out)["episodes_to_extract"] == 0
+
+    # v3 keeps policy B, so the live database's reads under it stay read.
+    monkeypatch.setattr(anthropic, "Anthropic", lambda: v3)
+    cli._extract(pipe, replace(cfg, extract=replace(cfg.extract, prompt="v3")))
+    assert "Alice" in json.dumps([c["messages"] for c in v3.calls])
 
 
 def status_error(cls, code, body=None):
