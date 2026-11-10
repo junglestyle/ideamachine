@@ -3,7 +3,8 @@
 Code checks (im.capture_checks) are recorded on every capture as it's read. Jev then asks of each capture, from the
 transcript around it (jev.QUESTIONS["gate"]):
 
-- does the gist add to, misstate, overstate or complete what its lines say? A gist that does is repaired;
+- does the gist add to, misstate, overstate or complete what its lines say, or point at something the transcript
+  names without naming it ("that kind of overview")? A gist that does is repaired;
 - is the point someone else's that I only go along with, or one I voice only to mock? The capture is dropped;
 - does the gist make two points? Flagged only.
 
@@ -22,7 +23,7 @@ import re
 from im import egress, jev, llm, trial
 from im.capture_checks import lines_of
 
-GIST = ("adds", "misstates", "overstates", "completes")
+GIST = ("adds", "misstates", "overstates", "completes", "unresolved")
 DROP = ("not_mine", "mocked")
 FLAG = ("two_points",)
 CHECKS = GIST + DROP + FLAG

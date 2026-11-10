@@ -95,6 +95,6 @@ def test_the_gate_keeps_repairs_or_drops_each_capture_from_what_jev_says_of_it(p
 
     s = gate_audit.score(folder)
     assert s["labels"] == {"from_me": 1, "from_drafts": 5, "missing": 0}
-    assert (s["repair"]["marked_past"], s["repair"]["auc"], s["repair"]["suggested_cut"]) == (1, 1.0, 0.9)
+    assert (s["repair"]["marked_past_or_unclear"], s["repair"]["auc"], s["repair"]["suggested_cut"]) == (1, 1.0, 0.9)
     assert (s["drop"]["marked_drop"], s["drop"]["auc"], s["drop"]["suggested_cut"]) == (1, 1.0, 0.3)
     assert gate.run(pipe, client, read, scrubber.policy, scrubber, 20.0)["asked"] == 0 and len(sent) == 3
