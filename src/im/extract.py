@@ -222,7 +222,7 @@ shaky transcription or a reading that depends on guessing the context."""
 # v5 (2026-11-08, decision 0012): only my speech (0011); a reading, the attribution of a thought I relay and the
 # mishearings the reading fixed; a gist that says only what the cited lines say. No capture kind, no confidence (nothing
 # read them) and no interests slot (it favored my usual subjects). The text was reviewed and merged in the prompt
-# review; it lives in prompts/extract_v5.txt. For trials until im.items keeps its fields (the run refuses it live).
+# review; it lives in prompts/extract_v5.txt. For trials; v5.3 is the revision that runs.
 SYSTEM_V5 = resources.files("im.prompts").joinpath("extract_v5.txt").read_text().rstrip("\n")
 # v5.1 (trial, 2026-11-10): v5 with the goldens' decisions written in. A point made through a joke, a story or an
 # example is stated as a claim at the scope it was told, not retold; my sentence interrupted by someone else's line is
@@ -234,13 +234,14 @@ SYSTEM_V5_1 = resources.files("im.prompts").joinpath("extract_v5_1.txt").read_te
 # made 34 twice). A judgment says what someone is like or should do; a complaint about what they did once is venting.
 # A personal reaction stays personal, not what anyone owes or should do.
 SYSTEM_V5_2 = resources.files("im.prompts").joinpath("extract_v5_2.txt").read_text().rstrip("\n")
-# v5.3 (trial, 2026-11-10): v5.2, and the reading also spells out what "that kind of …", "this approach" or "the same
-# way" points back to: all three earlier versions left "that kind of overview" (Astra's review) unresolved.
+# v5.3 (2026-11-10, the rebuild's prompt, decision 0012 amended): v5.2, and the reading also spells out what "that
+# kind of …", "this approach" or "the same way" points back to: all three earlier versions left "that kind of overview"
+# (Astra's review) unresolved.
 SYSTEM_V5_3 = resources.files("im.prompts").joinpath("extract_v5_3.txt").read_text().rstrip("\n")
 
 PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3, "v4": SYSTEM_V4, "v5": SYSTEM_V5, "v5.1": SYSTEM_V5_1,
            "v5.2": SYSTEM_V5_2, "v5.3": SYSTEM_V5_3}
-LIVE = ("v1", "v2", "v3")   # the prompts the matcher can read; a later one is for `im trial` and the rebuild until then
+LIVE = ("v1", "v2", "v3", "v5.3")   # what `im run` may read with; v4 and v5 to v5.2 are for `im trial` only
 
 
 def system_prompt(name: str = "v1", interests: str = "") -> str:
@@ -557,7 +558,7 @@ def review_items(conn) -> list[tuple]:
                AND NOT EXISTS (SELECT 1 FROM im.items s JOIN pub.feedback_events f ON f.item_id = s.item_id
                                WHERE s.item_id = i.item_id OR s.observation_id = i.observation_id)
              ORDER BY coalesce(i.observation_id, i.item_id), i.created_at, i.item_id) r
-           ORDER BY confidence DESC, started_at DESC""").fetchall()
+           ORDER BY confidence DESC NULLS LAST, started_at DESC""").fetchall()
 
 
 def discards(conn) -> list[tuple]:

@@ -2,6 +2,7 @@
 
 import json
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 
 import anthropic
@@ -352,7 +353,9 @@ def test_a_model_with_no_known_price_is_never_sent_to(pipe, cfg, stream):
     assert table(pipe, "SELECT count(*) FROM im.egress_log") == [(0,)]
 
 
-def test_a_v5_capture_keeps_its_reading_attribution_mishearings_and_checks(pipe, cfg, stream):
+def test_a_v5_capture_keeps_its_reading_attribution_mishearings_and_checks(pipe, cfg, stream, monkeypatch):
+    from im import cli
+
     run(pipe, cfg, stream)
 
     def respond(text):   # the first line I said, read with one mishearing fixed, and once tidied
@@ -366,8 +369,8 @@ def test_a_v5_capture_keeps_its_reading_attribution_mishearings_and_checks(pipe,
                 "mishearings": [{"heard": word, "meant": "WORD"}], "gist": "A thought."}
         return [base | {"quote": said}, base | {"quote": said.upper()}]
 
-    v5 = extract.system_prompt("v5")
-    stats = extract.run_stage(pipe, FakeClaude(respond), system=v5, schema=extract.schema_for("v5"))
+    monkeypatch.setattr(anthropic, "Anthropic", lambda: FakeClaude(respond))
+    stats = cli._extract(pipe, replace(cfg, extract=replace(cfg.extract, prompt="v5.3")))   # the rebuild's, live
     assert stats["read"] > 0 and stats["failed"] == 0
     rows = table(pipe, """SELECT kind, confidence, said_by, attributed_to, reading LIKE '%%WORD%%', mishearings,
                                  checks FROM im.items WHERE prompt_version = %s ORDER BY checks""",
@@ -375,6 +378,11 @@ def test_a_v5_capture_keeps_its_reading_attribution_mishearings_and_checks(pipe,
     first = rows[0]
     assert first[:5] == (None, None, "me", "my lead", True) and first[5][0]["meant"] == "WORD" and first[6] == []
     assert {tuple(r[6]) for r in rows} == {(), ("quote_inexact", "mishearing_not_in_quote")}   # recorded, not refused
+
+    # Reviewed like any capture, with no kind or confidence to show.
+    read, write, out = script("k", "q")
+    assert cli._review_items(pipe, extract, read, write) == 1
+    assert any("said by me" in line for line in out) and not any("confidence" in line for line in out)
 
 
 def status_error(cls, code, body=None):
