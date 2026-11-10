@@ -90,8 +90,10 @@ QUESTIONS = {
     },
     # The capture gate (im.gate, decision 0012): one capture, the transcript around it (`context`, lines as `[n]
     # speaker: text`, `me` being me), the lines it cites, its quote and its gist. The gist checks are the summary
-    # sheet's two and the two ways v5's review found gists going past the lines; `not_mine` and `mocked` drop a
-    # capture, `two_points` only flags one. Each is decided at its own cut (gate.CUTS), so `p` means nothing here.
+    # sheet's two, the two ways v5's review found gists going past the lines, and `unresolved`, a gist pointing at
+    # what the transcript names without naming it (v5's trials: "that kind of overview", Astra's review, in all three
+    # prompts); `not_mine` and `mocked` drop a capture, `two_points` only flags one. Each is decided at its own cut
+    # (gate.CUTS), so `p` means nothing here.
     "gate": {
         "adds": ("Does `gist` state something that `lines` don't say?",
                  {"true": "It adds an inference, conclusion, motive or outcome that isn't in the lines",
@@ -103,6 +105,10 @@ QUESTIONS = {
         "completes": ("Does `gist` finish a thought that `lines` leave unfinished?",
                       {"true": "It says where a sentence that trails off was going",
                        "false": "The lines finish the thought, or the gist stops where they stop"}),
+        "unresolved": ("Does `gist` point at something without saying what it is, when `context` says?",
+                       {"true": "It speaks of \"it\", \"that kind of …\", \"this approach\", \"my approach\" or a "
+                                "person or thing that `context` names, without naming it",
+                        "false": "It names what it points at, or `context` doesn't say what that is"}),
         "not_mine": ("In `context`, is the point of `gist` someone else's, which `me` only agrees with, answers or "
                      "repeats back?",
                      {"true": "Someone else makes the point, and me only goes along with it",
