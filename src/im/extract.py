@@ -224,8 +224,14 @@ shaky transcription or a reading that depends on guessing the context."""
 # read them) and no interests slot (it favored my usual subjects). The text was reviewed and merged in the prompt
 # review; it lives in prompts/extract_v5.txt. For trials until im.items keeps its fields (the run refuses it live).
 SYSTEM_V5 = resources.files("im.prompts").joinpath("extract_v5.txt").read_text().rstrip("\n")
+# v5.1 (trial, 2026-11-10): v5 with the goldens' decisions written in. A point made through a joke, a story or an
+# example is stated as a claim at the scope it was told, not retold; my sentence interrupted by someone else's line is
+# still one sentence; explaining the fault in front of me isn't a thought unless I state it as a rule; judgments about
+# a person (and what they should do differently) count; reworking something I've built is next steps, a new idea for
+# it isn't; a second illustration shows a story's point.
+SYSTEM_V5_1 = resources.files("im.prompts").joinpath("extract_v5_1.txt").read_text().rstrip("\n")
 
-PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3, "v4": SYSTEM_V4, "v5": SYSTEM_V5}
+PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3, "v4": SYSTEM_V4, "v5": SYSTEM_V5, "v5.1": SYSTEM_V5_1}
 LIVE = ("v1", "v2", "v3")   # the prompts the matcher can read; a later one is for `im trial` and the rebuild until then
 
 
@@ -318,7 +324,7 @@ SCHEMA_V5 = {
     "required": ["items"],
     "additionalProperties": False,
 }
-SCHEMAS = {"v4": SCHEMA_V4, "v5": SCHEMA_V5}   # a prompt not here answers in SCHEMA
+SCHEMAS = {"v4": SCHEMA_V4, "v5": SCHEMA_V5, "v5.1": SCHEMA_V5}   # a prompt not here answers in SCHEMA
 TEXT = ("quote", "reading", "gist", "attributed_to")   # what a capture says, names unscrubbed back (policy C)
 
 
