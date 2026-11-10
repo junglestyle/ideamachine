@@ -1,10 +1,11 @@
 """Routing: which episodes come to me (`review`) and which are filed without me (`auto_file`).
 
-Router v2 (docs/decisions/0004-claude-extraction.md): an episode comes to me when Claude captured
-something there that I haven't discarded, or when I said "note to self", or tapped the pendant (taps can be
-accidental, which is why everything routed can be discarded). Everything else is auto-filed. The local
-LLM's flags (router v1, decision 0003) are no longer read: against my labels they were mostly false alarms.
-Routes are labels in im.routes; nothing is dropped.
+Router v3 (docs/decisions/0004-claude-extraction.md, 0012): an episode comes to me when Claude captured something
+there that I haven't discarded, or when I said "note to self", or tapped the pendant (taps can be accidental, which is
+why everything routed can be discarded). Everything else is auto-filed. Router v2 also asked a capture's confidence
+to be at least 0.5; v5 captures have none, so 0012 retired that bar. The local LLM's flags (router v1, decision 0003)
+are no longer read: against my labels they were mostly false alarms. Routes are labels in im.routes; nothing is
+dropped.
 """
 
 import re
@@ -13,20 +14,19 @@ from im.triage import EpisodeState, render
 
 SCHEMA_VERSION = 1
 STAGE_VERSION = "route/2"
-ITEM_MIN_CONFIDENCE = 0.5
-ROUTER_VERSION = f"rules-2;claude-items>={ITEM_MIN_CONFIDENCE};tap;note_to_self"
+ROUTER_VERSION = "rules-3;claude-items;tap;note_to_self"
 NOTE_TO_SELF = re.compile(r"\bnote to (my)?self\b", re.IGNORECASE)
 
 
-def route(state: EpisodeState, items: list[str] | None) -> tuple[str, list[str]]:
-    """`items`: kinds of the captured, undiscarded items above the confidence bar (None: not read yet)."""
+def route(state: EpisodeState, items: list[str | None] | None) -> tuple[str, list[str]]:
+    """`items`: kinds of the captured, undiscarded items, None for a capture with no kind (v5); None for the list:
+    not read yet."""
     reasons = []
     if state.taps:
         reasons.append("tap")
     if any(line.startswith("me:") and NOTE_TO_SELF.search(line) for line in state.transcript.splitlines()):
         reasons.append("note_to_self")
-    for kind in sorted(set(items or [])):
-        reasons.append(f"claude:{kind}")
+    reasons += sorted({f"claude:{kind}" if kind else "claude" for kind in items or []})
     return ("review" if reasons else "auto_file"), reasons
 
 
@@ -39,9 +39,9 @@ def run_stage(conn) -> dict:
     kinds: dict = {}
     for eid, kind in conn.execute(
             """SELECT i.episode_id, i.kind FROM im.items i
-               WHERE i.episode_id = ANY(%s) AND i.confidence >= %s
+               WHERE i.episode_id = ANY(%s)
                  AND NOT EXISTS (SELECT 1 FROM im.item_verdicts v WHERE v.item_id = i.item_id
-                                 AND v.verdict = 'discard')""", (ids, ITEM_MIN_CONFIDENCE)):
+                                 AND v.verdict = 'discard')""", (ids,)):
         kinds.setdefault(eid, []).append(kind)
     counts = {"auto_file": 0, "review": 0, "waiting_for_claude": 0}
     changed = 0

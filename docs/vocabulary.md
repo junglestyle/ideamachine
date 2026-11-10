@@ -104,8 +104,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   - **route**: `auto_file`, `review` or `escalate` (006:5). "A route is a label": nothing is dropped;
   - **project**: an entry in the hand-kept registry `im.projects` (003:4-10).
 
-  **Status:** the local triage models are off by default (ROADMAP.md:100). Router v2 sends an episode to review
-  when it has a tap, a note-to-self cue or a capture (`router.py`).
+  **Status:** the local triage models are off by default (ROADMAP.md:100). Router v3 sends an episode to review
+  when it has a tap, a note-to-self cue or an undiscarded capture, whatever its confidence (`router.py`; v2 asked for
+  0.5 or more, retired by decision 0012).
 - **Payload.** The exact text of one request, system prompt excluded (`egress_log.payload`, 007:13;
   `egress.Payload`).
 - **Payload line.** One numbered line of a payload, `[n] S1: text`. Line n is the episode's nth segment
