@@ -304,8 +304,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   (020). Verdicts carry to recaptures (014, `feedback.carry_verdicts`). Nothing orders or gates by them ([0007]),
   but `pub.ideas` hides a cluster whose every capture I discarded (043:27-28).
 - **Comparison, rubric, score (legacy).** V1's ranking: `idea_compare` events (018), and a rubric of generality,
-  novelty, compression and outside value, combined into `pub.idea_scores.score` (017, 025). [0007] threw them out as
-  labels, and [0012] retired the scoring stage; Lattice still reads the view, now empty of new scores.
+  novelty, compression and outside value, combined into a score (017, 025). [0007] threw them out as labels, and
+  [0012] retired the scoring stage and dropped its table and views (053). Past `idea_compare` events stay in the
+  ledger.
 - **Merging and rejecting clusters.** **Not yet specified.** SPEC.md:98 and the [M2 design]:138 say merge and reject
   "stay", but no state, column or event exists for either on a cluster, and ROADMAP-v2.md:18 says ideas can't be
   merged yet. Themes can be merged and rejected (024).
