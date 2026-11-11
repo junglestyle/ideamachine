@@ -43,7 +43,8 @@ My links stay events, as all my input does (SPEC §2), and the views read them a
 
 Connections, with method `chatgpt-archive`, symmetric, so mutual references become one. ChatGPT wrote them, under
 the first Idea Machine's contract, not this one: they stand in, like embedding neighbors, until a model decides the
-pair under 0010.
+pair under 0010. Only the live database has them: the archive is now read by extraction (`im import-chatgpt`), which
+never reads ChatGPT's cross-references.
 
 ## Views and readers
 

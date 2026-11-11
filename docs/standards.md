@@ -94,7 +94,7 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
 - Privacy: the NAS layout (`/mnt/fast/ideamachine/...`) is committed, and nothing here overrides the org rule for it, as
   hearsay's and lattice's standards do.
 - Privacy: the owner's time zone, `America/New_York`, is the default for reading a ChatGPT export's times
-  (`im seed-observations --tz`, and `tz` in `archive_observations.parse` and `plan`).
+  (`im import-chatgpt --tz`, and `tz` in `archive_observations.parse` and `plan`).
 - Secrets: `install/nas.sh` prints Lattice's login token (`LATTICE_TOKEN`) at the end of every run (line 325).
 - Docs: V2's roadmap is `docs/ROADMAP-v2.md`, not `docs/ROADMAP.md`, because code comments cite V1's
   [ROADMAP.md](ROADMAP.md) by section. V1's spec stays in its §1–3; V2's is [SPEC.md](SPEC.md).
@@ -127,8 +127,6 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
   branches on or parses from outside: item kinds (`extract.KINDS`), digest point kinds (`digest.KINDS`), match
   decisions (`lattice.py` lines 35 and 258), routes (`router.py` lines 30 and 52), verdicts (`feedback.ITEM_KINDS`,
   `cli.py` line 369), speaker kinds (`importer.py` line 86) and sensitivity categories (`sensitivity.CATEGORIES`).
-- Python testing: `test_the_real_archive_parses` (`tests/test_lattice.py` line 114) reads the real archive from
-  `~/.local/share/ideamachine/seeds`, not a committed synthetic fixture.
 - Python testing: 14 of the 21 test files are named for a module (`test_extract.py`, `test_lattice.py`,
   `test_triage.py`...), not a behavior.
 - Python dependencies: `laya==0.3.23` is pinned exactly without a comment naming the break.

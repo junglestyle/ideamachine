@@ -277,9 +277,13 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   design]:135). The archive's clusters and the ones I added start canonical, and starred ones start pinned.
 - **Cluster provenance.** Where an `im.ideas` row came from (`origin`, 008:10, 023:1-9): `archive` (seeded from the
   ChatGPT archive), `captured` (made by the matcher from a capture) or `mine` (typed by me through `idea_add`).
-- **ChatGPT archive.** The ideas and messages of my first "Idea Machine", a ChatGPT conversation: 36 seeded clusters
-  (`archive_ref` `chatgpt#n`), their cross-references, and five themes (ROADMAP.md:142). Its messages are
-  observations with source `archive` (036).
+- **ChatGPT archive.** The messages I sent my first "Idea Machine", a ChatGPT conversation. `im import-chatgpt`
+  reads the ones a curation sheet keeps (as written, or as I edited them) with extraction v5.3, one session at a time
+  (a gap of 6 hours starts the next), into archive captures (`archive_observations`, 055). ChatGPT's replies,
+  numbering, groupings and cross-references are never read. The live database also holds the seeded archive, made
+  from ChatGPT's summary before the archive was read: 36 seeded clusters (`archive_ref` `chatgpt#n`), their
+  cross-references and five themes (ROADMAP.md:142), and observations of my messages written onto those clusters
+  (036). Nothing writes them now.
 - **Title.** A cluster's short name, at most 8 words, the point itself with its scope and hedges (`im.ideas.title`).
   The generated title is the matcher's (`lattice.MATCH_SYSTEM`), and it's kept as `claude_title`. My latest
   correction overrides it (`im.idea_text`, 011:15-27).
@@ -341,8 +345,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   _Not_ a connection kind.
 - **Stand-in connection.** A connection written by something other than a connection judge. Two kinds of stand-in
   hold a pair until a judge decides it: embedding neighbors (method `embedding:…;k=3;min=0.7`, `lattice.relate`) and
-  the ChatGPT archive's cross-references (`chatgpt-archive`) ([connections storage] §Tables). **Status:** a judge's
-  `none` isn't stored yet.
+  the ChatGPT archive's cross-references (`chatgpt-archive`, in the live database only) ([connections storage]
+  §Tables). **Status:** a judge's `none` isn't stored yet.
 - **Connection kind.** An optional annotation on a connection that says how the two relate. A connection may carry
   several, each with its own `method` (`im.connection_kinds`, 045:25-35). A connection kind is a suggestion: it never
   decides whether the connection exists, and it isn't graded ([0009]). Each adds `lens.KIND_WEIGHT` to its
@@ -640,7 +644,6 @@ themes and voice clusters. Whether the capture kind `idea` means "a suggestion" 
   `probe_audit`). SPEC.md:115 speaks of each side "as said and summarized".
 - `summary_audit`, `match_bench`, `miss_audit` and Jev's `summary` questions use "summary" for a capture's gist.
 - ROADMAP-v2 §5 q9 means both.
-- `archive_observations.py` calls the archive's text "ChatGPT's summary".
 
 **Use:** a capture gist, a cluster title and statement, and a digest summary. Where a model wrote one, say
 "generated" ("the generated title and statement"), with the model as provenance.

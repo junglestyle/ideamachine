@@ -17,7 +17,6 @@ attribution and count as my own.
 import hashlib
 import json
 import re
-from pathlib import Path
 
 import numpy as np
 
@@ -93,86 +92,10 @@ def matcher_version(chat: ModelConfig = ModelConfig()) -> str:
     return f"match-2:{digest}"
 
 
-# --- Seeding from an archive -------------------------------------------------------------------------
-
-ENTRY = re.compile(r"^(\d+)\.\s+(.*)$")
-CLUSTER = re.compile(r"^([A-Z])\.\s+(.+?):\s*$")
-
-
-def parse_archive(text: str) -> tuple[list[dict], list[dict]]:
-    """Numbered entries (the first line is the idea, the indented rest its notes) and lettered clusters
-    (a name line, a line of #refs, a description)."""
-    entries, clusters = [], []
-    lines = text.splitlines()
-    i = 0
-    while i < len(lines):
-        m = ENTRY.match(lines[i])
-        c = CLUSTER.match(lines[i])
-        if m:
-            body = []
-            i += 1
-            while i < len(lines) and not ENTRY.match(lines[i]) and not lines[i].startswith("Important emerging"):
-                if lines[i].strip():
-                    body.append(lines[i].strip())
-                i += 1
-            entries.append({"n": int(m.group(1)), "statement": m.group(2).strip(), "notes": "\n".join(body)})
-            continue
-        if c:
-            refs, desc = [], []
-            i += 1
-            while i < len(lines) and not CLUSTER.match(lines[i]) and lines[i].strip():
-                found = re.findall(r"#(\d+)", lines[i])
-                if found and not refs:
-                    refs = [int(n) for n in found]
-                else:
-                    desc.append(lines[i].strip())
-                i += 1
-            clusters.append({"letter": c.group(1), "name": c.group(2), "members": refs, "description": " ".join(desc)})
-            continue
-        i += 1
-    return entries, clusters
-
-
 def _title(statement: str, words: int = 8) -> str:
     plain = statement.strip("“”\"' ")
     parts = plain.split()
     return " ".join(parts[:words]) + ("…" if len(parts) > words else "")
-
-
-def seed_archive(conn, path: Path, name: str = "chatgpt") -> dict:
-    """Import an archive's ideas, its clusters as pinned themes, and its #N cross-references as links.
-    Idempotent: entries already imported (by archive_ref) are left alone."""
-    entries, clusters = parse_archive(Path(path).read_text())
-    ids = {}
-    added = 0
-    with conn.transaction():
-        for e in entries:
-            ref = f"{name}#{e['n']}"
-            row = conn.execute(
-                """INSERT INTO im.ideas (title, statement, origin, archive_ref, notes) VALUES (%s, %s, 'archive', %s, %s)
-                   ON CONFLICT (archive_ref) DO NOTHING RETURNING idea_id""",
-                (_title(e["statement"]), e["statement"], ref, e["notes"] or None)).fetchone()
-            added += row is not None
-            ids[e["n"]] = row[0] if row else conn.execute(
-                "SELECT idea_id FROM im.ideas WHERE archive_ref = %s", (ref,)).fetchone()[0]
-        for e in entries:   # cross-references stand in as connections until a model decides the pair (0010)
-            for n in {int(x) for x in re.findall(r"#(\d+)", e["notes"])} - {e["n"]}:
-                if n in ids:
-                    a, b = sorted((ids[e["n"]], ids[n]))
-                    conn.execute("""INSERT INTO im.connections (a, b, method) VALUES (%s, %s, %s)
-                                    ON CONFLICT (a, b) DO UPDATE SET method = excluded.method, confidence = NULL
-                                    WHERE im.connections.method LIKE 'embedding:%%'""", (a, b, f"{name}-archive"))
-        for c in clusters:
-            ref = f"{name}:{c['letter']}"
-            theme = conn.execute(
-                """INSERT INTO im.themes (name, description, origin, archive_ref, pinned) VALUES (%s, %s, 'archive', %s, true)
-                   ON CONFLICT (archive_ref) DO UPDATE SET name = excluded.name RETURNING theme_id""",
-                (c["name"], c["description"] or None, ref)).fetchone()[0]
-            for n in c["members"]:
-                if n in ids:
-                    conn.execute("""INSERT INTO im.idea_themes (idea_id, theme_id, origin) VALUES (%s, %s, 'archive')
-                                    ON CONFLICT DO NOTHING""", (ids[n], theme))
-    return {"entries": len(entries), "added": added, "clusters": len(clusters)}
 
 
 # --- Embeddings ----------------------------------------------------------------------------------------
@@ -537,7 +460,6 @@ def status(conn) -> dict:
     q = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
     return {
         "ideas": q("SELECT count(*) FROM pub.ideas"),
-        "archive": q("SELECT count(*) FROM pub.ideas WHERE origin = 'archive'"),
         "captured": q("SELECT count(*) FROM pub.ideas WHERE origin = 'captured'"),
         "added_by_me": q("SELECT count(*) FROM pub.ideas WHERE origin = 'mine'"),
         "with_more_than_one_evidence": q("SELECT count(*) FROM pub.ideas WHERE n_evidence > 1"),
