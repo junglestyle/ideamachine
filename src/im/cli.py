@@ -129,8 +129,9 @@ def _run_stages(conn, cfg) -> dict:
 
 
 def _extract(conn, cfg) -> dict:
-    """Run extraction, or say why it couldn't run (no credentials, API down); the run goes on either way. A stage
-    stops itself, saying why, at the cap or when Claude can't answer or rejects the credentials (llm.Stop)."""
+    """Run extraction, or say why it couldn't run (no credentials, API down, no key to pseudonymize names with); the
+    run goes on either way. A stage stops itself, saying why, at the cap or when Claude can't answer or rejects the
+    credentials (llm.Stop)."""
     import anthropic
 
     from im import extract
@@ -140,12 +141,23 @@ def _extract(conn, cfg) -> dict:
         return {"stopped": f"extract.prompt {x.prompt} is for `im trial` only; `im run` reads with "
                            f"{', '.join(extract.LIVE)}"}
     try:
+        scrubber = _extract_scrubber(conn, cfg, x.prompt)
+    except SystemExit as e:   # no key to pseudonymize names with
+        return {"stopped": str(e)}
+    try:
         client = anthropic.Anthropic()
         return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
                                  extract.system_prompt(x.prompt, x.interests), x.max_tokens,
-                                 extract.schema_for(x.prompt))
+                                 extract.schema_for(x.prompt), scrubber)
     except anthropic.AnthropicError as e:  # e.g. no credentials configured at all
         return {"stopped": f"Claude unavailable: {e}"}
+
+
+def _extract_scrubber(conn, cfg, prompt: str):
+    """Policy C's scrubber for a prompt written for it, None for one that keeps policy B (extract.POLICY_B)."""
+    from im import extract, names
+
+    return None if prompt in extract.POLICY_B else names.for_trials(conn, cfg.egress)
 
 
 def _lattice(conn, cfg) -> dict:
@@ -276,17 +288,19 @@ def cmd_pending(args) -> None:
     """What the next run would send to Claude, without sending anything. After moving the database to another
     machine, `already_extracted_would_resend` must be 0: anything else means the payloads changed (e.g. the time
     zone), and the run would re-send episodes and orphan my verdicts."""
-    from im import extract, lattice, themes
+    from im import egress, extract, lattice, themes
 
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
         prompt = args.prompt or cfg.extract.prompt
         pv = extract.prompt_version(cfg.extract.model, cfg.extract.effort,
                                     extract.system_prompt(prompt, cfg.extract.interests), extract.schema_for(prompt))
-        todo = extract._pending(conn, cfg.extract.model, pv)
+        scrubber = _extract_scrubber(conn, cfg, prompt)
+        todo = extract._pending(conn, cfg.extract.model, pv, scrubber)
         done = {r[0] for r in conn.execute(
-            "SELECT episode_id FROM im.extractions WHERE model = %s AND prompt_version = %s",
-            (cfg.extract.model, pv))}
+            """SELECT episode_id FROM im.extractions
+               WHERE model = %s AND prompt_version = %s AND privacy_policy_version = %s""",
+            (cfg.extract.model, pv, scrubber.policy if scrubber else egress.POLICY_VERSION))}
         # What each one's latest read cost, a read shared by reuse counted once; an `im trial` of a new prompt
         # says how its cost compares (cost_vs_live).
         (last_read,) = conn.execute(
