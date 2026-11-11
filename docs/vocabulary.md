@@ -140,13 +140,17 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Extraction.** The process of reading an episode with a model, under a prompt revision and a privacy policy, and
   storing the captures it returns. `im.extractions` records each read, including reads that found nothing (007:48).
   The **extractor** is the role that does it. _Not_ matching.
-- **Capture (item).** One extraction result that represents a thought expressed in an episode. It holds its capture
-  source citation, its quote, gist, said by, capture kind, capture tags and capture confidence, and its extraction
-  metadata: model, extraction fingerprint and policy (`im.items`, 007:28). "Capture" and "item" are the same thing.
-  _Not_ an observation: rereading the same speech makes a new capture of the same observation.
+- **Capture (item).** One extraction result that represents a thought expressed in an episode, or in messages of the
+  ChatGPT archive. It holds its capture source citation, its quote, gist, said by, capture kind, capture tags and
+  capture confidence, and its extraction metadata: model, extraction fingerprint and policy (`im.items`, 007:28).
+  "Capture" and "item" are the same thing. _Not_ an observation: rereading the same speech makes a new capture of the
+  same observation.
+- **Archive capture.** A capture of a message I typed into the ChatGPT archive: no episode and no segments, and an
+  archive observation of its own from the start, which says when I sent the message (055).
 - **Capture on an active episode.** A capture whose episode is active. One active episode can hold captures from
   several models and prompt revisions (`im.items` is keyed by episode, model, fingerprint and policy). So "current"
-  doesn't mean the latest read.
+  doesn't mean the latest read. An archive capture counts wherever a capture on an active episode does: in matching,
+  maturity, evidence, cards and weight (055).
 - **Capture source citation.** The payload lines a capture cites, stored as the segments they map to
   (`items.source_segment_ids`; [0004]:18). _Not_ an edge observation citation.
 - **Prompt revision.** One of the extraction prompts' texts, `v1` to `v5.3` (`extract.PROMPTS`). Live extraction runs
@@ -207,7 +211,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   is represented by the captures grouped into it: a capture joins when its segments descend from the observation's
   and its quote-overlap score (floor 8) is at least 0.4 against every capture already in it (034, [M2 design]
   §Observations). Archive and typed observations hold their own quote, time, owner-attribution class and source
-  context (036:1-23). Observations are neutral and never judged (SPEC.md:27).
+  context (036:1-23). An archive observation is an archive capture's, in its capture's cluster, and says whether I
+  edited the message before it was read (`edited`, 055); the seeded archive's belong to their cluster directly
+  (`idea_id`), as typed ones do. Observations are neutral and never judged (SPEC.md:27).
 - **Source context.** What a non-speech observation is grouped by for recurrence: the ChatGPT conversation, or the
   `idea_add` event (`observations.conversation`, 036:7). _Not_ a Hearsay conversation.
 - **Same point, distinct points.** Two occurrences make the same point when they make "the same claim about the same
@@ -240,10 +246,11 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   (`weight.recurrences`, `weight._signals`; SPEC §3).
 - **Maturity.** How far a cluster has come, derived each time it's read, not stored (`im.idea_maturity`, 031:34-44):
   - `idea`: I kept it;
-  - `candidate`: not kept, with a `me` observation on an active episode;
+  - `candidate`: not kept, with a `me` observation on an active episode or of the archive;
   - `observation`: neither of those. In prose, "a cluster without owner evidence".
-- **Candidate.** An unkept cluster with at least one `me` observation on an active episode (031:32-44). Candidates
-  differ only by weight ([M2 design]:39-40). A cluster with only `not_me` members never becomes one (SPEC.md:30-31).
+- **Candidate.** An unkept cluster with at least one `me` observation on an active episode or of the archive
+  (031:32-44, 055). Candidates differ only by weight ([M2 design]:39-40). A cluster with only `not_me` members never
+  becomes one (SPEC.md:30-31).
 - **Cluster weight.** A number per cluster, computed each run by a versioned formula over stored signals: my
   recurrences, a capped count of other members, connections to canonical clusters, and whether the cluster is
   canonical itself (`im.weights`, 031:48-55; `weight.weigh`). It's shown as a fact and orders nothing ([0007]).
@@ -401,7 +408,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 ## Views and lenses
 
 - **Card eligibility.** A cluster is shown in the neutral view if its provenance is `archive` or `mine`, or if it has
-  a capture on an active episode (033:58). That's what "every cluster that passed the gates" means (033:1-3).
+  a capture on an active episode or of the archive (033:58, 055). That's what "every cluster that passed the gates"
+  means (033:1-3).
 - **Neutral view, card.** The neutral view is a list of every eligible cluster, with what's known about each and no
   score ([0007]; 033:1-3; `web.py`). A card is one cluster as that view shows it: a row of `pub.cards` (033:32), with
   title, statement, maturity, kept status, my note, observations by owner-attribution class, conversations, first
@@ -548,8 +556,8 @@ Each role decides one thing. The model behind it can change, so models are liste
 - **Capture, observation, cluster, idea.** Another read of the same occurrence is a new capture of the same
   observation. Another occurrence of the same point is a new observation in the same cluster. If I keep the cluster,
   it's an idea.
-- **Candidate.** An unkept cluster with `me` evidence on an active episode. Without that evidence, it's a cluster
-  without owner evidence; once I keep it, it's an idea.
+- **Candidate.** An unkept cluster with `me` evidence on an active episode or of the archive. Without that evidence,
+  it's a cluster without owner evidence; once I keep it, it's an idea.
 - **Cluster evidence, recurrence.** Cluster evidence counts member observations. Recurrence counts only my
   occurrences that meet the independence rule. Several captures of one occurrence are one observation, and at most
   one recurrence.

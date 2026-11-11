@@ -5,8 +5,9 @@ the capture makes the same point (matcher v2, decision 0012). Code decides: the 
 two or more do, they're logged as a possible duplicate (im.merge_review); if none does, the capture starts a new
 cluster, with the title and statement the matcher wrote. It decides membership only: whether one point builds on
 another is the connection judge's, so the matcher writes no lineage. It only links, never merges destructively.
-Discarded items are skipped. Related-idea edges come from the embeddings and are rebuilt every run, and so are the
-ideas' positions on Lattice's map.
+Discarded items are skipped. Captures are matched in the order I said them, speech and the archive (captures of
+what I typed into the ChatGPT Idea Machine, with no episode, migration 055) alike. Related-idea edges come from the
+embeddings and are rebuilt every run, and so are the ideas' positions on Lattice's map.
 
 A thought I relay and a thought I hold are never the same point: a relayed capture (`attributed_to`, extraction v5)
 is shown only clusters that began from a relayed capture, and my own only the rest. Captures from before v5 have no
@@ -215,16 +216,19 @@ def _idea_matrix(conn, embedder) -> tuple[list, np.ndarray]:
 # --- Matching ------------------------------------------------------------------------------------------
 
 def _pending_items(conn) -> list[tuple]:
-    """Items on current episodes not matched yet, oldest first, with my latest verdict, and their reading and
-    attribution (v5; NULL before)."""
+    """Items on current episodes, and archive items, not matched yet, oldest first by when they were said, with my
+    latest verdict, and their reading and attribution (v5; NULL before)."""
     return conn.execute(
         """SELECT i.item_id, i.episode_id, i.kind, w.said_by, i.quote, i.gist, i.source_segment_ids,
                   (SELECT v.verdict FROM im.item_verdicts v WHERE v.item_id = i.item_id
                    ORDER BY v.decided_at DESC LIMIT 1),
                   i.reading, coalesce(i.attributed_to, '')
-           FROM im.items i JOIN im.item_said_by w USING (item_id) JOIN im.episodes e USING (episode_id)
-           WHERE e.current AND NOT EXISTS (SELECT 1 FROM im.item_matches m WHERE m.item_id = i.item_id)
-           ORDER BY e.started_at, i.item_id""").fetchall()
+           FROM im.items i JOIN im.item_said_by w USING (item_id)
+           LEFT JOIN im.episodes e USING (episode_id)
+           LEFT JOIN im.observations o ON o.observation_id = i.observation_id AND i.episode_id IS NULL
+           WHERE (e.current OR i.episode_id IS NULL)
+             AND NOT EXISTS (SELECT 1 FROM im.item_matches m WHERE m.item_id = i.item_id)
+           ORDER BY coalesce(e.started_at, o.said_at), i.item_id""").fetchall()
 
 
 CARRIED = "carried:observation"   # judged_by for a match an item takes from its observation
@@ -261,16 +265,19 @@ def _relayed_clusters(conn) -> set:
 
 
 def _members(conn, idea_id) -> list[tuple]:
-    """A cluster's observations, newest first, at most MEMBERS: (gist, relayed from, quote). Spoken ones through
-    their current captures, one per observation; ones that aren't speech by their quote, my own words."""
+    """A cluster's observations, newest first, at most MEMBERS: (gist, relayed from, quote). Spoken and archive ones
+    through their current captures, one per observation; ones that belong to the idea directly by their quote, my
+    own words."""
     return conn.execute(
         """SELECT gist, relayed, quote FROM (
              (SELECT DISTINCT ON (coalesce(i.observation_id, i.item_id))
-                     i.gist, coalesce(i.attributed_to, '') AS relayed, i.quote, e.started_at AS said_at
+                     i.gist, coalesce(i.attributed_to, '') AS relayed, i.quote,
+                     coalesce(e.started_at, o.said_at) AS said_at
               FROM im.idea_evidence ev JOIN im.items i USING (item_id)
-              JOIN im.episodes e ON e.episode_id = i.episode_id AND e.current
-              WHERE ev.idea_id = %(idea)s
-              ORDER BY coalesce(i.observation_id, i.item_id), e.started_at DESC)
+              LEFT JOIN im.episodes e ON e.episode_id = i.episode_id
+              LEFT JOIN im.observations o ON o.observation_id = i.observation_id AND i.episode_id IS NULL
+              WHERE ev.idea_id = %(idea)s AND (e.current OR i.episode_id IS NULL)
+              ORDER BY coalesce(i.observation_id, i.item_id), coalesce(e.started_at, o.said_at) DESC)
              UNION ALL
              SELECT o.quote, '', o.quote, o.said_at FROM im.observations o
              WHERE o.idea_id = %(idea)s AND o.source <> 'speech') m

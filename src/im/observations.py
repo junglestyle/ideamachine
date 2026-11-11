@@ -35,8 +35,10 @@ def assign_stage(conn) -> dict:
         dropped = conn.execute("""DELETE FROM im.observations o WHERE o.source = 'speech'
                                     AND NOT EXISTS (SELECT 1 FROM im.items i WHERE i.observation_id = o.observation_id)
                                """).rowcount
+        # An archive capture comes with its observation (migration 055).
         items = conn.execute("""SELECT item_id, quote, source_segment_ids, created_at FROM im.items
-                                WHERE observation_id IS NULL ORDER BY created_at, item_id""").fetchall()
+                                WHERE observation_id IS NULL AND episode_id IS NOT NULL
+                                ORDER BY created_at, item_id""").fetchall()
         if dropped:
             citations.uncite_missing(conn)
         stats = {"new": 0, "joined": 0, "dropped": dropped}
