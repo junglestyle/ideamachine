@@ -58,7 +58,12 @@ QUESTIONS = {
         "adds": ("Does `summary` state something that `lines` don't say?",
                  {"true": "It adds an inference, conclusion, motive or outcome that isn't in the lines",
                   "false": "Everything it says is in the lines, perhaps more briefly"}),
-        "misstates": ("Does `summary` contradict or misstate what `lines` say?", None),
+        "misstates": ("Does `summary` contradict or misstate what `lines` say?",
+                      {"true": "It says something the lines contradict, gets who did or said what wrong, changes what "
+                               "a claim is about, reverses a negation, or says it more strongly or more broadly "
+                               "(\"might\" to \"is\", \"some\" to \"all\")",
+                       "false": "What it says matches the lines in substance and strength, even if shorter or reworded "
+                                "(whether it adds anything is asked separately)"}),
     },
     # B1 (match_bench): is a new capture `a` the same idea as an existing one `b`, or does it develop it? Two
     # wordings of each, from the matcher's own definitions (lattice.MATCH_SYSTEM), decided in code.
@@ -66,7 +71,12 @@ QUESTIONS = {
         "same": ("Are `a` and `b` the same idea: restated, repeated or near-paraphrased?",
                  {"true": "They make the same point, whatever the wording",
                   "false": "They make different points, even about the same subject"}),
-        "same_v2": ("Is `a` another way of saying `b`?", None),
+        "same_v2": ("Is `a` another way of saying `b`?",
+                    {"true": "The same claim about the same thing, with the same stance, conditions and scope, "
+                             "whatever the wording",
+                     "false": "A different claim, even on the same subject; one builds on, extends, applies or "
+                              "contains the other; a general claim and one instance of it; or one is relayed and the "
+                              "other held"}),
         "develops": ("Does `a` develop, refine, extend or apply `b` into a distinct idea of its own?",
                      {"true": "a builds on b and goes somewhere b doesn't",
                       "false": "a says the same as b, or something unrelated to it"}),
@@ -98,7 +108,11 @@ QUESTIONS = {
         "adds": ("Does `gist` state something that `lines` don't say?",
                  {"true": "It adds an inference, conclusion, motive or outcome that isn't in the lines",
                   "false": "Everything it says is in the lines, perhaps more briefly"}),
-        "misstates": ("Does `gist` contradict or misstate what `lines` say?", None),
+        "misstates": ("Does `gist` contradict or misstate what `lines` say?",
+                      {"true": "It says something the lines contradict, gets who did or said what wrong, reverses a "
+                               "negation, or changes what a claim is about",
+                       "false": "Nothing in it contradicts or changes what the lines say (whether it adds anything, "
+                                "or says it more strongly, is asked separately)"}),
         "overstates": ("Does `gist` say it more strongly, more broadly or more certainly than `lines` do?",
                        {"true": "It drops a hedge, a doubt or a qualifier, or turns one case into a rule",
                         "false": "It's as strong, as broad and as sure as the lines"}),
@@ -113,8 +127,16 @@ QUESTIONS = {
                      "repeats back?",
                      {"true": "Someone else makes the point, and me only goes along with it",
                       "false": "me makes the point, or passes on someone's view as worth telling"}),
-        "mocked": ("In `context`, does `me` voice the point of `gist` only to mock, parody or reject it?", None),
-        "two_points": ("Does `gist` make two separate points, each of which could stand on its own?", None),
+        "mocked": ("In `context`, is `me` mocking or rejecting the point of `gist`?",
+                   {"true": "me voices it to mock, parody or reject it, deadpan included: asked straight, me wouldn't "
+                            "stand behind it, and the context shows me doesn't hold it",
+                    "false": "me means it, as a claim, a joke with a point, an exaggeration or a provocation, or "
+                             "passes on someone's view without rejecting it"}),
+        "two_points": ("Does `gist` make two separate points, each of which could stand on its own?",
+                       {"true": "It joins two claims a reader could accept or reject separately, each meaningful "
+                                "without the other; \"X but Y\" counts when Y is a claim of its own",
+                        "false": "One claim, perhaps with the reason, example or qualification that only supports "
+                                 "it; \"X but Y\" counts when Y only limits X"}),
     },
     # Sensitivity tags (im.sensitivity, decision 0012): an idea or a theme (`item`: its text, and for an idea what was
     # said), one yes or no per tag, each decided at sensitivity.CUT. They describe; a view decides what to hide.
@@ -122,19 +144,42 @@ QUESTIONS = {
         "profanity": ("Does `item` contain swearing or crude language?",
                       {"true": "Swear words or crude terms appear in its text or in what was said",
                        "false": "Its wording is clean, whatever its subject"}),
-        "sex": ("Is `item` about sex: sexual content or behavior, or dating framed sexually?", None),
+        "sex": ("Is `item` about sex: sexual content or behavior, or dating framed sexually?",
+                {"true": "It's about sex acts, sexual desire or performance, or dating and attraction in sexual terms",
+                 "false": "Romance, relationships or attraction without sexual content, or sex only mentioned in "
+                          "passing"}),
         "gender_politics": ("Is `item` about gender politics: claims about men and women, gender roles and power, "
-                            "feminism or its critics?", None),
+                            "feminism or its critics?",
+                            {"true": "It makes or discusses a claim about what men or women are like, want or "
+                                     "deserve, including preferences (\"women like tall men\"), or about gender roles, "
+                                     "power or feminism",
+                             "false": "It's about particular people who happen to be men or women, with no claim "
+                                      "about the sexes; or gender is only mentioned in passing"}),
         "politics": ("Is `item` about politics: parties, politicians, ideologies, policy or political conflict?",
-                     None),
-        "drugs": ("Is `item` about recreational drugs or drug use?", None),
-        "offensive": ("Could `item` offend: stereotypes or slurs about a group, mockery of a group, or a crude insult, "
-                      "even as a joke?", None),
-        "violence": ("Is `item` about violence, weapons or harming people?", None),
-        "private_person": ("Is `item` about a specific private individual?",
+                     {"true": "It takes or discusses a position on parties, politicians, ideologies, elections, policy "
+                              "or political conflict",
+                      "false": "Its subject isn't political, even if it touches society, work or culture; or politics "
+                               "is only mentioned in passing"}),
+        "drugs": ("Is `item` about recreational drugs or drug use?",
+                  {"true": "It's about taking, buying or the effects of recreational drugs (cannabis, psychedelics, "
+                           "stimulants, opioids), prescription drugs used to get high, or alcohol when the point is "
+                           "getting drunk",
+                   "false": "Medicine taken as prescribed, supplements, caffeine, alcohol or nicotine as everyday "
+                            "habits, or a drug only named in passing"}),
+        "offensive": ("Does `item` demean a group or crudely insult a person?",
+                      {"true": "It uses a slur, states a demeaning stereotype as fact, mocks a group for what it is, "
+                               "or crudely insults someone, even as a joke",
+                       "false": "It's blunt, provocative or contrarian about ideas or behavior, criticizes a person "
+                                "without crude insult, or describes a stereotype without endorsing it"}),
+        "violence": ("Is `item` about violence, weapons or harming people?",
+                     {"true": "Hurting people, killing, sexual violence or weapons is its subject, including news, "
+                              "history, combat sports or guns as a hobby",
+                      "false": "Violence only mentioned in passing, or as a figure of speech (\"killing it\", "
+                               "\"falling knives\")"}),
+        "private_person": ("Is `item` about a specific private individual other than me, the speaker?",
                            {"true": "It describes, judges or tells about one particular person who isn't a public "
-                                    "figure, named or not (a friend, a date, a coworker; P-... stands for a name)",
-                            "false": "It's about people in general, a public figure, or no one in particular"}),
+                                    "figure and isn't me, named or not (a friend, a date, a coworker)",
+                            "false": "It's about me, people in general, a public figure, or no one in particular"}),
     },
 }
 
