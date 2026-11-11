@@ -10,13 +10,13 @@ from test_pipeline import CORRECTIONS
 DATABASE = "managed database"
 
 
-def capture(needle, kind="idea"):
+def capture(needle):
     """Claude captures every line containing `needle`, quoting the line."""
     def respond(text):
         hits = [(int(line[1:].split("]")[0]), line.split(": ", 1)[1])
                 for line in text.splitlines() if line.startswith("[") and needle in line]
-        return [{"kind": kind, "said_by": "me", "quote": q, "lines": [n], "gist": needle, "themes": [],
-                 "confidence": 0.9} for n, q in hits]
+        return [{"quote": q, "lines": [n], "attributed_to": "", "reading": q, "mishearings": [], "gist": needle}
+                for n, q in hits]
     return respond
 
 

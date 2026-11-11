@@ -2,7 +2,10 @@
 my speech in the order I said things, and shown and weighed as speech is."""
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+
+import psycopg
+import pytest
 
 from im import extract, fixtures, lattice, observations, pipeline, quotes, weight
 from im.config import WeightConfig
@@ -73,3 +76,22 @@ def test_an_archive_capture_is_left_alone_by_the_speech_stages_and_a_reset(pipe,
                  typed) == before
     assert table(pipe, "SELECT maturity FROM pub.cards") == [("candidate",)]
     assert_invariants(pipe)
+
+
+def test_the_archive_is_only_captures_now(pipe):
+    # Migration 057: no idea comes from the archive (the seeded ideas stayed in im_v1), and an archive observation
+    # belongs to its capture, never to an idea of its own, as what I typed adding an idea always does.
+    (idea,) = pipe.execute("INSERT INTO im.ideas (title, statement, origin) VALUES ('t', 's', 'mine') "
+                           "RETURNING idea_id").fetchone()
+    observation = """INSERT INTO im.observations (segment_ids, first_seen, source, idea_id, quote, said_at, said_by,
+                                                  conversation, source_ref)
+                     VALUES ('{}', now(), %s, %s, 'q', now(), 'me', 'c', %s)"""
+    for row in [("archive", idea, "chatgpt:c1:x#1"), ("typed", None, "idea_add:1")]:
+        with pytest.raises(psycopg.errors.CheckViolation), pipe.transaction():
+            pipe.execute(observation, row)
+    with pytest.raises(psycopg.errors.CheckViolation), pipe.transaction():
+        pipe.execute("INSERT INTO im.ideas (title, statement, origin) VALUES ('t', 's', 'archive')")
+    archive_capture(pipe, datetime(2026, 9, 1, tzinfo=timezone.utc))
+    pipe.execute(observation, ("typed", idea, "idea_add:1"))
+    assert table(pipe, "SELECT source, idea_id IS NULL FROM im.observations ORDER BY source") == \
+        [("archive", True), ("typed", False)]

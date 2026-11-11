@@ -1,6 +1,6 @@
 # Vocabulary
 
-_As of 2026-11-07. What each term in Idea Machine is, where it's stored, and what it isn't. Definitions say what a
+_As of 2026-11-11. What each term in Idea Machine is, where it's stored, and what it isn't. Definitions say what a
 thing is. Where it matters, they keep three things apart: the thing, how it's stored, and how it came about. Status
 (what's built, what's planned) goes in a trailing **Status** note, and history is left to the decisions. Words that
 mean two things, or two words that mean one, are listed at the end, each with the one meaning to use._
@@ -21,6 +21,11 @@ Storage has three layers ([0006]). The **ledger** is append-only: what was recei
 (`im.source_*`, `im.items`, `im.egress_log`, `pub.feedback_events`). The **graph** is the data Idea Machine derives
 from the ledger and can rebuild from it (`im.ideas`, connections, lineage, weights). **`pub`** is the read model:
 the web app, Lattice and the MCP connector read it, and their only write is to insert feedback events (SPEC §2).
+
+The **live database** is `im`, rebuilt from the stream with `v5.3` and matcher v2 and cut over to on 2026-11-11
+([0012]). The **archived database**, `im_v1`, is the one from before the rebuild: dumped once at the cutover, never
+migrated again, and read by nothing ([deploy.md](deploy.md)). It holds the captures of prompts `v1` to `v4` and the
+seeded archive.
 
 ## Speech
 
@@ -72,7 +77,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Speaker label.** The display name on a segment: `me`, a name, `anon A` or `unknown` (002:27).
 - **Tap.** A press on the pendant, recorded as a time (`source_conversations.taps`, 005:1-2). An episode's taps are
   those within 30 s of it (`triage.py`). To extraction a tap is a prompt cue: "A tap usually means I wanted something
-  kept: look closely at what I said around that time" (`extract.SYSTEM_V3`). _Not_ tapping a star on the sky.
+  kept: look closely at what I said around that time" (`extract.SYSTEM_V5_3`). _Not_ tapping a star on the sky.
 - **Places.** The places I named for a conversation, with their times (013:3-5).
 - **Affect, arousal.** Affect is the stream's container for measures of how I sounded. Arousal is the measure in it:
   how animated I sounded, about 0 to 1, from the audio alone, meaning tone of voice and not sentiment (013:7-9).
@@ -128,15 +133,16 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 
 ## Capture
 
-- **Thought.** What extraction captures: something someone expresses that could be said again, in a different
-  conversation weeks later, and be the same thought. "The pills are a band-aid" is one; "toss it on seven" isn't
-  (`extract.SYSTEM_V3`'s test).
+- **Thought.** What extraction captures: something I express whose meaning reaches beyond the occasion it was said
+  in. "These sleeping pills treat the symptom, not the cause" is one; "toss it on seven" isn't
+  (`extract.SYSTEM_V5_3`'s test).
 - **Extraction.** The process of reading an episode with a model, under a prompt revision and a privacy policy, and
   storing the captures it returns. `im.extractions` records each read, including reads that found nothing (007:48).
   The **extractor** is the role that does it. _Not_ matching.
 - **Capture (item).** One extraction result that represents a thought expressed in an episode, or in messages of the
-  ChatGPT archive. It holds its capture source citation, its quote, gist, said by, capture kind, capture tags and
-  capture confidence, and its extraction metadata: model, extraction fingerprint and policy (`im.items`, 007:28).
+  ChatGPT archive. It holds its capture source citation, its quote, reading, gist, said by, attributed to,
+  mishearings and capture checks, and its extraction metadata: model, extraction fingerprint and policy (`im.items`,
+  007:28, 047).
   "Capture" and "item" are the same thing. _Not_ an observation: rereading the same speech makes a new capture of the
   same observation.
 - **Archive capture.** A capture of a message I typed into the ChatGPT archive: no episode and no segments, and an
@@ -147,55 +153,47 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   maturity, evidence, cards and weight (055).
 - **Capture source citation.** The payload lines a capture cites, stored as the segments they map to
   (`items.source_segment_ids`; [0004]:18). _Not_ an edge observation citation.
-- **Prompt revision.** One of the extraction prompts' texts, `v1` to `v5.3` (`extract.PROMPTS`). Live extraction runs
-  `v1` to `v3`, or `v5.3` (`extract.LIVE`). **Status:** `v4` and `v5` to `v5.2` are for trials only; `v5.3` is the
-  rebuild's (decision 0012, amended 2026-11-10), and `im.items` holds its captures (047).
+- **Prompt revision.** One of the extraction prompts' texts, `v5` to `v5.3` (`extract.PROMPTS`), each capturing only
+  my speech (0011). The **live prompt** is the one `im run` reads with, `extract.prompt` in the config: only `v5.3`
+  may be (`extract.LIVE`); `v5` to `v5.2` are for trials. `v1` to `v4` captured everyone's speech with a capture kind
+  and a capture confidence; they were retired at the cutover (2026-11-11, [0012]), with `extract.interests`, the
+  config text that filled `v2`'s slot for my interests (ignored, with a warning, if still set). Their captures are in
+  the archived database.
 - **Extraction fingerprint.** A hash of the system prompt, schema, model and effort (`extract.prompt_version`). It's
   stored as `prompt_version` (007:40), and changing any part of it re-reads every episode. _Not_ the prompt revision.
-- **Quote.** The capture's excerpt of its cited lines. Under `v4` it's exactly what the transcript says, character
-  for character. Under `v1` to `v3` it could fix obvious transcription errors (`extract.SYSTEM_V3`, `SYSTEM_V4`).
-- **Reading.** `v4` and `v5`: the quote repaired and resolved, with transcription fixed, fillers dropped and what
-  "it" or "he" refers to spelled out (`extract.SYSTEM_V4`, `SYSTEM_V5`; `im.items.reading`, 047). NULL before `v5`.
+- **Quote.** The capture's excerpt of its cited lines, exactly as the transcript says it, so it can be checked
+  (`extract.SYSTEM_V5_3`; the capture checks).
+- **Reading.** The quote repaired and resolved, with transcription fixed, fillers dropped and what "it" or "he"
+  refers to spelled out (`extract.SYSTEM_V5_3`; `im.items.reading`, 047).
 - **Gist.** The thought restated in one line, with the context it needs to stand alone for someone who wasn't
-  there (`im.items.gist`). Under `v4` it carries no label ("Joke:"), no transcription note and no attribution. _Not_
-  a statement: a gist is this one occurrence's, and a statement is the cluster's.
+  there (`im.items.gist`). It carries no label ("Joke:"), no transcription note and no attribution. _Not_ a
+  statement: a gist is this one occurrence's, and a statement is the cluster's.
 - **Said by.** Who said the capture here: the current speaker label of the capture's `said_by_segment_id`, read at
   query time through `im.item_said_by` (029, [M1 design]).
-- **Attributed to.** `v4` and `v5`: whose thought the speaker is passing on ("a nurse"), or empty. Said by stays
-  whoever said it here (`extract.SYSTEM_V4`, `SYSTEM_V5`; `im.items.attributed_to`, 047). NULL before `v5`.
-- **Mishearings.** `v5`: the (heard, meant) pairs the reading fixed (`im.items.mishearings`, 047; NULL before `v5`).
+- **Attributed to.** Whose thought I'm passing on ("a nurse"), or empty. Said by stays whoever said it here
+  (`extract.SYSTEM_V5_3`; `im.items.attributed_to`, 047).
+- **Mishearings.** The (heard, meant) pairs the reading fixed (`im.items.mishearings`, 047).
   A pair is `provisional` when captures propose it, and `confirmed` or `rejected` when I decide it, or `confirmed`
   when I add it (`im mishearings`; `im.mishearings`, `im.mishearing_decisions`, 050). A rejected pair stays rejected.
   A read's context line lists the confirmed and provisional pairs whose heard words occur in its transcript, as
   hints: they aren't part of what decides whether an episode was read (`egress.Payload.sha256`), so a new pair
   re-reads nothing.
-- **Capture checks.** `v5`: the code checks a capture failed against the transcript as sent, empty when it passed
-  (`capture_checks.FAIL`; `im.items.checks`, 047). NULL before `v5`.
-- **Capture kind.** What sort of thought a capture expresses (`im.items.kind`, no CHECK, 007:31). `v5` has none: NULL
-  (047).
-  - `extract.KINDS` (`v1`-`v3`): `idea`, `aphorism`, `joke`, `observation`, `project`, `task`, `decision`. Under `v3`
-    a question is filed as `observation` unless it's an idea put as a question.
-  - `extract.KINDS_V4`: `idea`, `aphorism`, `observation`, `question`, `technique`, `project`, `task`, `decision`.
-    `question` is something someone is wondering about, unless it's an idea put as a question. `technique` is a
-    principle or technique someone is teaching. A joke is filed by what it says (`extract.SYSTEM_V4`).
-
-  The boundaries between the other capture kinds are **not yet specified**.
-- **Capture tags.** The free-text strings a model returns with each capture, in the `themes` field (`extract.SCHEMA`;
-  `im.items.themes`, 007:35). What they should be is **not yet specified**: no prompt says. _Not_ themes.
-- **Capture confidence.** The model's number, from 0 to 1; `v5` has none (NULL, 047). What it measures depends on the
-  prompt revision:
-  - `v1` and `v2`: keep probability, the chance I'd keep the capture;
-  - `v3` and `v4`: fidelity confidence, how sure the model is that the quote (or reading) and gist are what was said
-    and meant (`extract.SYSTEM`, `SYSTEM_V2`, `SYSTEM_V3`, `SYSTEM_V4`).
+- **Capture checks.** The code checks a capture failed against the transcript as sent, empty when it passed
+  (`capture_checks.FAIL`; `im.items.checks`, 047).
+- **Capture kind, capture tags, capture confidence.** What sort of thought a capture expressed, the free-text tags
+  and the model's number from 0 to 1 that `v1` to `v4` returned with each capture (`im.items.kind`, `themes` and
+  `confidence`, 007:31-36). `v5` has none of them: `kind` and `confidence` are NULL, `themes` empty (047). The columns
+  stay, as the archived database's history, and `pub.evidence` and `pub.review_items` still show them (always empty
+  now). _Not_ themes, and _not_ a connection's confidence.
 - **Quote-source coverage.** The share of a quote's words found, in order, in its cited lines. Under 0.6, the quote
   isn't from its lines (`quote_in_lines`, 044:1-4; `quotes.FLAG`).
 - **Quote-overlap score.** The share of the shorter of two quotes' words found, in order, in the other, with each
   quote counted as at least a floor of words long: 4 for carrying verdicts, 8 for grouping (`feedback.quote_score`,
   `observations.GROUP_MIN_WORDS`, decision 0012).
 - **Register.** How something is said, such as a joke or irony, as against what it says. **Status:** meant for a
-  judging pass after extraction, not built (`extract.SYSTEM_V4`'s comment; ROADMAP-v2 §5 q10-11).
+  judging pass after extraction, not built (ROADMAP-v2 §5 q10-11).
 - **Note-to-self cue.** An explicit spoken instruction, "note to self", to keep the thought that follows. Extraction
-  captures what follows it (`extract.SYSTEM_V3`), and the router sends the episode to review
+  captures what follows it (`extract.SYSTEM_V5_3`), and the router sends the episode to review
   (`router.NOTE_TO_SELF`).
 
 ## Observations and clusters
@@ -206,8 +204,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   and its quote-overlap score (floor 8) is at least 0.4 against every capture already in it (034, [M2 design]
   §Observations). Archive and typed observations hold their own quote, time, owner-attribution class and source
   context (036:1-23). An archive observation is an archive capture's, in its capture's cluster, and says whether I
-  edited the message before it was read (`edited`, 055); the seeded archive's belong to their cluster directly
-  (`idea_id`), as typed ones do. Observations are neutral and never judged (SPEC.md:27).
+  edited the message before it was read (`edited`, 055); it has no cluster of its own (`idea_id` NULL), while a typed
+  one belongs to its cluster directly (`idea_id`, 057). Observations are neutral and never judged (SPEC.md:27).
 - **Source context.** What a non-speech observation is grouped by for recurrence: the ChatGPT conversation, or the
   `idea_add` event (`observations.conversation`, 036:7). _Not_ a Hearsay conversation.
 - **Same point, distinct points.** Two occurrences make the same point when they make "the same claim about the same
@@ -268,16 +266,18 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 
   Keeping a cluster either way makes it an idea. Switching between canonical and pinned changes neither maturity nor
   clustering, and unkeeping returns it to candidate or to a cluster without owner evidence (031:34-44; [M2
-  design]:135). The archive's clusters and the ones I added start canonical, and starred ones start pinned.
-- **Cluster provenance.** Where an `im.ideas` row came from (`origin`, 008:10, 023:1-9): `archive` (seeded from the
-  ChatGPT archive), `captured` (made by the matcher from a capture) or `mine` (typed by me through `idea_add`).
+  design]:135). The ones I added start canonical, and starred ones start pinned.
+- **Cluster provenance.** Where an `im.ideas` row came from (`origin`, 008:10, 057): `captured` (made by the matcher
+  from a capture) or `mine` (typed by me through `idea_add`). `archive`, for the seeded archive, is only in the
+  archived database.
 - **ChatGPT archive.** The messages I sent my first "Idea Machine", a ChatGPT conversation. `im import-chatgpt`
   reads the ones a curation sheet keeps (as written, or as I edited them) with extraction v5.3, one session at a time
   (a gap of 6 hours starts the next), into archive captures (`archive_observations`, 055). ChatGPT's replies,
-  numbering, groupings and cross-references are never read. The live database also holds the seeded archive, made
-  from ChatGPT's summary before the archive was read: 36 seeded clusters (`archive_ref` `chatgpt#n`), their
-  cross-references and five themes (ROADMAP.md:142), and observations of my messages written onto those clusters
-  (036). Nothing writes them now.
+  numbering, groupings and cross-references are never read. The **seeded archive**, made from ChatGPT's summary
+  before the archive was read (36 clusters with `archive_ref` `chatgpt#n`, their cross-references as
+  `chatgpt-archive` connections, five themes, ROADMAP.md:142, and observations of my messages written onto those
+  clusters), is only in the archived database. `pub.ideas` still has `archive_ref`, always NULL, because Lattice
+  reads it.
 - **Title.** A cluster's short name, at most 8 words, the point itself with its scope and hedges (`im.ideas.title`).
   The generated title is the matcher's (`lattice.MATCH_SYSTEM`), and it's kept as `claude_title`. My latest
   correction overrides it (`im.idea_text`, 011:15-27).
@@ -286,7 +286,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   said (`lattice.match_stage`), and it's kept as `claude_statement`; it changes only when I correct it, so it's a
   stable anchor for retrieval. My latest correction overrides it.
 - **My note.** My latest `idea_note` on a cluster (`my_note`, 011:23-24).
-- **Archive elaboration.** What the ChatGPT archive developed around one of its ideas (`im.ideas.notes`, 008:12).
+- **Archive elaboration.** What the ChatGPT archive developed around one of its seeded ideas, in the archived
+  database (`im.ideas.notes`, 008:12). In the live database `notes` holds only the note I typed adding an idea (023).
 - **Correction.** An `idea_correct` event that replaces a cluster's title or statement (011).
 - **Feedback event.** A recorded action or judgment of mine (`pub.feedback_events`, 008:88-98). `source` says where I
   made it: `lattice`, `cli`, `mcp` or `emanation`. Where events disagree, my latest is the one with the highest
@@ -337,10 +338,10 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   - `evolves` and `synthesizes`: lineage links, in `pub.connections` only.
 
   _Not_ a connection kind.
-- **Stand-in connection.** A connection written by something other than a connection judge. Two kinds of stand-in
-  hold a pair until a judge decides it: embedding neighbors (method `embedding:…;k=3;min=0.7`, `lattice.relate`) and
-  the ChatGPT archive's cross-references (`chatgpt-archive`, in the live database only) ([connections storage]
-  §Tables). **Status:** a judge's `none` isn't stored yet.
+- **Stand-in connection.** A connection written by something other than a connection judge: embedding neighbors
+  (method `embedding:…;k=3;min=0.7`, `lattice.relate`), which hold a pair until a judge decides it. The archived
+  database also holds the ChatGPT archive's cross-references (`chatgpt-archive`) ([connections storage] §Tables).
+  **Status:** a judge's `none` isn't stored yet.
 - **Connection kind.** An optional annotation on a connection that says how the two relate. A connection may carry
   several, each with its own `method` (`im.connection_kinds`, 045:25-35). A connection kind is a suggestion: it never
   decides whether the connection exists, and it isn't graded ([0009]). Each adds `lens.KIND_WEIGHT` to its
@@ -366,7 +367,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
     nothing writes it now. Whether one point builds on another is a connection (`elaborates`, with a direction);
   - `synthesizes`: a synthesized cluster derived from each of its source clusters ([0010]:75-79).
 - **Edge-generation method.** What wrote a connection, connection kind or lineage link (the `method` column): a model
-  and question version, embedding parameters, `chatgpt-archive`, the matcher's version, or `feedback` (SPEC §3; 045).
+  and question version, embedding parameters, the matcher's version, or `feedback` (SPEC §3; 045).
   `im.edge_methods` records when each method first wrote, so that an unlink hides only what had been written before
   it (045:49-53).
 - **Edge observation citation.** The observations an edge rests on: the founding observations of its two ends
@@ -405,8 +406,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 
 ## Views and lenses
 
-- **Card eligibility.** A cluster is shown in the neutral view if its provenance is `archive` or `mine`, or if it has
-  a capture on an active episode or of the archive (033:58, 055). That's what "every cluster that passed the gates"
+- **Card eligibility.** A cluster is shown in the neutral view if its provenance is `mine`, or if it has a capture on
+  an active episode or of the archive (033:58, 055, 057). That's what "every cluster that passed the gates"
   means (033:1-3).
 - **Neutral view, card.** The neutral view is a list of every eligible cluster, with what's known about each and no
   score ([0007]; 033:1-3; `web.py`). A card is one cluster as that view shows it: a row of `pub.cards` (033:32), with
@@ -582,7 +583,7 @@ they are; prose follows the meanings given here.
 
 ### kind
 
-- Capture kind: `im.items.kind` (007:31), `extract.KINDS`, `extract.KINDS_V4`.
+- Capture kind: `im.items.kind` (007:31), which only the archived database's captures have.
 - Triage kind: `triage.KINDS`, `label.KINDS`.
 - Episode shape (001:30), speaker kind (002:25) and stutter kind (019:2).
 - Feedback event kind (008:91, 031:7-11).
@@ -599,32 +600,29 @@ they are; prose follows the meanings given here.
 `prompt_version` (007:40) is a hash of the system prompt, schema, model and effort (`extract.prompt_version`). The docs
 also say "prompt `v3`" for a prompt's text (ROADMAP-v2 §5 q6).
 
-**Use:** a prompt revision is `v1` to `v4`. The extraction fingerprint is the hash, stored as `prompt_version`.
+**Use:** a prompt revision is `v5` to `v5.3` (`v1` to `v4` are retired). The extraction fingerprint is the hash,
+stored as `prompt_version`.
 
 ### observation
 
 - An `im.observations` row (030:1-4).
 - The maturity `observation`, meaning a cluster with no `me` evidence (030:41-50).
-- The capture kind `observation` (`extract.KINDS`). `edge_audit.CONCRETE` reads it as "about a case, not a claim",
-  and `v3` files questions under it.
-- Any capture: "You extract observations" (`extract.SYSTEM_V3`).
+- The capture kind `observation`, on the archived database's captures. `edge_audit.CONCRETE` reads it as "about a
+  case, not a claim".
 - "A stretch of speech" ([0006]:33).
 
 **Use:** an observation is a source occurrence of a thought, stored as an `im.observations` row. The maturity value
-is "a cluster without owner evidence" in prose. The capture kind keeps its name until capture kinds matter
-downstream (ROADMAP-v2 §5 q11). If its meaning is "about a case, not a claim", it should be renamed then. Questions
-already have their own capture kind under `v4`.
+is "a cluster without owner evidence" in prose. The capture kind went with `v1` to `v4`.
 
 ### idea, cluster, candidate
 
 - Every cluster is an `im.ideas` row with an `idea_id` (031:49, 031:60), and `pub.ideas` lists clusters of any
   maturity (043:27-28).
-- "Idea" is also the maturity `idea` (031:36), the capture kind and triage kind `idea`, and "You extract ideas" in
-  the `v1` prompt (`extract.SYSTEM`).
+- "Idea" is also the maturity `idea` (031:36), and the capture kind and triage kind `idea`.
 - "Candidate" is also the nearest clusters shown to the matcher ("Candidates", `lattice.MATCH_SYSTEM`), a model under
   trial ([0008]:40).
-- "Cluster" is also the archive's five clusters (ROADMAP.md:143), a theme's provenance `clustered` (008:69), and
-  Hearsay's voice clusters (`speaker_basis` `cluster`, 002:28; [M1 design]:41).
+- "Cluster" is also the seeded archive's five clusters (ROADMAP.md:143), a theme's provenance `clustered` (008:69),
+  and Hearsay's voice clusters (`speaker_basis` `cluster`, 002:28; [M1 design]:41).
 
 **Use:** an idea is a kept cluster, a cluster is any `im.ideas` row (`idea_id` is a cluster id), and a candidate is
 the maturity. For the others: the matcher's nearest clusters, the trial model, archive
@@ -670,10 +668,10 @@ that views give every stored connection (owner's decision, 2026-11-07).
 - A theme is an `im.themes` row (008:65-73). A capture's `themes` field is capture tags (007:35).
 - "Subject" is what a lens gathers ([0010] §Context), and Jev's `different_subjects`.
 - "Topic" has no definition. In use it means subject, measured by embedding similarity (`analogy_spike`,
-  `probe_audit`), and it's also a prefix a gist shouldn't open with (`extract.SYSTEM_V4`).
+  `probe_audit`), and it's also a prefix a gist shouldn't open with (`extract.SYSTEM_V5_3`).
 
 **Use:** subject (what it's about), theme (a stored category with members) and lens (a relevance query). "Topic"
-becomes "subject". The `themes` field is capture tags, whose meaning is still not specified.
+becomes "subject". The `themes` field is capture tags, which no prompt since `v5` writes.
 
 ### evidence
 
@@ -701,8 +699,8 @@ traversal weight. A tap is a prompt cue.
 
 ### confidence
 
-- Capture confidence, whose meaning changed under one column: keep probability under `v1` and `v2`, fidelity
-  confidence under `v3` and `v4` (`extract.SYSTEM`, `SYSTEM_V3`).
+- Capture confidence, on the archived database's captures, whose meaning changed under one column: keep probability
+  under `v1` and `v2`, fidelity confidence under `v3` and `v4`.
 - Connection confidence. For embedding stand-ins it holds the cosine ([M2 design]:159), which is a similarity, not a
   confidence.
 - A triage answer's confidence (004:12), `speaker_conf` (Hearsay's owner similarity) and `asr_confidence` (002:30-31).
@@ -760,11 +758,11 @@ qualified: typed by me, linked by me, a theme created by me.
 
 ### archive
 
-- The ChatGPT archive: cluster provenance, `observations.source`, `chatgpt-archive`, and the old link kind.
-- An archived lens ([0010]:48), and the Lattice repo, archived at M6.
-- My whole collection: "my idea archive" in the `v1` and `v2` prompts (`extract.SYSTEM`).
+- The ChatGPT archive: `observations.source` and archive captures, and in the archived database the seeded
+  archive's cluster provenance, `chatgpt-archive`, and the old link kind.
+- An archived lens ([0010]:48), the Lattice repo, archived at M6, and the archived database, `im_v1`.
 
-**Use:** the ChatGPT archive (the seed archive), an archived lens, the archived Lattice repository. The whole
+**Use:** the ChatGPT archive, an archived lens, the archived Lattice repository, the archived database. The whole
 collection is "the graph".
 
 ### origin

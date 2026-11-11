@@ -1,6 +1,7 @@
 # 0012: Rebuild from the stream with extraction v5, in parallel, then cut over
 
-_2026-11-08. Status: accepted, not built yet; amended 2026-11-10 (the extractor and the gate, below). Amends [0010](0010-connections-kinds-lenses.md) (who writes `evolves`)
+_2026-11-08. Status: accepted; built and cut over 2026-11-11; amended 2026-11-10 (the extractor and the gate, below).
+Amends [0010](0010-connections-kinds-lenses.md) (who writes `evolves`)
 and [0011](0011-observations-are-mine.md) (relayed and held thoughts); settles the prompt review before the
 re-extraction; my decision. The prompt texts were reviewed by two reviewers and three adversarial teardowns, merged,
 and read by me; they go into the code as extraction v5 and matcher v2._

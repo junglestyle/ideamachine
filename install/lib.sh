@@ -25,9 +25,6 @@ LATTICE_HTTPS_PORT=8444
 WEB_HTTPS_PORT=8445   # the neutral view (im web)
 DB_CONTAINER=ideamachine-db
 RUN_LOCK=/run/ideamachine-run.lock
-# The archive rebuilt beside im (decision 0012), until cutover renames it: install/rebuild.sh, install/bin/im-rebuild.
-REBUILD_DB=im_rebuild
-NAS_REBUILD_ENV="$NAS_CONFIG/rebuild.env"   # its IM_DATABASE_URL: pipeline.env's, with the database swapped
 # Corral's NAS worker runs from here (deployed from the infra repo).
 NAS_CORRAL_DIR="/mnt/fast/corral-worker"
 APPS_UID=568
@@ -172,22 +169,4 @@ db_sql() {  # runs SQL as the database superuser, prints unaligned tuples
 
 im() {  # runs one `im` command in the pipeline image
     "${COMPOSE[@]}" run --rm -T run "$@" </dev/null
-}
-
-rebuild_exists() {  # whether the rebuild database is there (install/rebuild.sh makes it)
-    [ "$(db_sql "SELECT 1 FROM pg_database WHERE datname = '$REBUILD_DB'")" = 1 ]
-}
-
-# Points `compose run run` at the rebuild database: exports IM_DATABASE_URL from rebuild.env (handed to the container
-# by name, so the password stays off the command line) and sets REBUILD_RUN to compose run's options for it and the
-# rebuild's config.
-rebuild_env() {
-    IM_DATABASE_URL="$(env_get "$NAS_REBUILD_ENV" IM_DATABASE_URL)"
-    case "$IM_DATABASE_URL" in
-        */"$REBUILD_DB") ;;
-        *) die "$NAS_REBUILD_ENV doesn't name database $REBUILD_DB. Run install/rebuild.sh." ;;
-    esac
-    export IM_DATABASE_URL
-    # shellcheck disable=SC2034  # read by install/bin/im-rebuild and install/rebuild.sh, which source this
-    REBUILD_RUN=(-e IM_DATABASE_URL -e IM_CONFIG=/config/rebuild.toml)
 }

@@ -42,8 +42,8 @@ def _captures(conn) -> list[dict]:
                ORDER BY t.model, t.episode_id""", (egress.POLICY_VERSION,)):
         for n, it in enumerate(items):
             if (it.get("gist") or "").strip() and it.get("source_segment_ids"):
-                out.append({"model": model, "episode": eid, "item": n, "kind": it["kind"], "quote": it["quote"],
-                            "gist": it["gist"], "segments": it["source_segment_ids"]})
+                out.append({"model": model, "episode": eid, "item": n, "quote": it["quote"], "gist": it["gist"],
+                            "segments": it["source_segment_ids"]})
     return out
 
 

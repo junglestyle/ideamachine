@@ -134,13 +134,11 @@ def _extract(conn, cfg) -> dict:
 
     x = cfg.extract
     if x.prompt not in extract.LIVE:
-        return {"stopped": f"extract.prompt {x.prompt} is for `im trial` only; `im run` reads with "
-                           f"{', '.join(extract.LIVE)}"}
+        return {"stopped": f"extract.prompt {x.prompt} isn't live; `im run` reads with {', '.join(extract.LIVE)}"}
     try:
         client = llm.client_for(x.model, cfg.egress.zdr)
         return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
-                                 extract.system_prompt(x.prompt, x.interests), x.max_tokens,
-                                 extract.schema_for(x.prompt), only_mine=x.prompt in extract.ONLY_MINE)
+                                 extract.PROMPTS[x.prompt], x.max_tokens)
     except (anthropic.AnthropicError, SystemExit) as e:  # e.g. no credentials configured at all
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -244,9 +242,8 @@ def cmd_pending(args) -> None:
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
         prompt = args.prompt or cfg.extract.prompt
-        pv = extract.prompt_version(cfg.extract.model, cfg.extract.effort,
-                                    extract.system_prompt(prompt, cfg.extract.interests), extract.schema_for(prompt))
-        todo = extract._pending(conn, cfg.extract.model, pv, prompt in extract.ONLY_MINE)
+        pv = extract.prompt_version(cfg.extract.model, cfg.extract.effort, extract.PROMPTS[prompt])
+        todo = extract._pending(conn, cfg.extract.model, pv)
         done = {r[0] for r in conn.execute(
             """SELECT episode_id FROM im.extractions
                WHERE model = %s AND prompt_version = %s AND privacy_policy_version = %s""",
@@ -274,7 +271,7 @@ def cmd_trial(args) -> None:
 
     cfg = config.load()
     x = cfg.extract
-    system, schema = extract.system_prompt(args.prompt, x.interests), extract.schema_for(args.prompt)
+    system, schema = extract.PROMPTS[args.prompt], extract.SCHEMA_V5
     model, effort = args.model or x.model, args.effort or x.effort
     ref_model, _, ref_effort = (args.against or f"{x.model}:{x.effort}").partition(":")
     ref_effort = ref_effort or x.effort
@@ -302,7 +299,7 @@ def cmd_gate(args) -> None:
 
     cfg = config.load()
     x = cfg.extract
-    system, schema = extract.system_prompt(args.prompt, x.interests), extract.schema_for(args.prompt)
+    system, schema = extract.PROMPTS[args.prompt], extract.SCHEMA_V5
     model, effort = args.model or x.model, args.effort or x.effort
     cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
     with db.connect(db.pipeline_dsn()) as conn:
@@ -340,7 +337,7 @@ def cmd_audit_gate(args) -> None:
             return
         if not args.prompt:
             raise SystemExit("sheet needs the trial's prompt, e.g. v5 --model openai/gpt-6.1-sol")
-        system, schema = extract.system_prompt(args.prompt, x.interests), extract.schema_for(args.prompt)
+        system, schema = extract.PROMPTS[args.prompt], extract.SCHEMA_V5
         model, effort = args.model or x.model, args.effort or x.effort
         read = (trial.version(model, effort, system, args.replicate, schema), model)
         _print(gate_audit.write(conn, folder, jev.Jev(), read, args.seed, args.size))
@@ -465,10 +462,10 @@ def cmd_audit_misses(args) -> None:
         _print(probe_audit.score(folder))
         return
     if not args.prompt or not args.model:
-        raise SystemExit("sheet needs the trial's prompt and candidate, e.g. v3 --model openai/gpt-6.1-terra")
+        raise SystemExit("sheet needs the trial's prompt and candidate, e.g. v5.3 --model openai/gpt-6.1-terra")
     cfg = config.load()
     x = cfg.extract
-    system, schema = extract.system_prompt(args.prompt, x.interests), extract.schema_for(args.prompt)
+    system, schema = extract.PROMPTS[args.prompt], extract.SCHEMA_V5
     effort = args.effort or x.effort
     ref_model, _, ref_effort = (args.against or f"{x.model}:{x.effort}").partition(":")
     ref_effort = ref_effort or x.effort
@@ -576,48 +573,40 @@ def cmd_ideas(args) -> None:
             return
         if args.discards:
             rows = extract.discards(conn)
-            for kind, who, quote, gist, conf, at, note, model, pv in rows:
-                print(f"{at.astimezone():%Y-%m-%d %H:%M}  {_said(kind, who, conf)}  {model} prompt {pv}")
+            for who, quote, gist, at, note, model, pv in rows:
+                print(f"{at.astimezone():%Y-%m-%d %H:%M}  {who:<16}  {model} prompt {pv}")
                 print(f"    \u201c{quote}\u201d")
                 print(f"    {gist}")
                 print(f"    why discarded: {note or '(no note)'}\n")
             print(f"{len(rows)} discarded")
             return
         rows = conn.execute(
-            """SELECT i.kind, w.said_by, i.quote, i.gist, i.confidence, e.started_at,
+            """SELECT w.said_by, i.quote, i.gist, e.started_at,
                       (SELECT v.verdict FROM im.item_verdicts v WHERE v.item_id = i.item_id
                        ORDER BY v.decided_at DESC LIMIT 1)
                FROM im.items i JOIN im.item_said_by w USING (item_id) JOIN im.episodes e USING (episode_id)
-               WHERE e.current ORDER BY e.started_at DESC, i.confidence DESC NULLS LAST""").fetchall()
+               WHERE e.current ORDER BY e.started_at DESC, i.item_id""").fetchall()
         shown = 0
-        for kind, who, quote, gist, conf, at, verdict in rows:
+        for who, quote, gist, at, verdict in rows:
             if verdict == "discard" and not args.all:
                 continue
             mark = {"keep": "kept", "star": "\u2605", "discard": "discarded", None: "new"}[verdict]
-            print(f"{at.astimezone():%Y-%m-%d %H:%M}  {_said(kind, who, conf)}  [{mark}]")
+            print(f"{at.astimezone():%Y-%m-%d %H:%M}  {who:<16}  [{mark}]")
             print(f"    \u201c{quote}\u201d")
             print(f"    {gist}\n")
             shown += 1
         print(f"{shown} shown ({len(rows)} captured on current episodes)")
 
 
-def _said(kind: str | None, who: str, conf: float | None) -> str:
-    """A capture's kind, speaker and confidence as columns. v5 captures have neither kind nor confidence."""
-    return f"{kind or '':<11} {who:<16} {'' if conf is None else f'{conf:.2f}':>4}"
-
-
 def _review_items(conn, extract, read=input, write=print) -> int:
     from im.label import _choose
 
     n = 0
-    for item_id, kind, who, quote, gist, themes, conf, _, at, _ in extract.review_items(conn):
+    for item_id, who, quote, gist, _, at, _ in extract.review_items(conn):
         write("\n" + "─" * 72)
-        said = f"{kind} said by {who}" if kind else f"said by {who}"
-        write(f"{at.astimezone():%A %Y-%m-%d %H:%M}  {said}" + ("" if conf is None else f"  (confidence {conf:.2f})"))
+        write(f"{at.astimezone():%A %Y-%m-%d %H:%M}  said by {who}")
         write(f"  \u201c{quote}\u201d")
         write(f"  {gist}")
-        if themes:
-            write(f"  themes: {', '.join(themes)}")
         got = _choose(read, write, "[k]eep · [*] star · [d]iscard · [s]kip · [q]uit > ",
                       {"k": "keep", "*": "star", "d": "discard", "s": "skip", "q": "quit"})
         if got == "quit":
@@ -764,7 +753,7 @@ def main(argv=None) -> None:
     pe = sub.add_parser("pending", help="what the next run would send to Claude, without sending anything")
     pe.add_argument("--expect-none-resent", action="store_true",
                     help="exit 1 if any already-extracted episode would be sent again (use after a move)")
-    pe.add_argument("--prompt", help="as if extract.prompt were this one (e.g. v3): what switching would re-read")
+    pe.add_argument("--prompt", help="as if extract.prompt were this one (e.g. v5.2): what it would read")
     pe.set_defaults(func=cmd_pending)
     dg = sub.add_parser("digest", help="the weekly digest: what the lattice gained, synthesized by Claude")
     dg.add_argument("--week", help="any date in the week (default: the latest digest, or last week with --write)")
@@ -773,7 +762,7 @@ def main(argv=None) -> None:
     dg.set_defaults(func=cmd_digest)
     tr = sub.add_parser("trial", help="try an extraction model or prompt on a sample of episodes, against a reference "
                         "(sends the episodes to the models)")
-    tr.add_argument("prompt", help="a name in extract.PROMPTS, e.g. v3")
+    tr.add_argument("prompt", help="a name in extract.PROMPTS, e.g. v5.3")
     tr.add_argument("--limit", type=int, help="read at most this many episodes this time")
     tr.add_argument("--report", action="store_true", help="only report on what's been read; send nothing")
     tr.add_argument("--model", help="the candidate model: claude-sonnet-5-5, or through OpenRouter, e.g. "
@@ -882,7 +871,7 @@ def main(argv=None) -> None:
                         "(sends nothing); score my marks")
     am.add_argument("action", choices=["sheet", "score"])
     am.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
-    am.add_argument("prompt", nargs="?", help="sheet: the trial's prompt, a name in extract.PROMPTS, e.g. v3")
+    am.add_argument("prompt", nargs="?", help="sheet: the trial's prompt, a name in extract.PROMPTS, e.g. v5.3")
     am.add_argument("--model", help="sheet: the candidate, as its trial named it, e.g. openai/gpt-6.1-terra")
     am.add_argument("--effort", help="sheet: the candidate's effort in its trial (default: the configured one)")
     am.add_argument("--against", help="sheet: the reference, model[:effort], read twice (--replicate 2) unless "

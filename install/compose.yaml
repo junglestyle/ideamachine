@@ -42,7 +42,7 @@ services:
     env_file: /mnt/fast/ideamachine/config/pipeline.env
     environment:
       IM_STREAM_DIR: /data/stream
-      IM_CONFIG: /config/im.toml   # e.g. extract.prompt and extract.interests; made by install/nas.sh
+      IM_CONFIG: /config/im.toml   # e.g. extract.prompt and the stages' models; made by install/nas.sh
       TZ: America/New_York   # payloads carry local times: keep them as they were on eeyore (im pending)
     volumes:
       - ${HEARSAY_STREAM:?no install/.env; run install/nas.sh}:/data/stream:ro

@@ -16,13 +16,13 @@ uv run im load-fixtures           # a synthetic Hearsay stream in $IM_STREAM_DIR
 uv run im run                     # import + segment + extract ideas with Claude + route; idempotent
 uv run im ideas                   # what Claude captured; --review to keep or discard each item
 uv run im ideas --discards        # what I discarded and why: material for revising the extraction prompt
-uv run im trial v3 --model openai/gpt-6.1-sol   # B3: a model on the trial sample, vs Opus
-uv run im trial v3 --model claude-opus-5-5 --replicate 2   # Opus against itself: the ceiling for recall
+uv run im trial v5.3 --model openai/gpt-6.1-sol   # B3: a model on the trial sample, vs Opus
+uv run im trial v5.3 --model claude-opus-5-5 --replicate 2   # Opus against itself: the ceiling for recall
 uv run im trial v5 --replicate 2   # extraction v5 (decision 0012) on the trial sample, read twice; the report counts the capture checks each read fails
 uv run im trial v5 --model openai/gpt-6.1-sol --report --same-point   # also count a thought the two quoted from different lines, where Jev says they make the same point (sends only those pairs, to Jev; kept)
 uv run im gate v5 --model openai/gpt-6.1-sol   # the capture gate on a trial read: Jev asks of each capture whether its gist goes past its lines (repair) and whether the point is mine and meant (drop); answers kept, then a summary
 uv run im audit-gate sheet saved/gate-1 v5 --model openai/gpt-6.1-sol   # 80 captures Jev answered about, half it flags; then `draft saved/gate-1 --model openai/gpt-6.1-terra` and `--model claude-opus-5-5`, `review saved/gate-1` (only their disagreements, on review.md), `score saved/gate-1` (each check's AUC and suggested cut)
-uv run im audit-misses sheet saved/misses-terra v3 --model openai/gpt-6.1-terra   # its misses among Opus's solid captures, blind beside ones it found; score my marks
+uv run im audit-misses sheet saved/misses-terra v5.3 --model openai/gpt-6.1-terra   # its misses among Opus's solid captures, blind beside ones it found; score my marks
 uv run im audit-misses sheet saved/bar-sol v5 --model openai/gpt-6.1-sol --both-ways   # 20 captures only Sol made, 20 only Opus made, 20 both made, blind: whose bar is right?
 uv run im hard-set saved/hard-1 --per-case 6 --controls 20   # a deliberate hard set of episodes (irony, fragments, relayed thoughts, short thoughts, ones I only acknowledge, ones answering someone), plus controls from the trials' random sample, each as extraction would send it; sends nothing
 uv run im mishearings list   # the transcription's mishearings, proposed by v5 captures or added by me; then `confirm HEARD MEANT` (also adds one) or `reject HEARD MEANT`
@@ -67,7 +67,9 @@ Settings are env vars:
   fresh `im_test` database and stream directory, and none of the other settings here.
 
 `IM_CONFIG` can name a TOML file that overrides the defaults in `src/im/config.py`. An unknown key in a section
-stops the run. Every segmentation value goes into the episodes' `stage_version`, so changing one re-derives episodes
+stops the run, except a retired one, which is ignored with a warning until it's deleted: `[extract] interests` (with
+prompts `v1` to `v4`, decision 0012) and `[egress] names`, `public_names` and `my_names` (with policy C, decision
+0008). Every segmentation value goes into the episodes' `stage_version`, so changing one re-derives episodes
 on the next run. Triage rows record the model, its weights revision and a hash of the questions, so a model or
 question change re-triages.
 
@@ -75,7 +77,7 @@ Every stage that asks Claude takes its model and effort from the file:
 
 | Section | Stage | `model` | `effort` |
 |---|---|---|---|
-| `[extract]` | extraction (also `prompt`, `interests`, `monthly_cap_usd`, `max_episodes_per_run`) | `claude-opus-5-5` | `medium` |
+| `[extract]` | extraction (also `prompt`, default and only live one `v5.3`; `monthly_cap_usd`, `max_episodes_per_run`) | `claude-opus-5-5` | `medium` |
 | `[match]` | the lattice's matcher | `claude-opus-5-5` | `low` |
 | `[themes]` | describing, filing and proposing themes | `claude-opus-5-5` | `low` |
 | `[digest]` | the weekly digest | `claude-opus-5-5` | `low` |
@@ -158,7 +160,7 @@ Then, outside that transaction:
   candidates a week, the most recently said first, are proposed to me to keep as canonical or pinned. `im tune knob=value ...` previews a change to
   those settings, writing nothing, and prints the `[weight]` block to paste.
 - **Route.** The router sends to review whatever I tapped or called a note to self, and any episode where Claude
-  captured an item above the confidence bar; the rest is auto-filed (`src/im/router.py`; v1 used the local LLM's flags instead, see
+  captured something I haven't discarded; the rest is auto-filed (`src/im/router.py`; v1 used the local LLM's flags instead, see
   [decisions/0003-router-v1.md](decisions/0003-router-v1.md)).
 
 Every stage that asks a model (extraction, matching, themes, sensitivity, the digest) stops, saying

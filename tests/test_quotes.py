@@ -34,8 +34,9 @@ def test_forgetting_a_line_a_capture_quoted_without_citing_reaches_it_and_what_w
                                                                                                     stream):
     def respond(text):   # the LoRa line and the start of the next one, citing only the LoRa line
         (n,) = [int(line[1:].split("]")[0]) for line in text.splitlines() if "LoRa" in line]
-        return [{"kind": "idea", "said_by": "me", "quote": "over LoRa. Battery life is the hard part", "lines": [n],
-                 "gist": "Garden sensors over LoRa; battery is hard", "themes": [], "confidence": 0.9}]
+        return [{"quote": "over LoRa. Battery life is the hard part", "lines": [n], "attributed_to": "",
+                 "reading": "Garden sensors over LoRa; battery life is the hard part", "mishearings": [],
+                 "gist": "Garden sensors over LoRa; battery is hard"}]
 
     run(seeded, cfg, stream)
     extract.run_stage(seeded, FakeClaude(respond))
