@@ -89,7 +89,8 @@ Hearsay mounts `/mnt/fast/ideamachine/vocab` read-only for my vocabulary (Hearsa
 
 As admin, `git pull` in both clones, then `sudo /mnt/fast/repos/ideamachine/install/nas.sh`. It's idempotent:
 existing secrets are kept, images are rebuilt, migrations applied, the worker's kind and the backup cron job
-rewritten.
+rewritten. While there's a rebuild database (below), it then re-runs `install/rebuild.sh`, so that one gets the same
+migrations.
 
 Every time, it ends by checking that it all works: Postgres is up; one run finishes; one backup, the same way, writes a readable dump to `backups/`; Lattice answers on 127.0.0.1:8790 and,
 through `tailscale serve`, at the tailnet address on 8444. So each re-run also does a run and a backup.
@@ -119,12 +120,61 @@ corral job:
 - Start a backlog: `corral enqueue ideamachine.names --needs gpu --key ideamachine.names`. `corral pause` holds it
   between chunks; the NAS never waits for it.
 
+## The rebuild database
+
+Decision 0012 rebuilds the archive from Hearsay's stream, with extraction v5, into a second database, `im_rebuild`,
+in the same Postgres as `im`, and switches to it once its checks pass. Both use the same image: only the connection
+(`IM_DATABASE_URL`) and the config (`IM_CONFIG`) differ. Lattice and the neutral view read `im` until the cutover.
+
+Create it on the NAS, after `install/nas.sh`:
+
+```sh
+sudo /mnt/fast/repos/ideamachine/install/rebuild.sh
+```
+
+It creates `im_rebuild` if it's missing and gives it `im`'s per-database setup (`dev/init/bootstrap-db.sql.in`) and
+the names role's grants. It writes the rebuild's connections, `config/rebuild.env` and `gpu/names-rebuild.env`,
+from the live ones with the database name swapped, so no secret is entered twice. It writes `config/im/rebuild.toml`
+if it's missing, then migrates `im_rebuild`. It never touches `im`, and it's safe to re-run.
+
+Run it as root with `im-rebuild` (`install/bin/im-rebuild`, on root's PATH next to `im`). It takes the same
+arguments as `im`:
+
+```sh
+im-rebuild pending   # what the next run would send to Claude, sending nothing
+im-rebuild run       # one pipeline run against im_rebuild (no arguments does the same)
+```
+
+It's `im`'s `run` service with `IM_DATABASE_URL` from `rebuild.env`, `IM_CONFIG=/config/rebuild.toml`, and
+`IM_VOCAB_PATH` empty, so the rebuild never writes Hearsay's `vocab.json`. Corral doesn't schedule it: every run is
+started by hand.
+
+- **Its own spending cap.** `extract.monthly_cap_usd` is checked against `egress.spent_this_month`, the month's sum
+  of `im.egress_log` in the database the run is connected to. So `im_rebuild` has its own cap, $100 in
+  `rebuild.toml`, apart from `im`'s. Both bill the same Anthropic key: in a month both run, the account can be
+  charged up to the two caps together.
+- **Matching is off** (`[lattice] enabled = false` in `rebuild.toml`), so the bulk extraction goes first. Set it to
+  `true` there to switch matching on; each run reads the file, so nothing needs reinstalling.
+- **Names said** (policy C) are kept per database, and `im_rebuild` starts with none: the NAS's CPU finds them as
+  payloads need them. For the backlog, re-run `install/gpu.sh` on the dev box after `install/rebuild.sh` (it adds
+  the kind `ideamachine.names-rebuild`), then, once the first `im-rebuild run` has imported the stream:
+  `corral enqueue ideamachine.names-rebuild --needs gpu --key ideamachine.names-rebuild`.
+- **Backups.** The nightly backup also dumps `im_rebuild` while it's there, to `backups/im_rebuild-<date>.dump`,
+  kept 14 days like `im`'s.
+
+**Cutover** renames the databases; it isn't scripted. With nothing connected to either (corral's run kind paused,
+Lattice, the neutral view and any `im-rebuild` stopped), as `postgres` in the `postgres` database: rename `im` to an
+archive name (for example `ALTER DATABASE im RENAME TO im_v1`), then `ALTER DATABASE im_rebuild RENAME TO im`. The
+old database is archived, not deleted; dump it once, since the nightly backup covers only `im` and `im_rebuild`.
+Then carry `rebuild.toml`'s settings into `im.toml`, delete `config/rebuild.env` and `gpu/names-rebuild.env`, and
+re-run `install/nas.sh`, and `install/gpu.sh` on the dev box.
+
 ## Where things are
 
 | What | Where |
 |---|---|
-| Secrets | `/mnt/fast/ideamachine/config/` (`db.env`, `pipeline.env`, `lattice.env`, `cloudflared.env`; root only) |
-| Config | `/mnt/fast/ideamachine/config/im/im.toml` (e.g. `extract.interests`; read by the run container) |
+| Secrets | `/mnt/fast/ideamachine/config/` (`db.env`, `pipeline.env`, `lattice.env`, `cloudflared.env`, and `rebuild.env` while there's a rebuild; root only) |
+| Config | `/mnt/fast/ideamachine/config/im/im.toml` (e.g. `extract.interests`; read by the run container), and `rebuild.toml` for `im-rebuild` |
 | Database | `/mnt/fast/ideamachine/pg` |
 | Nightly dumps (14 days) | `/mnt/fast/ideamachine/backups/` |
 | My vocabulary (for Hearsay) | `/mnt/fast/ideamachine/vocab/vocab.json` |
@@ -133,4 +183,5 @@ corral job:
 | Logs | `journalctl -t ideamachine-run` (and `-t ideamachine-backup`, `-t ideamachine-db`, `-t lattice`, `-t lattice-tunnel`) |
 | Run now | `im` as root (`install/bin/im`; `install/nas.sh` puts it on root's PATH), or `docker compose -f /mnt/fast/repos/ideamachine/install/compose.yaml run --rm run` |
 | Any im command | `im check`, `im lattice`, ...: the command runs in the pipeline image, with `saved/` at `/saved` |
+| The rebuild database | `im-rebuild` as root, with `im`'s arguments (`install/bin/im-rebuild`); psql: `... exec db psql -U postgres -d im_rebuild` |
 | psql | `docker compose -f /mnt/fast/repos/ideamachine/install/compose.yaml exec db psql -U postgres -d im` |

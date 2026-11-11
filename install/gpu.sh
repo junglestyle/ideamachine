@@ -2,13 +2,15 @@
 # Dev box GPU worker: finding names said (policy C, decision 0008) as a kind on the dev box's corral worker. Each
 # job takes one chunk of the segments not yet looked at, runs GLiNER on the GPU, keeps what it finds in the NAS's
 # database (im.segment_names), and requeues itself until the backlog is done. The NAS never waits for it: anything
-# not looked at yet is read on the NAS's CPU when a payload needs it. Run as your normal user on the dev box, after
+# not looked at yet is read on the NAS's CPU when a payload needs it. While the NAS has a rebuild database
+# (install/rebuild.sh), a second kind does the same for it. Run as your normal user on the dev box, after
 # install/nas.sh. Safe to re-run; also how updates are deployed.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
 GPU_VENV="$HOME/.local/share/ideamachine/gpu-venv"
 GPU_ENV="$HOME/.config/ideamachine/gpu.env"
+GPU_REBUILD_ENV="$HOME/.config/ideamachine/gpu-rebuild.env"   # the same, for the rebuild database (decision 0012)
 CORRAL_CONFIG="$HOME/.config/corral"
 
 [ "$(id -u)" -ne 0 ] || die "run as your normal user, not root: the corral worker and its config are per user"
@@ -33,6 +35,16 @@ Port Forwarding, save, then re-run."
 fi
 mkdir -p "$(dirname "$GPU_ENV")"
 (umask 077; printf 'IM_DATABASE_URL=%s\nIM_SSH_TUNNEL=nas\n' "$url" > "$GPU_ENV")
+# While there's a rebuild database (install/rebuild.sh writes its connection), a second kind finds names for it.
+rebuild_names="$NAS_ROOT/gpu/names-rebuild.env"
+rebuild_url="$(ssh -o BatchMode=yes nas "[ ! -f '$rebuild_names' ] || cat '$rebuild_names'" \
+    | sed -n 's/^IM_DATABASE_URL=//p')"
+if [ -n "$rebuild_url" ]; then
+    (umask 077; printf 'IM_DATABASE_URL=%s\nIM_SSH_TUNNEL=nas\n' "$rebuild_url" > "$GPU_REBUILD_ENV")
+    echo "and the rebuild database's"
+else
+    rm -f "$GPU_REBUILD_ENV"
+fi
 
 say "Python 3.13 environment in $GPU_VENV"
 command -v uv >/dev/null || die "install uv first: https://docs.astral.sh/uv/getting-started/installation/"
@@ -55,13 +67,22 @@ grep -q '"gpu"' "$CORRAL_CONFIG/worker.toml" \
     || die "the corral worker in $CORRAL_CONFIG/worker.toml doesn't offer \"gpu\"; add it to offers, then re-run"
 mkdir -p "$CORRAL_CONFIG/kinds.d"
 # A shell only to load the connection; exec, so the worker's kill reaches Python (which closes its ssh tunnel).
-if write_if_changed "$CORRAL_CONFIG/kinds.d/ideamachine.toml" <<EOF
+if {
+    cat <<EOF
 # Written by ideamachine's install/gpu.sh on every run.
 # Enqueue with: corral enqueue ideamachine.names --needs gpu --key ideamachine.names
 [kinds."ideamachine.names"]
 argv = ["/bin/sh", "-c", "set -a; . $GPU_ENV; exec $GPU_VENV/bin/im names job"]
 timeout = "30m"
 EOF
+    [ -z "$rebuild_url" ] || cat <<EOF
+
+# The rebuild database's: corral enqueue ideamachine.names-rebuild --needs gpu --key ideamachine.names-rebuild
+[kinds."ideamachine.names-rebuild"]
+argv = ["/bin/sh", "-c", "set -a; . $GPU_REBUILD_ENV; exec $GPU_VENV/bin/im names job"]
+timeout = "30m"
+EOF
+} | write_if_changed "$CORRAL_CONFIG/kinds.d/ideamachine.toml"
 then
     systemctl --user restart corral-worker
     echo "kinds updated, worker restarted"
@@ -73,3 +94,5 @@ say "First chunk (here, not through corral, to see it work)"
 
 say "Done. For the backlog: corral enqueue ideamachine.names --needs gpu --key ideamachine.names (it requeues
 itself until it's done)."
+[ -z "$rebuild_url" ] || echo "For the rebuild database's: corral enqueue ideamachine.names-rebuild --needs gpu \
+--key ideamachine.names-rebuild"
