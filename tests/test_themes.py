@@ -10,7 +10,7 @@ from im import extract, lattice, themes
 
 from helpers import run, table
 from test_extract import FakeClaude
-from test_lattice import ARCHIVE, FakeMatcher, items_for
+from test_lattice import FakeMatcher, items_for, seed
 from test_triage import HashEmbedder
 
 
@@ -41,9 +41,8 @@ class FakeThemer:
 
 
 @pytest.fixture
-def lat(pipe, cfg, stream, tmp_path):
-    (tmp_path / "a.md").write_text(ARCHIVE)
-    lattice.seed_archive(pipe, tmp_path / "a.md")
+def lat(pipe, cfg, stream):
+    seed(pipe)
     run(pipe, cfg, stream)
     extract.run_stage(pipe, FakeClaude(items_for))
     lattice.match_stage(pipe, FakeMatcher(), HashEmbedder())

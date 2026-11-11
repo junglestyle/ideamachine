@@ -34,7 +34,6 @@ uv run im names warm               # policy C: find names in the trial sample on
 uv run im audit-tension draft saved/tension-2 --model jev-1.14.0   # Jev drafts a probe sheet (via OpenRouter); --probes asks more
                                   # (OpenRouter models need OPENROUTER_API_KEY; policy C needs IM_NAME_KEY)
 uv run im import-chatgpt saved/chatgpt-idea-machine.md saved/chatgpt-curate-sheet.md   # what the ChatGPT Idea Machine's kept messages would send, a session at a time; --write reads them with extraction v5.3 (policy C) into archive captures, once
-uv run im seed ~/.local/share/ideamachine/seeds/chatgpt-archive.md   # seed the idea lattice (once)
 uv run im lattice                 # lattice counts: ideas, evidence, connections
 uv run im themes                  # themes; im themes pin|unpin|reject <name>, im themes rename <name> <new name>
 uv run im load-fixtures --scenario edited   # the same stream after every kind of correction and a forget
