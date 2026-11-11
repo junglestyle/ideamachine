@@ -1,7 +1,8 @@
 # 0008: Other providers' models, and names said pseudonymized
 
-_2026-11-04. Status: accepted for trials; the live switch waits on the checklist below. Amends
-[0004](0004-claude-extraction.md)'s privacy policy and B3's method in [ROADMAP-v2.md](../ROADMAP-v2.md); my decision._
+_2026-11-04. Status: accepted for trials; the live switch waits on the checklist below; amended 2026-11-11 (public
+figures, words that aren't names). Amends [0004](0004-claude-extraction.md)'s privacy policy and B3's method in
+[ROADMAP-v2.md](../ROADMAP-v2.md); my decision._
 
 ## Context
 
@@ -73,3 +74,18 @@ these is done. A switch re-reads every episode once, so it goes out together wit
 - Pseudonyms are linkable across requests by design. A provider could learn that `P-K3M7Q` comes up often, never
   who that is.
 - The pipeline image now bakes GLiNER in next to the embedding model, so runs stay offline.
+
+## Amendment (2026-11-11): public figures and words that aren't names
+
+_My decision._
+
+**Public figures' names go out as said, from a list I keep** (`[egress] public_names`). Pseudonymizing them hid
+who a reference is to ("per Yohami", "Sowell's vision of the anointed") without protecting anyone: they're public.
+The list works word by word, like the rest of policy C, so it should hold what only they are called; a word of
+someone Hearsay or `[egress] names` knows stays pseudonymized even if a public figure shares it.
+
+**Words that look like names but aren't stay as said** (`names.NOT_NAMES`): pronouns, "mom", "dad", "god", and
+"Hashem", how Jews refer to God.
+
+Neither changes the policy version, as `[egress] names` doesn't: the version names the method, and the egress log
+keeps every payload as sent. A payload that changes because of either is read again.
