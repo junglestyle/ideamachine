@@ -6,13 +6,12 @@ import uuid
 import psycopg
 import pytest
 
-from im import digest, lattice, scores
+from im import digest, lattice
 
 from helpers import table
 from test_digest import WEEK, FakeDigester
 from test_lattice import FakeMatcher, HashEmbedder
 from test_review import as_lattice
-from test_scores import FakeScorer
 
 ADD = "INSERT INTO pub.feedback_events (at, kind, idea_id, payload, source) VALUES (%s, 'idea_add', %s, %s, %s)"
 AT = "2026-09-02T12:00:00Z"   # in the fixture week
@@ -57,7 +56,7 @@ def test_bad_adds_are_refused(seeded_lattice, admin):
         as_lattice(admin, "INSERT INTO im.ideas (title, statement, origin) VALUES ('t', 's', 'mine')")
 
 
-def test_the_run_embeds_places_ranks_and_digests_it(seeded_lattice, admin):
+def test_the_run_embeds_places_and_digests_it(seeded_lattice, admin):
     pipe = seeded_lattice
     idea = uuid.uuid4()
     add(admin, idea, {"title": "Coffee runs the meeting", "statement": "The coffee order is the real meeting."})
@@ -65,11 +64,6 @@ def test_the_run_embeds_places_ranks_and_digests_it(seeded_lattice, admin):
     assert stats["pending"] == 0 and stats["positions"] > 0
     assert table(pipe, "SELECT count(*) FROM pub.idea_positions WHERE idea_id = %s", idea) == [(1,)]
     assert table(pipe, "SELECT count(*) FROM pub.connections WHERE kind = 'related' AND %s IN (a, b)", idea) == [(1,)]
-
-    scores.score_stage(pipe, FakeScorer())
-    (score, rubric, developed), = table(pipe, "SELECT score::float, rubric::float, developed "
-                                              "FROM pub.idea_scores WHERE idea_id = %s", idea)
-    assert developed and score == pytest.approx(0.65 * rubric + 0.25)   # an idea I added counts as developed
 
     claude = FakeDigester()
     digest.digest_stage(pipe, claude, week=WEEK)

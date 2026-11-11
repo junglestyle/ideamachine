@@ -307,8 +307,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   (020). Verdicts carry to recaptures (014, `feedback.carry_verdicts`). Nothing orders or gates by them ([0007]),
   but `pub.ideas` hides a cluster whose every capture I discarded (043:27-28).
 - **Comparison, rubric, score (legacy).** V1's ranking: `idea_compare` events (018), and a rubric of generality,
-  novelty, compression and outside value, combined into `pub.idea_scores.score` (017, 025). [0007] threw them out as
-  labels.
+  novelty, compression and outside value, combined into a score (017, 025). [0007] threw them out as labels, and
+  [0012] retired the scoring stage and dropped its table and views (053). Past `idea_compare` events stay in the
+  ledger.
 - **Merging and rejecting clusters.** **Not yet specified.** SPEC.md:98 and the [M2 design]:138 say merge and reject
   "stay", but no state, column or event exists for either on a cluster, and ROADMAP-v2.md:18 says ideas can't be
   merged yet. Themes can be merged and rejected (024).
@@ -498,7 +499,7 @@ Each role decides one thing. The model behind it can change, so models are liste
 | Name finder | name mentions, for policy C | GLiNER (`urchade/gliner_medium-v2.1`) |
 | Embedder | embeddings for neighbors, positions, lens search | `BAAI/bge-small-en-v1.5`, local |
 | Sensitivity tagger | the eight sensitivity tags on each idea and theme | Jev, at `sensitivity.CUT` per tag, policy C |
-| Theme filer, scorer, vocabulary checker, digest writer | as named | `[themes]`, `[scores]`, `[vocab]`, `[digest]`; default Opus (`config.ModelConfig`) |
+| Theme filer, vocabulary checker, digest writer | as named | `[themes]`, `[vocab]`, `[digest]`; default Opus (`config.ModelConfig`) |
 
 - **Opus, Sonnet, Haiku.** Anthropic's `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5` (`llm.PRICES`). A
   refusal falls back to `claude-opus-4-8` ([0004]).
@@ -930,6 +931,7 @@ These terms are in use, but no doc or file defines them:
 [0008]: decisions/0008-other-providers-and-names.md
 [0009]: decisions/0009-edges-connection-graded-kind-suggested.md
 [0010]: decisions/0010-connections-kinds-lenses.md
+[0012]: decisions/0012-rebuild-with-v5.md
 [0013]: decisions/0013-lenses-and-boards.md
 [M1 design]: design/m1-segment-identity.md
 [M2 design]: design/m2-observations-candidates-ideas.md
