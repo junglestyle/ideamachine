@@ -81,8 +81,8 @@ _My decision._
 
 **Public figures' names go out as said, from a list I keep** (`[egress] public_names`). Pseudonymizing them hid
 who a reference is to ("per Yohami", "Sowell's vision of the anointed") without protecting anyone: they're public.
-The list works word by word, like the rest of policy C, so it should hold what only they are called; a word of
-someone Hearsay or `[egress] names` knows stays pseudonymized even if a public figure shares it.
+Each entry is left as said where it's said in full, so `"Thomas Sowell"` keeps that name while any other Thomas is
+still pseudonymized; a name I also use alone ("Sowell") is listed alone too.
 
 **Words that look like names but aren't stay as said** (`names.NOT_NAMES`): pronouns, "mom", "dad", "god", and
 "Hashem", how Jews refer to God.

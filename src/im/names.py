@@ -67,12 +67,14 @@ def words(name: str) -> list[str]:
 class Scrubber:
     def __init__(self, key: bytes, known=(), mine=(), finder=None, policy: str | None = None, public=()):
         self.key, self.finder = key, finder
+        self.known = {w for n in known for w in words(n)}
         self.mine = [w for n in mine for w in words(n)]
-        private = {w for n in known for w in words(n)} | set(self.mine)
-        # Word by word, as everywhere here: a word of someone Hearsay or config names stays pseudonymized even if a
-        # public figure shares it.
-        self.public = {w.casefold() for n in public for w in words(n)} - {w.casefold() for w in private}
-        self.known = {w for w in private if w.casefold() not in self.public}
+        self.known |= set(self.mine)
+        # Public figures' names, each left as said where it's said in full as listed, in any case: "Thomas Sowell"
+        # stays, while "Thomas" alone is pseudonymized like anyone's (decision 0008, amended).
+        listed = sorted({" ".join(n.split()) for n in public if n.strip()}, key=len, reverse=True)
+        self.public = re.compile("|".join(rf"(?<![\w'’-]){r'\s+'.join(map(re.escape, n.split()))}(?![\w-])"
+                                          for n in listed), re.IGNORECASE) if listed else None
         self.policy = policy or policy_c(bool(finder))
 
     def find(self, conn, segments: list[tuple]) -> set[str]:
@@ -88,7 +90,7 @@ class Scrubber:
         `found` is what the finder saw in them already (`find`); otherwise the finder reads them now."""
         if found is None:
             found = set(self.finder(texts)) if self.finder else set()
-        found = set(self.known) | {w for n in found for w in words(n) if w.casefold() not in self.public}
+        found = set(self.known) | {w for n in found for w in words(n)}
         if not found:
             return texts, {}, []
         alternation = "|".join(re.escape(w) for w in sorted(found, key=len, reverse=True))
@@ -104,7 +106,15 @@ class Scrubber:
             back.setdefault(t, word)
             return t
 
-        out = [pattern.sub(swap, t) for t in texts]
+        held: list[str] = []   # the public names in the texts, set aside while the rest is scrubbed
+
+        def hold(m: re.Match) -> str:
+            held.append(m.group(0))
+            return f"\ue000{len(held) - 1}\ue001"
+
+        out = [pattern.sub(swap, self.public.sub(hold, t) if self.public else t) for t in texts]
+        if held:
+            out = [re.sub("\ue000(\\d+)\ue001", lambda m: held[int(m.group(1))], t) for t in out]
         mine = [t for t in dict.fromkeys(token(w, self.key) for w in self.mine) if t in back]
         return out, back, mine
 

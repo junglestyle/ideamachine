@@ -31,11 +31,12 @@ def test_nothing_known_or_found_leaves_the_text_alone():
 
 
 def test_a_public_figures_name_goes_out_as_said():
-    s = names.Scrubber(KEY, known=["Julie Chen", "Thomas"], finder=lambda texts: {"Yohami", "Raj"},
-                       public=["Yohami", "Thomas Sowell"])
-    out, back, _ = s.scrub(["Per Yohami and Sowell, Julie, Thomas and Raj come at things from below."])
-    julie, thomas, raj = (names.token(w, KEY) for w in ("Julie", "Thomas", "Raj"))
-    assert out == [f"Per Yohami and Sowell, {julie}, {thomas} and {raj} come at things from below."]
+    s = names.Scrubber(KEY, known=["Julie Chen"], finder=lambda texts: {"Yohami", "Raj", "Thomas Sowell", "Thomas"},
+                       public=["Yohami", "thomas  sowell"])
+    out, back, _ = s.scrub(["Per Yohami and Thomas Sowell, Julie, Thomas and Raj say so; Sowell agrees."])
+    julie, thomas, raj, sowell = (names.token(w, KEY) for w in ("Julie", "Thomas", "Raj", "Sowell"))
+    # The listed names, whole and in any case, go as said; Thomas alone and Sowell alone aren't what's listed.
+    assert out == [f"Per Yohami and Thomas Sowell, {julie}, {thomas} and {raj} say so; {sowell} agrees."]
     assert "Yohami" not in back.values()   # nothing to map back: it went out as said
 
 
