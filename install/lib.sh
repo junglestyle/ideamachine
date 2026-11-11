@@ -171,8 +171,8 @@ rebuild_exists() {  # whether the rebuild database is there (install/rebuild.sh 
 }
 
 # Points `compose run run` at the rebuild database: exports IM_DATABASE_URL from rebuild.env (handed to the container
-# by name, so the password stays off the command line) and sets REBUILD_RUN to compose run's options for it, the
-# rebuild's config and no vocabulary file, so the rebuild never writes Hearsay's vocab.json.
+# by name, so the password stays off the command line) and sets REBUILD_RUN to compose run's options for it and the
+# rebuild's config.
 rebuild_env() {
     IM_DATABASE_URL="$(env_get "$NAS_REBUILD_ENV" IM_DATABASE_URL)"
     case "$IM_DATABASE_URL" in
@@ -181,7 +181,7 @@ rebuild_env() {
     esac
     export IM_DATABASE_URL
     # shellcheck disable=SC2034  # read by install/bin/im-rebuild and install/rebuild.sh, which source this
-    REBUILD_RUN=(-e IM_DATABASE_URL -e IM_CONFIG=/config/rebuild.toml -e IM_VOCAB_PATH=)
+    REBUILD_RUN=(-e IM_DATABASE_URL -e IM_CONFIG=/config/rebuild.toml)
 }
 
 grant_names() {  # the names role's grants in database $1: it reads segments and episodes and writes names, nothing else

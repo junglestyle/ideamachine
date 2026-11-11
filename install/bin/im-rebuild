@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # `im-rebuild` on the NAS: `im` (install/bin/im) against the rebuild database, im_rebuild (decision 0012), with its
-# own config, rebuild.toml, and no vocabulary file, so it never writes Hearsay's vocab.json. The same arguments as
-# `im`, e.g. `im-rebuild pending`; no arguments is a pipeline run. install/rebuild.sh makes the database and its
-# files; install/nas.sh puts this on root's PATH.
+# own config, rebuild.toml. The same arguments as `im`, e.g. `im-rebuild pending`; no arguments is a pipeline run.
+# install/rebuild.sh makes the database and its files; install/nas.sh puts this on root's PATH.
 set -euo pipefail
 
 # shellcheck source=SCRIPTDIR/../lib.sh

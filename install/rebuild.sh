@@ -54,8 +54,7 @@ if [ ! -f "$NAS_CONFIG/im/rebuild.toml" ]; then
     cat > "$NAS_CONFIG/im/rebuild.toml" <<'TOML'
 # The rebuild's config (decision 0012): im-rebuild reads it in place of im.toml, against database im_rebuild. Every
 # key and its default is in src/im/config.py. Written once by install/rebuild.sh, never overwritten: edit it here.
-# Decision 0012 retires extract.interests, the rubric ([scores]) and the vocabulary written back to Hearsay ([vocab]),
-# so none of them is set here.
+# Decision 0012 retires extract.interests, so it isn't set here.
 [extract]
 prompt = "v5.3"             # extraction v5, its latest version
 model = "claude-opus-5-5"   # the reference extractor

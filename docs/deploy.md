@@ -143,9 +143,8 @@ im-rebuild pending   # what the next run would send to Claude, sending nothing
 im-rebuild run       # one pipeline run against im_rebuild (no arguments does the same)
 ```
 
-It's `im`'s `run` service with `IM_DATABASE_URL` from `rebuild.env`, `IM_CONFIG=/config/rebuild.toml`, and
-`IM_VOCAB_PATH` empty, so the rebuild never writes Hearsay's `vocab.json`. Corral doesn't schedule it: every run is
-started by hand.
+It's `im`'s `run` service with `IM_DATABASE_URL` from `rebuild.env` and `IM_CONFIG=/config/rebuild.toml`. Corral
+doesn't schedule it: every run is started by hand.
 
 - **Its own spending cap.** `extract.monthly_cap_usd` is checked against `egress.spent_this_month`, the month's sum
   of `im.egress_log` in the database the run is connected to. So `im_rebuild` has its own cap, $100 in
