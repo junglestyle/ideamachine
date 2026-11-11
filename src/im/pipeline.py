@@ -158,9 +158,10 @@ def reset(conn: psycopg.Connection, stage: str) -> dict:
                      "episodes_deleted": conn.execute("DELETE FROM im.episodes").rowcount}
         elif stage == "triage":
             stats = {"triage_deleted": conn.execute("DELETE FROM im.triage").rowcount}
-        elif stage == "extract":  # routes read items, so they go too. The egress log and Lattice's events stay.
+        elif stage == "extract":  # routes read items, so they go too. The egress log and Lattice's events stay, and
+            # so do the archive's captures (no episode): the next run reads the stream, not the ChatGPT export.
             stats = {"routes_deleted": conn.execute("DELETE FROM im.routes").rowcount,
-                     "items_deleted": conn.execute("DELETE FROM im.items").rowcount,
+                     "items_deleted": conn.execute("DELETE FROM im.items WHERE episode_id IS NOT NULL").rowcount,
                      "extractions_deleted": conn.execute("DELETE FROM im.extractions").rowcount}
         else:
             stats = {"routes_deleted": conn.execute("DELETE FROM im.routes").rowcount}

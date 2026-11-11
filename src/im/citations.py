@@ -7,14 +7,15 @@ observations or edges change, and `uncite_missing` drops ids that are gone (forg
 """
 
 
-# The observations each idea's statement was made from: its origin captures'. A reused read copies the origin
-# relation to the new capture, which joins the same observation, so there's usually one. An archive idea or one I
-# added was made from its observations that aren't speech (migration 036): my messages, or what I typed.
+# The observations each idea's statement was made from: its origin captures', spoken or of the archive. A reused read
+# copies the origin relation to the new capture, which joins the same observation, so there's usually one. An idea
+# seeded from the archive or one I added was made from the observations that belong to it directly (migration 036):
+# my messages, or what I typed.
 ORIGIN_OBSERVATIONS = """
 SELECT ev.idea_id, i.observation_id FROM im.idea_evidence ev JOIN im.items i USING (item_id)
 WHERE ev.relation = 'origin' AND i.observation_id IS NOT NULL
 UNION ALL
-SELECT o.idea_id, o.observation_id FROM im.observations o WHERE o.source <> 'speech'"""
+SELECT o.idea_id, o.observation_id FROM im.observations o WHERE o.source <> 'speech' AND o.idea_id IS NOT NULL"""
 
 
 # The two cited tables (migration 045): each with its key and its two ends.

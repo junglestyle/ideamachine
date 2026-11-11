@@ -72,7 +72,8 @@ def quote_score(a: str, b: str, floor: int = MIN_WORDS) -> float:
 
 
 def carry_verdicts(conn) -> dict:
-    """Copy my verdicts from items no longer on a current episode to the current items they became.
+    """Copy my verdicts from items no longer current (on no current episode, and not of the archive) to the current
+    items they became.
 
     A retired item's verdict can go to a current item whose source segments descend from the verdict's segments
     (through supersession links) and whose quote matches (`quote_score`). Matches are one-to-one, best first. A new
@@ -87,8 +88,8 @@ def carry_verdicts(conn) -> dict:
     rows = conn.execute(
         """SELECT v.item_id, v.verdict_id, v.segment_ids, v.quote, i.kind FROM im.item_verdicts v
            LEFT JOIN im.items i USING (item_id)
-           WHERE NOT EXISTS (SELECT 1 FROM im.items c JOIN im.episodes e USING (episode_id)
-                             WHERE c.item_id = v.item_id AND e.current)
+           WHERE NOT EXISTS (SELECT 1 FROM im.items c LEFT JOIN im.episodes e USING (episode_id)
+                             WHERE c.item_id = v.item_id AND (e.current OR c.episode_id IS NULL))
              AND NOT EXISTS (SELECT 1 FROM im.verdict_carries k WHERE k.from_item_id = v.item_id)
            ORDER BY v.decided_at, v.verdict_id""").fetchall()
     # Items with the same quote and segments are one capture decided on more than once: one source, latest wins.

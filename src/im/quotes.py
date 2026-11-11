@@ -72,10 +72,12 @@ def near(lines: list[tuple[str, str]], cited: list[str]) -> list[tuple[str, str]
 
 
 def place_stage(conn) -> dict:
-    """Every capture not checked yet, placed: its quote unlabeled, its citation grown to the lines its words are
-    on (and everything that holds its segments with it), and quote_in_lines kept."""
+    """Every capture of speech not checked yet, placed: its quote unlabeled, its citation grown to the lines its
+    words are on (and everything that holds its segments with it), and quote_in_lines kept. An archive capture has no
+    lines to place it in."""
     rows = conn.execute("""SELECT item_id::text, episode_id::text, quote, source_segment_ids::text[] FROM im.items
-                           WHERE quote_in_lines IS NULL ORDER BY created_at, item_id""").fetchall()
+                           WHERE quote_in_lines IS NULL AND episode_id IS NOT NULL
+                           ORDER BY created_at, item_id""").fetchall()
     stats = {"checked": len(rows), "unlabelled": 0, "cited_more": 0, "flagged": 0}
     lines = windows(conn, {eid for _, eid, _, _ in rows})
     with conn.transaction():
