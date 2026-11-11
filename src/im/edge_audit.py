@@ -81,7 +81,7 @@ Then run `im audit-edges score` on this folder. "me" is me, "someone" anyone els
 
 
 def _clusters(conn) -> list[tuple]:
-    """Every cluster Lattice shows, with its embedding (under the model most were embedded with), whether it's mine
+    """Every cluster in pub.ideas, with its embedding (under the model most were embedded with), whether it's mine
     (a candidate or idea), when it was first said, and the kind most of its captures are."""
     return conn.execute(
         """WITH v AS (SELECT model_version FROM im.idea_embeddings GROUP BY 1 ORDER BY count(*) DESC LIMIT 1),

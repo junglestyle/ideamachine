@@ -20,7 +20,8 @@ name `kind`.
 Storage has three layers ([0006]). The **ledger** is append-only: what was received, extracted and decided
 (`im.source_*`, `im.items`, `im.egress_log`, `pub.feedback_events`). The **graph** is the data Idea Machine derives
 from the ledger and can rebuild from it (`im.ideas`, connections, lineage, weights). **`pub`** is the read model:
-the web app, Lattice and the MCP connector read it, and their only write is to insert feedback events (SPEC §2).
+the web app reads it (Lattice and its MCP connector did, until 2026-11-11), and its only write is to insert feedback
+events (SPEC §2).
 
 The **live database** is `im`, rebuilt from the stream with `v5.3` and matcher v2 and cut over to on 2026-11-11
 ([0012]). The **archived database**, `im_v1`, is the one from before the rebuild: dumped once at the cutover, never
@@ -48,7 +49,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Source segment.** Idea Machine's stored copy of one version of an utterance (`im.source_segments`, 002:14-35). Its
   identity is `uuid5(conversation, start, end, text)` (`importer.IDENTITY`, [M1 design]). Speaker fields, arousal
   and delivery are annotations on it, updated in place and outside its identity. _Not_ an episode.
-- **Turn.** Not a term: prose for an utterance or a segment (SPEC.md:22, 013:8, 019:1).
+- **Turn.** Not a term: prose for an utterance or a segment (SPEC.md:23, 013:8, 019:1).
 - **Current source segment.** A segment in the latest import of its conversation that hasn't been forgotten
   (`im.current_segments`, 002:65-68). Everything downstream reads only these.
 - **Supersession.** A recorded correspondence between an old segment and the new segment that replaced it
@@ -73,7 +74,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   - `not_me`: not established as me. That covers other people, `unknown` speech, and a capture citing no segment.
 
   `cites_me` says that a quote spanning speakers includes `me` speech. An observation that isn't speech records only
-  `me` or `not_me` (036:13). Hearsay names no one but me (SPEC.md:21-22).
+  `me` or `not_me` (036:13). Hearsay names no one but me (SPEC.md:22-23).
 - **Speaker label.** The display name on a segment: `me`, a name, `anon A` or `unknown` (002:27).
 - **Tap.** A press on the pendant, recorded as a time (`source_conversations.taps`, 005:1-2). An episode's taps are
   those within 30 s of it (`triage.py`). To extraction a tap is a prompt cue: "A tap usually means I wanted something
@@ -90,7 +91,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   ([0007]).
 - **Delivery.** How I spoke: words per second, pauses and stutters, measured from word timings, not judged (019:1-6).
   A stutter kind is `repeat`, `restart` or `filler`. **Status:** nothing reads it (ROADMAP.md:49).
-- **Open flag.** Hearsay's index flag for a conversation that's still growing. **Status:** SPEC.md:69-70 says V2
+- **Open flag.** Hearsay's index flag for a conversation that's still growing. **Status:** SPEC.md:70-71 says V2
   stores it; no column does yet.
 
 ## Episodes and what's sent
@@ -183,8 +184,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Capture kind, capture tags, capture confidence.** What sort of thought a capture expressed, the free-text tags
   and the model's number from 0 to 1 that `v1` to `v4` returned with each capture (`im.items.kind`, `themes` and
   `confidence`, 007:31-36). `v5` has none of them: `kind` and `confidence` are NULL, `themes` empty (047). The columns
-  stay, as the archived database's history, and `pub.evidence` and `pub.review_items` still show them (always empty
-  now). _Not_ themes, and _not_ a connection's confidence.
+  stay, as the archived database's history, and `pub.evidence` still shows them (always empty now). _Not_ themes,
+  and _not_ a connection's confidence.
 - **Quote-source coverage.** The share of a quote's words found, in order, in its cited lines. Under 0.6, the quote
   isn't from its lines (`quote_in_lines`, 044:1-4; `quotes.FLAG`).
 - **Quote-overlap score.** The share of the shorter of two quotes' words found, in order, in the other, with each
@@ -205,7 +206,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   §Observations). Archive and typed observations hold their own quote, time, owner-attribution class and source
   context (036:1-23). An archive observation is an archive capture's, in its capture's cluster, and says whether I
   edited the message before it was read (`edited`, 055); it has no cluster of its own (`idea_id` NULL), while a typed
-  one belongs to its cluster directly (`idea_id`, 057). Observations are neutral and never judged (SPEC.md:27).
+  one belongs to its cluster directly (`idea_id`, 057). Observations are neutral and never judged (SPEC.md:28).
 - **Source context.** What a non-speech observation is grouped by for recurrence: the ChatGPT conversation, or the
   `idea_add` event (`observations.conversation`, 036:7). _Not_ a Hearsay conversation.
 - **Same point, distinct points.** Two occurrences make the same point when they make "the same claim about the same
@@ -242,7 +243,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   - `observation`: neither of those. In prose, "a cluster without owner evidence".
 - **Candidate.** An unkept cluster with at least one `me` observation on an active episode or of the archive
   (031:32-44, 055). Candidates differ only by weight ([M2 design]:39-40). A cluster with only `not_me` members never
-  becomes one (SPEC.md:30-31).
+  becomes one (SPEC.md:31-32).
 - **Cluster weight.** A number per cluster, computed each run by a versioned formula over stored signals: my
   recurrences, a capped count of other members, connections to canonical clusters, and whether the cluster is
   canonical itself (`im.weights`, 031:48-55; `weight.weigh`). It's shown as a fact and orders nothing ([0007]).
@@ -256,7 +257,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 
 ## Ideas and my decisions
 
-- **Idea.** A kept cluster: one I kept as canonical or as pinned (maturity `idea`). Only I make one (SPEC.md:32-34,
+- **Idea.** A kept cluster: one I kept as canonical or as pinned (maturity `idea`). Only I make one (SPEC.md:33-35,
   [0007]). _Not_ any `im.ideas` row, and _not_ the capture kind or triage kind `idea`.
 - **Kept status.** How I keep a cluster (`kept_as`, `im.idea_kept`, 031:17-30): canonical, pinned or unkept. Canonical
   and pinned are two ways of keeping it, told apart by whether being kept adds to weight:
@@ -276,8 +277,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   numbering, groupings and cross-references are never read. The **seeded archive**, made from ChatGPT's summary
   before the archive was read (36 clusters with `archive_ref` `chatgpt#n`, their cross-references as
   `chatgpt-archive` connections, five themes, ROADMAP.md:142, and observations of my messages written onto those
-  clusters), is only in the archived database. `pub.ideas` still has `archive_ref`, always NULL, because Lattice
-  reads it.
+  clusters), is only in the archived database. `archive_ref`, always NULL in the live database, went with Lattice
+  (058).
 - **Title.** A cluster's short name, at most 8 words, the point itself with its scope and hedges (`im.ideas.title`).
   The generated title is the matcher's (`lattice.MATCH_SYSTEM`), and it's kept as `claude_title`. My latest
   correction overrides it (`im.idea_text`, 011:15-27).
@@ -290,9 +291,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   database (`im.ideas.notes`, 008:12). In the live database `notes` holds only the note I typed adding an idea (023).
 - **Correction.** An `idea_correct` event that replaces a cluster's title or statement (011).
 - **Feedback event.** A recorded action or judgment of mine (`pub.feedback_events`, 008:88-98). `source` says where I
-  made it: `lattice`, `cli`, `mcp` or `emanation`. Where events disagree, my latest is the one with the highest
-  `event_id`; `at` bounds time windows and orders nothing (SPEC.md:84-86, 043). The feedback event kinds, from the
-  CHECK at 031:7-11:
+  made it: `cli` or `emanation`, and `lattice` or `mcp` for Lattice's, until 2026-11-11. Where events disagree, my
+  latest is the one with the highest `event_id`; `at` bounds time windows and orders nothing (SPEC.md:90-92, 043).
+  The feedback event kinds, from the CHECK at 031:7-11:
   - on clusters: `idea_keep` (payload `as`: `canonical` or `pinned`), `idea_unkeep`, `idea_dismiss`, `idea_add`,
     `star`, `unstar`, `link`, `unlink`, `idea_note`, `idea_correct`, `idea_sensitive`;
   - on themes: `pin_theme`, `unpin_theme`, `rename_theme`, `reject_theme`, `merge_theme`, `split_theme`,
@@ -316,8 +317,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   novelty, compression and outside value, combined into a score (017, 025). [0007] threw them out as labels, and
   [0012] retired the scoring stage and dropped its table and views (053). Past `idea_compare` events stay in the
   ledger.
-- **Merging and rejecting clusters.** **Not yet specified.** SPEC.md:98 and the [M2 design]:138 say merge and reject
-  "stay", but no state, column or event exists for either on a cluster, and ROADMAP-v2.md:18 says ideas can't be
+- **Merging and rejecting clusters.** **Not yet specified.** SPEC.md:104 and the [M2 design]:138 say merge and reject
+  "stay", but no state, column or event exists for either on a cluster, and ROADMAP-v2.md:21 says ideas can't be
   merged yet. Themes can be merged and rejected (024).
 
 ## Graph
@@ -373,16 +374,16 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Edge observation citation.** The observations an edge rests on: the founding observations of its two ends
   (`cited_observation_ids`; `citations.py`; [M2 design] §Edges). `im check` fails on an edge that cites nothing where
   it could.
-- **Embedding neighbors.** A cluster's nearest clusters by embedding similarity (cosine) (`pub.idea_neighbours`,
-  026; `pub.card_neighbours`, 033). They nominate pairs and seed a lens's search, and never decide a connection
-  ([0010]:96).
+- **Embedding neighbors.** A cluster's nearest clusters by embedding similarity (cosine) (`pub.card_neighbours`,
+  033; Lattice's `pub.idea_neighbours`, 026, until 058). They nominate pairs and seed a lens's search, and never
+  decide a connection ([0010]:96).
 - **Graph neighborhood.** A set of clusters joined by connections. "A neighborhood of connected observations"
   ([0010]:33-36) means the observations of those clusters. What makes a set of clusters a neighborhood (how many,
   how densely connected) is **not yet specified**.
 - **Synthesis pass.** The process that, given a graph neighborhood, writes a synthesis result and sends it to me as
   a proposal (ROADMAP-v2 Synthesis row; [0010]:75-80; [M2 design]:268-275). **Status:** not built.
 - **Synthesis result.** A synthesis pass's output, citing observations. It's either:
-  - **consolidation**: a new statement for one cluster ([M2 design]:270; ROADMAP-v2.md:16);
+  - **consolidation**: a new statement for one cluster ([M2 design]:270; ROADMAP-v2.md:18);
   - **multi-cluster synthesis**: one statement for several connected clusters.
 - **Synthesized cluster.** The cluster that holds a kept multi-cluster synthesis, linked to each source cluster by
   `synthesizes`.
@@ -459,17 +460,17 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Subject.** What something is about. A shared subject is what a lens gathers, and is no connection ([0010]
   §Context; `edge_audit.HEADER`, `none`).
 - **Theme.** A stored category of clusters: `im.themes(name, description, origin, pinned)`, with membership in
-  `im.idea_themes` (008:65-80). Its provenance is `archive`, `clustered` (proposed by Claude) or `mine`. Theme events
-  edit it (024). **Status:** to become a lens: its name and description the query, my filing corrections its pins
-  ([0013]).
-- **Lattice.** The legacy app, in its own repo, that reads `pub`: the map, review and the first MCP server ([0005]).
-  **Status:** feature-frozen at `v1`, and archived at M6.
+  `im.idea_themes` (008:65-80). Its provenance is `clustered` (proposed by Claude) or `mine`; the seeded archive's
+  `archive` went with it (058). Theme events edit it (024). **Status:** to become a lens: its name and description
+  the query, my filing corrections its pins ([0013]).
+- **Lattice.** The legacy app, in its own repo, that read `pub`: the map, review and the first MCP server ([0005]).
+  **Status:** feature-frozen at `v1`, removed from the deploy 2026-11-11 with its MCP server, archived at M6.
 - **Trellis.** The stable family of views, each drawing one board: lenses arranged by hand. Called Lattice v2 in
   [0010] ([0010]:70-73, ROADMAP-v2 §4). The first are a grid of lenses and the Tree of Life. _Not_ the graph.
   **Status:** not built.
 - **Tree of Life, correspondence.** The Tree of Life is the Qabalistic correspondence table, condensed into
   definitions and laid out on the sephirot and the paths between them. A correspondence is one entry of that table,
-  such as 1/Kether, and each becomes a lens (ROADMAP-v2.md:57-58, [0010]:70-73).
+  such as 1/Kether, and each becomes a lens (ROADMAP-v2.md:69-70, [0010]:70-73).
 - **Digest.** A weekly write-up of the ideas said that week, written by a model (`im.digests`, `im.digest_points`, 022;
   `digest.py`). It has a digest summary and 3 to 7 points, each citing ideas. Digest point kinds
   (`digest.SYSTEM`):
@@ -516,8 +517,8 @@ Each role decides one thing. The model behind it can change, so models are liste
   - **probe**: a question asked only to measure (`jev.PROBE_SET`);
   - **cut**: the probability at or above which a ranking counts as yes (`jev.CUT`).
 - **Laya, logreg, local LLM.** V1's triage backends (`backends.py`, [0001], [0002]). **Status:** off by default.
-- **Corral.** The job queue that runs the pipeline on the NAS, and GPU jobs on the dev box (deploy.md:4-6,
-  109-120).
+- **Corral.** The job queue that runs the pipeline on the NAS, and GPU jobs on the dev box (deploy.md:4-7,
+  118-130).
 - **Trial.** A comparison of an extraction model or prompt against a reference read (normally Opus's) of the same
   sample of episodes, under policy B or C (`im trial`; `trial.py`; [0008]:38-43). Trial captures are kept apart in
   `im.prompt_trials`. Its counts:
@@ -632,7 +633,7 @@ themes and voice clusters. Whether the capture kind `idea` means "a suggestion" 
 
 - No capture or cluster has a `summary` column. The only one is the digest summary (022:11).
 - On the B4 and probe sheets, "Claude's summary" is a cluster's title and statement (`edge_audit.side_data`,
-  `probe_audit`). SPEC.md:115 speaks of each side "as said and summarized".
+  `probe_audit`). SPEC.md:121 speaks of each side "as said and summarized".
 - `summary_audit`, `match_bench`, `miss_audit` and Jev's `summary` questions use "summary" for a capture's gist.
 - ROADMAP-v2 §5 q9 means both.
 
@@ -645,7 +646,7 @@ themes and voice clusters. Whether the capture kind `idea` means "a suggestion" 
 - `pub.cards.links` counts connections only (033:33-35), and the neutral view prints that count as "N edges"
   (`web._facts`) under a "Connections" heading (`web.card`). The sky's `links` include lineage (`web.sky`).
 - "Link" is my action (008:91), an archive cross-reference (`lattice.py`), a "lineage link" (`lens.py`), weight's
-  "links to canonical ideas" (SPEC.md:107), and V1's connections (ROADMAP.md:138).
+  "links to canonical ideas" (SPEC.md:113), and V1's connections (ROADMAP.md:138).
 - [0006]:49-56 describes edges as `im.idea_links` rows with `evidence_item_ids`, a column that never existed.
 
 **Use:** "link" is my action in prose. A connection is a connection, a lineage link is lineage, and "edge" covers
@@ -679,7 +680,7 @@ becomes "subject". The `themes` field is capture tags, which no prompt since `v5
 - Cluster evidence: `pub.evidence`, one row per observation since 037 (037:1), and `n_evidence`.
 - The ledger as a whole: the "evidence ledger" ([0006]:17).
 - What an edge cites: "each cites its evidence" (SPEC.md:13), "evidentiary edges" ([0005]:21), and "shared evidence"
-  (SPEC.md:119).
+  (SPEC.md:125).
 - What recurrence isn't ([M2 design]:83-84).
 - The argument sense, in `supports`: "evidence or an argument for it" (`edge_audit.HEADER`).
 
@@ -735,8 +736,8 @@ is "pin". "Star" is the sky glyph, and also the legacy event name for a pin.
 
 ### merge, reject, same
 
-- SPEC.md:83 and 98 and the [M2 design]:138 list merging and rejecting clusters. Nothing implements either
-  (031:7-11), and ROADMAP-v2.md:18 says ideas can't be merged yet.
+- SPEC.md:89 and 104 and the [M2 design]:138 list merging and rejecting clusters. Nothing implements either
+  (031:7-11), and ROADMAP-v2.md:21 says ideas can't be merged yet.
 - To merge or reject a theme (024).
 - To group captures into an observation; B5 counts these "merged observations" (`dedupe_audit`).
 - The matcher's `same_as`, a same-point match (008:30).
@@ -789,8 +790,8 @@ bridge idea, and M2's "bridging" is a multi-cluster synthesis.
 ### neighborhood, neighbors
 
 - A graph neighborhood, and "a neighborhood of connected observations" ([0010]:33-36).
-- Embedding neighbors: `pub.idea_neighbours`, `pub.card_neighbours`, `lattice.RELATED_K`. B4 "drew its pairs from
-  neighborhoods" in this sense (`probe_audit`, ROADMAP-v2.md:87).
+- Embedding neighbors: `pub.card_neighbours`, `lattice.RELATED_K`, and Lattice's `pub.idea_neighbours` (until 058).
+  B4 "drew its pairs from neighborhoods" in this sense (`probe_audit`, ROADMAP-v2.md:99).
 - The "semantic neighborhood" that places and colors a star ([M6 notes]:15, 37).
 
 **Use:** embedding neighbors (by similarity) and a graph neighborhood (a set of clusters, by connections).
@@ -798,9 +799,9 @@ Observations "in" a neighborhood belong to its clusters.
 
 ### analogy
 
-- SPEC.md:124-125 and [0009]:28 make analogy a pass over pairs, beside tension. The 0010 amendment (2026-11-07)
+- SPEC.md:130-131 and [0009]:28 make analogy a pass over pairs, beside tension. The 0010 amendment (2026-11-07)
   makes a kept analogy a lens that writes no connection.
-- `lens` is also the name of one analogy wording (ROADMAP-v2.md:96).
+- `lens` is also the name of one analogy wording (ROADMAP-v2.md:108).
 
 **Use:** an analogy is a structural correspondence across subjects, and an analogy lens is its kept form. The
 analogy pass only proposes.
@@ -881,7 +882,7 @@ episode, capture on an active episode. Payload line and triage line.
 ### speaker basis
 
 002:28 lists `voice | diarization | named | cluster | none`. The code accepts `channel` as verified (030:23), and
-SPEC.md:25 names `voice`, `named` and `channel`. Hearsay's enumeration and Idea Machine's acceptance rule are two
+SPEC.md:26 names `voice`, `named` and `channel`. Hearsay's enumeration and Idea Machine's acceptance rule are two
 contracts, and neither list here cites Hearsay's: [UNGROUNDED].
 
 **Use:** take the values from Hearsay's contract, fix the 002 comment to match, and state the acceptance rule apart.
@@ -916,7 +917,7 @@ These terms are in use, but no doc or file defines them:
   between canonical and pinned.
 - The statement: the [M2 design]:95-96 says a candidate's statement is the gist of its first observation. The matcher
   writes the statement, and uses the gist only as a fallback (`lattice.match_stage`).
-- Analogy: SPEC.md:124-125 and [0009]:28 predate 0010's analogy amendment.
+- Analogy: SPEC.md:130-131 and [0009]:28 predate 0010's analogy amendment.
 
 [0001]: decisions/0001-laya-spike.md
 [0002]: decisions/0002-first-triage-eval.md

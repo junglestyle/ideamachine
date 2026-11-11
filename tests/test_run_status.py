@@ -1,4 +1,4 @@
-"""im run records every stage on its run row, and a failure too; Lattice reads that through pub.runs."""
+"""im run records every stage on its run row (im.runs), and a failure too."""
 
 import json
 
@@ -25,8 +25,7 @@ def test_a_run_records_every_stage_and_its_warnings(pipe, run_cli):
     (stats, finished) = table(pipe, "SELECT stats, finished_at IS NOT NULL FROM im.runs WHERE command = 'run'")[0]
     assert finished and "extract" in stats and "route" in stats and stats["monthly_cap_usd"] == 20.0
     assert "run_id" not in out
-    (error, warnings, cap) = table(pipe, "SELECT error, warnings, monthly_cap_usd FROM pub.runs")[0]
-    assert error is None and cap == 20 and any(w.startswith("Claude unavailable") for w in warnings)
+    assert "error" not in stats and stats["extract"]["stopped"].startswith("Claude unavailable")
 
 
 def test_a_failed_stage_is_recorded_with_what_ran_before_it(pipe, run_cli, monkeypatch):
@@ -37,7 +36,6 @@ def test_a_failed_stage_is_recorded_with_what_ran_before_it(pipe, run_cli, monke
         run_cli()
     (stats,) = table(pipe, "SELECT stats FROM im.runs WHERE command = 'run'")[0]
     assert stats["error"] == "RuntimeError: disk full" and "extract" in stats and "conversations_changed" in stats
-    assert table(pipe, "SELECT error FROM pub.runs") == [("RuntimeError: disk full",)]
 
 
 def test_a_run_that_fails_at_once_still_leaves_a_row(pipe, run_cli, monkeypatch):
@@ -46,13 +44,5 @@ def test_a_run_that_fails_at_once_still_leaves_a_row(pipe, run_cli, monkeypatch)
     monkeypatch.setattr("im.pipeline.import_stream", gone)
     with pytest.raises(FileNotFoundError):
         run_cli()
-    assert table(pipe, "SELECT error, finished_at IS NOT NULL FROM pub.runs") == \
+    assert table(pipe, "SELECT stats->>'error', finished_at IS NOT NULL FROM im.runs WHERE command = 'run'") == \
         [("FileNotFoundError: no index.json in /data/stream", True)]
-
-
-def test_lattice_can_read_status_and_spend(pipe, run_cli, admin):
-    run_cli()
-    with admin.transaction():
-        admin.execute("SET LOCAL ROLE lattice_app")
-        assert len(admin.execute("SELECT * FROM pub.runs").fetchall()) == 1
-        assert admin.execute("SELECT month_to_date FROM pub.spend").fetchone()[0] == 0

@@ -5,7 +5,9 @@ do is in [SPEC.md](SPEC.md). Each risky milestone gets its own design doc before
 
 ## 1. Milestones
 
-Each one leaves the system working and Lattice usable until M6.
+Each one leaves the system working. Lattice stayed usable until it was removed from the deploy on 2026-11-11, ahead
+of M6 ([deploy.md](deploy.md)): the neutral view (`im web`) is the presentation until Emanation, and the claude.ai
+connector is off until M5.
 
 | M | Goal | Done when | Design |
 |---|---|---|---|
@@ -17,8 +19,8 @@ Each one leaves the system working and Lattice usable until M6.
 | M3 | ~~Tune weight and proposals~~ No rating: proposals neutral, newest first | Closed without tuning: no signal predicted what I keep | [0007](decisions/0007-neutral-proposals.md) |
 | Rebuild | Re-extract the archive with extraction v5.3 on Opus and matcher v2 into a second database, then cut over ([0012](decisions/0012-rebuild-with-v5.md), amended 2026-11-10). Built: the trials (fourteen models on v5.3; none cheaper held up), the goldens, then the rebuild from Hearsay's stream under policy B: 455 episodes, 1,100 captures (49 of them from the ChatGPT export, read by `im import-chatgpt`), 1,089 clusters; `im check` passes. Cut over 2026-11-11: the rebuilt database is `im`, the old one archived as `im_v1`; prompts v1 to v4, `extract.interests`, the seeded archive and the rebuild tooling retired. **B7** (the gate) runs on the rebuilt captures afterward, as a cleanup pass. **B8** (Jev as a connection screen) can run any time before the connection judge, which runs on the rebuilt archive. **B9** and **B10** (Jev as a screen in front of the matcher and of extraction) replay the rebuild's own logged decisions | Every invariant holds on the rebuilt database; cut over before 2026-11-25 | done 2026-11-11 ([0012](decisions/0012-rebuild-with-v5.md)) |
 | M4 | Jev for match decisions, Terra for edges (it passed B4; Jev didn't), behind versioned `judged_by` | B1 and B4 pass; no rise in duplicate ideas. Baseline (2026-11-06): 6 quotes are evidence for two ideas each, all from October, when re-keyed episodes were read again and Opus joined the same words to two ideas or said they evolved one; every capture since 11-02 joins its observation's idea unasked. Ideas can't be merged yet | at M4 |
-| M5 | Lenses; MCP server moves here | Connector works unchanged against the new endpoint; 5 canonical lenses judged useful | at M5 |
-| M6 | Emanation UI; cut over; archive Lattice | Parity checklist from Lattice's tools and views; a week of use without falling back | at M6 |
+| M5 | Lenses; MCP server moves here | Connector works unchanged against the new endpoint (off since Lattice's removal, 2026-11-11); 5 canonical lenses judged useful | at M5 |
+| M6 | Emanation UI; cut over; archive Lattice (removed from the deploy 2026-11-11: no fallback to it) | Parity checklist from Lattice's tools and views; a week of use without falling back | at M6 |
 | M7 | Local titles | B6 (local titles via Corral) passes | at M7 |
 
 ~~**Hold:** Hearsay's audio retention stays off until M2 validates. Raw audio is the rollback for the re-link.~~ Lifted 2026-11-01: M2 validated, and nothing in Idea Machine needs the audio.
@@ -62,7 +64,7 @@ drawn through lenses ([0010](decisions/0010-connections-kinds-lenses.md)), and a
   at 3,000 cards and 1.5 s at 15,000, mostly the cards query and the lens's PageRank; links are now most of a
   frame's drawing.
 - **Trellis: pinned lenses, laid out by hand, for organization.** The stable one, called Lattice v2 in
-  [0010](decisions/0010-connections-kinds-lenses.md). Not the Lattice app, which is still archived at M6. First two:
+  [0010](decisions/0010-connections-kinds-lenses.md). Not the Lattice app (removed 2026-11-11). First two:
   - a conceptual or thematic grid of lenses;
   - the Qabalistic Tree of Life: a correspondence table condensed into definitions, each correspondence a lens
     (1/Kether), on the sephirot and the paths between them.

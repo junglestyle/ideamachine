@@ -59,7 +59,7 @@ def _embedder(cfg):
 
 
 def cmd_run(args) -> None:
-    """Every stage, recorded on one im.runs row, including a failure: Lattice's status line reads it (pub.runs)."""
+    """Every stage, recorded on one im.runs row, including a failure."""
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
         try:
@@ -86,7 +86,7 @@ def _run_stages(conn, cfg) -> dict:
     try:
         from im import feedback
 
-        # Before extraction and matching, so captures I discarded in Lattice stay out of the lattice.
+        # Before extraction and matching, so captures I discarded stay out of the lattice.
         stats["feedback"] = feedback.apply_item_feedback(conn)
         if cfg.triage.backends:
             run_backends, notes = _backends(conn, cfg, cfg.triage.backends)
@@ -550,7 +550,7 @@ def cmd_import_chatgpt(args) -> None:
 
 
 def cmd_web(args) -> None:
-    """Serve the neutral view as Lattice's role (LATTICE_DATABASE_URL), never as im_pipeline."""
+    """Serve the neutral view as its own role (IM_WEB_DATABASE_URL), never as im_pipeline."""
     from im import web
 
     web.serve(args.host, args.port, args.demo)

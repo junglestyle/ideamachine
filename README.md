@@ -14,9 +14,8 @@ Turns transcripts of my recorded conversations into a searchable map of the idea
 Idea Machine reads the speaker-attributed transcripts that [Hearsay](https://github.com/junglestyle/hearsay)
 makes from conversations recorded with consent. It groups them into episodes, has Claude pull out ideas,
 jokes, tasks and decisions with quotes and line citations, and links each idea to similar ones it has seen
-before. [Lattice](https://github.com/junglestyle/lattice) shows the result. Most recorded speech is small
-talk, so most of the work is deciding what deserves attention, and measuring whether a cheap model can
-decide that before trusting it to.
+before. A web view (`im web`) shows the result. Most recorded speech is small talk, so most of the work is
+deciding what deserves attention, and measuring whether a cheap model can decide that before trusting it to.
 
 > **Versions.** `v1` is the proof of concept as it ran, before the V2 refactor. To run it, check out `v1.1`:
 > V1 plus one fix, so naming a speaker no longer sends an unchanged transcript back to Claude
@@ -37,9 +36,9 @@ flowchart LR
         TR -.-> EV["im eval<br/>against my labels"]
     end
 
-    T --> P["schema pub<br/>ideas, evidence, themes, items to review"]
+    T --> P["schema pub<br/>ideas, evidence, themes, cards"]
     X --> P
-    P --> L["Lattice<br/>idea map"]
+    P --> L["im web<br/>the neutral view"]
 ```
 
 ## The interesting parts
@@ -63,8 +62,9 @@ flowchart LR
 - **What leaves the box is a versioned policy.** Speakers are pseudonymized per request (`me`, `S1`, `S2`),
   and the mapping stays local. Every Claude request is logged with the segment IDs it carried, its tokens
   and cost, and a monthly budget is checked before each one.
-- **A plain data contract on both sides.** Idea Machine reads Hearsay's file stream read-only, and Lattice
-  reads only the views in schema `pub`, so each app can change without touching the others' internals.
+- **A plain data contract on both sides.** Idea Machine reads Hearsay's file stream read-only, and the web view
+  reads only the views in schema `pub`, as its own role, so each side can change without touching the other's
+  internals.
 
 ## Stack
 

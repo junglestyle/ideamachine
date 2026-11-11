@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TrueNAS SCALE: datasets, secrets, images, Postgres, Lattice, the run as a corral kind, and nightly backups.
+# TrueNAS SCALE: datasets, secrets, images, Postgres, the web view, the run as a corral kind, and nightly backups.
 # Run as root (sudo) from admin's clone in /mnt/fast/repos. Safe to re-run; also how updates are deployed.
 #
 # Everything lives on the NVMe pool (fast/ideamachine). Before 2026-10-15 it was on storage/ideamachine: when fast
@@ -12,17 +12,13 @@ source "$(dirname "$0")/lib.sh"
 
 require_root
 
-say "Checking Docker and the clones"
+say "Checking Docker and the clone"
 docker info >/dev/null 2>&1 || die "Docker isn't running. Set the Apps pool in the TrueNAS UI first."
 # Clones belong to admin: git as root in them trips "dubious ownership", and root-owned files block admin's pulls.
 [ "$(stat -c %U "$REPO_DIR")" != root ] || die "$REPO_DIR belongs to root. Run this from admin's clone. As admin:
     git clone https://github.com/junglestyle/ideamachine.git /mnt/fast/repos/ideamachine
 then: sudo /mnt/fast/repos/ideamachine/install/nas.sh"
-[ -f "$NAS_LATTICE_REPO/pyproject.toml" ] || die "Lattice isn't cloned. As admin (not root):
-    git clone https://github.com/junglestyle/lattice.git $NAS_LATTICE_REPO"
-[ "$(stat -c %U "$NAS_LATTICE_REPO")" != root ] || die "$NAS_LATTICE_REPO belongs to root; clone it again as admin"
 echo "ideamachine: $REPO_DIR"
-echo "lattice: $NAS_LATTICE_REPO"
 
 say "Hearsay's stream"
 pick_hearsay_stream
@@ -65,8 +61,8 @@ if ! zfs list -H -o name "$NAS_POOL_DATASET/pg" >/dev/null 2>&1 && [ -f "$OLD_RO
         mv "$ROWS_BEFORE.new" "$ROWS_BEFORE"
     fi
     echo "counted rows in $(wc -l < "$ROWS_BEFORE") tables: $ROWS_BEFORE"
-    for c in lattice "$DB_CONTAINER"; do docker stop "$c" >/dev/null 2>&1 || true; done
-    echo "stopped Lattice and the database"
+    for c in ideamachine-web "$DB_CONTAINER"; do docker stop "$c" >/dev/null 2>&1 || true; done
+    echo "stopped the web view and the database"
 
     # One snapshot of all three, taken together; zfs send -p brings each dataset's properties along. pg goes last:
     # its absence is what says the move isn't done.
@@ -115,10 +111,51 @@ if [ "$(stat -c %u "$NAS_PG")" != "$APPS_UID" ]; then
 fi
 chmod 700 "$NAS_PG"
 
+say "Retiring Lattice (removed from the deploy 2026-11-11; docs/deploy.md)"
+# Lattice, its public MCP listener and the Cloudflare tunnel to it, their images, Lattice's tailnet address, and its
+# config, whose database URL and token the web view keeps under its own names. Does nothing once they're gone.
+for c in lattice-tunnel lattice; do
+    docker container inspect "$c" >/dev/null 2>&1 || continue
+    docker rm -f "$c" >/dev/null
+    echo "removed container $c"
+done
+for image in lattice cloudflare/cloudflared:2026.9.3; do
+    docker image inspect "$image" >/dev/null 2>&1 || continue
+    docker image rm "$image" >/dev/null
+    echo "removed image $image"
+done
+# The Tailscale app (TrueNAS UI: Apps) runs tailscaled in a container on the host network.
+ts="$(docker ps --format '{{.Names}} {{.Image}}' | awk 'tolower($2) ~ /tailscale/ {print $1; exit}')"
+lattice_https_port=8444
+if [ -n "$ts" ] && docker exec "$ts" tailscale serve status --json | python3 -c '
+import json, sys
+try:
+    tcp = json.load(sys.stdin).get("TCP") or {}
+except ValueError:
+    tcp = {}
+sys.exit(0 if sys.argv[1] in tcp else 1)' "$lattice_https_port"; then
+    docker exec "$ts" tailscale serve --https="$lattice_https_port" off >/dev/null
+    echo "removed Lattice's address on the tailnet (tailscale serve, HTTPS port $lattice_https_port)"
+fi
+if [ -f "$NAS_CONFIG/lattice.env" ]; then
+    if [ -f "$NAS_WEB_ENV" ]; then
+        echo "both $NAS_CONFIG/lattice.env and $NAS_WEB_ENV exist: using $NAS_WEB_ENV; remove the other by hand"
+    else
+        mv "$NAS_CONFIG/lattice.env" "$NAS_WEB_ENV"
+        echo "moved $NAS_CONFIG/lattice.env to $NAS_WEB_ENV"
+    fi
+fi
+env_rename "$NAS_WEB_ENV" LATTICE_DATABASE_URL IM_WEB_DATABASE_URL
+env_rename "$NAS_WEB_ENV" LATTICE_TOKEN IM_WEB_TOKEN
+for key in LATTICE_PUBLIC_URL LATTICE_MCP_ALLOW LATTICE_DEMO_HIDE; do env_delete "$NAS_WEB_ENV" "$key"; done
+env_rename "$NAS_DB_ENV" LATTICE_APP_PASSWORD IM_WEB_PASSWORD
+[ ! -e "$NAS_CONFIG/cloudflared.env" ] || { rm -f "$NAS_CONFIG/cloudflared.env"; echo "removed the tunnel's token"; }
+echo "ok"
+
 say "Secrets in $NAS_CONFIG"
 env_ensure "$NAS_DB_ENV" POSTGRES_PASSWORD "$(openssl rand -hex 24)"
 env_ensure "$NAS_DB_ENV" IM_PIPELINE_PASSWORD "$(openssl rand -hex 24)"
-env_ensure "$NAS_DB_ENV" LATTICE_APP_PASSWORD "$(openssl rand -hex 24)"
+env_ensure "$NAS_DB_ENV" IM_WEB_PASSWORD "$(openssl rand -hex 24)"   # the web view's role, lattice_app (058)
 env_ensure "$NAS_PIPELINE_ENV" IM_DATABASE_URL \
     "postgresql://im_pipeline:$(env_get "$NAS_DB_ENV" IM_PIPELINE_PASSWORD)@db:5432/im"
 if [ -z "$(env_get "$NAS_PIPELINE_ENV" ANTHROPIC_API_KEY)" ]; then
@@ -129,11 +166,9 @@ fi
 # OPENROUTER_API_KEY (optional, by hand in pipeline.env): other providers' models, for `im trial` and edge drafts.
 # Jev (im.jev) goes through OpenRouter on its key, with zero retention; TYPESAFE_API_KEY (optional) calls TypeSafe
 # directly instead.
-env_ensure "$NAS_LATTICE_ENV" LATTICE_DATABASE_URL \
-    "postgresql://lattice_app:$(env_get "$NAS_DB_ENV" LATTICE_APP_PASSWORD)@db:5432/im"
-env_ensure "$NAS_LATTICE_ENV" LATTICE_TOKEN "$(openssl rand -base64 24 | tr -d '/+=')"
-# The tunnel for Lattice's public MCP listener (below). Always present, so compose can load; empty until it's used.
-touch "$NAS_CONFIG/cloudflared.env"; chmod 600 "$NAS_CONFIG/cloudflared.env"
+env_ensure "$NAS_WEB_ENV" IM_WEB_DATABASE_URL \
+    "postgresql://lattice_app:$(env_get "$NAS_DB_ENV" IM_WEB_PASSWORD)@db:5432/im"
+env_ensure "$NAS_WEB_ENV" IM_WEB_TOKEN "$(openssl rand -base64 24 | tr -d '/+=')"
 
 # Idea Machine's own config: readable by the pipeline (the apps group), not secret, but personal, so not in the repo.
 mkdir -p "$NAS_CONFIG/im"
@@ -193,12 +228,13 @@ if [ -z "$(db_sql "SELECT to_regclass('im.schema_migrations')")" ]; then
     $NAS_MOVE_DUMP), then re-run this. To start empty instead: sudo FRESH=1 $0"
     fi
 fi
-# After a move from storage: the same rows as before, checked before anything (migrations, Lattice, the run) writes.
+# After a move from storage: the same rows as before, checked before anything (migrations, the web view, the run)
+# writes.
 if [ -f "$ROWS_BEFORE" ] && [ ! -f "$ROWS_AFTER" ]; then
     say "Checking the copy against storage's database (row counts of every table)"
     row_counts > "$ROWS_AFTER.new"
     diff "$ROWS_BEFORE" "$ROWS_AFTER.new" || die "row counts differ (above: < storage, > fast). Nothing is
-    scheduled and Lattice is stopped. storage/ideamachine is untouched."
+    scheduled and the web view is stopped. storage/ideamachine is untouched."
     mv "$ROWS_AFTER.new" "$ROWS_AFTER"
     echo "all $(wc -l < "$ROWS_AFTER") tables match: $(awk -F'|' '{n += $2} END {print n}' "$ROWS_AFTER") rows"
 fi
@@ -233,67 +269,25 @@ say "Checking that nothing already sent to Claude would be sent again"
 im pending --expect-none-resent || die "payloads differ from what was sent before (time zone?). Nothing is
     scheduled yet; fix this before re-running."
 
-say "Lattice (built from $NAS_LATTICE_REPO)"
-"${COMPOSE[@]}" up -d --build lattice
-for _ in $(seq 30); do
-    [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8790/login)" = 200 ] && break
-    sleep 1
-done
-[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8790/login)" = 200 ] || die "Lattice isn't answering"
-echo "answering on 127.0.0.1:8790"
-
-say "Publishing Lattice on the tailnet (tailscale serve, HTTPS port $LATTICE_HTTPS_PORT)"
-# The Tailscale app (TrueNAS UI: Apps) runs tailscaled in a container on the host network. Tailnet only: never
-# `tailscale funnel`, which would put it on the internet.
-ts="$(docker ps --format '{{.Names}} {{.Image}}' | awk 'tolower($2) ~ /tailscale/ {print $1; exit}')"
-if [ -n "$ts" ]; then
-    docker exec "$ts" tailscale serve --bg --https="$LATTICE_HTTPS_PORT" http://127.0.0.1:8790 >/dev/null
-    ts_host="$(docker exec "$ts" tailscale status --json | python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
-    LATTICE_URL="https://$ts_host:$LATTICE_HTTPS_PORT/"
-    echo "$LATTICE_URL"
-else
-    LATTICE_URL="(not published: no Tailscale container found)"
-    echo "No Tailscale container found. Publish it by hand: tailscale serve --bg --https=$LATTICE_HTTPS_PORT http://127.0.0.1:8790"
-fi
-
-say "The neutral view (im web; tailscale serve, HTTPS port $WEB_HTTPS_PORT)"
+say "The web view (im web; tailscale serve, HTTPS port $WEB_HTTPS_PORT)"
 "${COMPOSE[@]}" up -d web
 for _ in $(seq 30); do
     [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8792/login)" = 200 ] && break
     sleep 1
 done
 [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8792/login)" = 200 ] || die "im web isn't answering"
+echo "answering on 127.0.0.1:8792"
+# Tailnet only: never `tailscale funnel`, which would put it on the internet.
 if [ -n "$ts" ]; then
     docker exec "$ts" tailscale serve --bg --https="$WEB_HTTPS_PORT" http://127.0.0.1:8792 >/dev/null
-    echo "https://$ts_host:$WEB_HTTPS_PORT/ (log in with Lattice's token)"
+    ts_host="$(docker exec "$ts" tailscale status --json \
+        | python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
+    WEB_URL="https://$ts_host:$WEB_HTTPS_PORT/"
+    echo "$WEB_URL"
 else
-    echo "Publish it by hand: tailscale serve --bg --https=$WEB_HTTPS_PORT http://127.0.0.1:8792"
-fi
-
-say "Public MCP listener for claude.ai (Lattice's docs/public-mcp.md)"
-LATTICE_PUBLIC_URL="$(env_get "$NAS_LATTICE_ENV" LATTICE_PUBLIC_URL)"
-if [ -n "$LATTICE_PUBLIC_URL" ]; then
-    if [ -z "$(env_get "$NAS_CONFIG/cloudflared.env" TUNNEL_TOKEN)" ]; then
-        # Manual: Cloudflare dashboard -> Zero Trust -> Networks -> Tunnels -> the tunnel -> its install command.
-        read -rsp "Cloudflare tunnel token for $LATTICE_PUBLIC_URL (input hidden): " key; echo
-        env_ensure "$NAS_CONFIG/cloudflared.env" TUNNEL_TOKEN "$key"
-    fi
-    "${COMPOSE[@]}" --profile public up -d cloudflared
-    # From Anthropic's range but without a token, /mcp must ask for one (401): the listener is up and checks auth.
-    code="000"
-    for _ in $(seq 30); do
-        code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'CF-Connecting-IP: 160.79.104.1' \
-                http://127.0.0.1:8791/mcp)"
-        [ "$code" = 401 ] && break
-        sleep 1
-    done
-    [ "$code" = 401 ] || die "Lattice's public listener on 127.0.0.1:8791 answered $code, not 401 (is LATTICE_PUBLIC_URL
-    in $NAS_LATTICE_ENV, and Lattice up to date?)"
-    echo "the public listener answers (401 without a token)"
-    echo "on: $LATTICE_PUBLIC_URL/mcp (the WAF rules and connecting: Lattice's docs/public-mcp.md)"
-else
-    "${COMPOSE[@]}" --profile public rm -sf cloudflared >/dev/null 2>&1 || true
-    echo "off (set LATTICE_PUBLIC_URL in $NAS_LATTICE_ENV to turn it on)"
+    WEB_URL="(not published: no Tailscale container found)"
+    echo "No Tailscale container found. Publish it by hand:"
+    echo "    tailscale serve --bg --https=$WEB_HTTPS_PORT http://127.0.0.1:8792"
 fi
 
 say "The run on corral's NAS worker (github.com/junglestyle/corral)"
@@ -354,14 +348,16 @@ dump="$NAS_BACKUPS/im-$(date -I).dump"
 docker exec -i "$DB_CONTAINER" pg_restore -l < "$dump" >/dev/null || die "$dump isn't a readable dump"
 echo "backup: $dump ($(du -h "$dump" | cut -f1), readable)"
 
-[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8790/login)" = 200 ] || die "Lattice isn't answering on 127.0.0.1:8790"
-echo "Lattice: answering on 127.0.0.1:8790"
+# Logged in with its token, the feed reads the database as the web view's role.
+[ "$(web_feed http://127.0.0.1:8792/)" = 200 ] \
+    || die "the web view's feed didn't load on 127.0.0.1:8792 (journalctl -t ideamachine-web)"
+echo "web view: logged in and read the feed on 127.0.0.1:8792"
 if [ -n "$ts" ]; then
     # Through tailscale serve on this machine's own tailnet address, as a phone would reach it.
     ts_ip="$(docker exec "$ts" tailscale ip -4 | head -n 1)"
-    code="$(curl -s -o /dev/null -w '%{http_code}' --resolve "$ts_host:$LATTICE_HTTPS_PORT:$ts_ip" "${LATTICE_URL}login")"
-    [ "$code" = 200 ] || die "Lattice answered $code, not 200, at ${LATTICE_URL}login"
-    echo "Lattice: answering on the tailnet at $LATTICE_URL"
+    code="$(web_feed "$WEB_URL" --resolve "$ts_host:$WEB_HTTPS_PORT:$ts_ip")"
+    [ "$code" = 200 ] || die "the web view's feed answered $code, not 200, at $WEB_URL"
+    echo "web view: the same on the tailnet at $WEB_URL"
 fi
 
 say "The im command, for root"
@@ -378,10 +374,9 @@ to see it work:
 Any im command, as root (in a new shell, or after: source /root/.zshrc):
     im check
 Hearsay's stream: $HEARSAY_STREAM ($HEARSAY_STREAM_WHY)
-Lattice: $LATTICE_URL
-    token: $(env_get "$NAS_LATTICE_ENV" LATTICE_TOKEN)
+The web view: $WEB_URL
+    token: $(env_get "$NAS_WEB_ENV" IM_WEB_TOKEN)
     (in Safari on the phone: open it, log in, Share -> Add to Home Screen)
-Public MCP for claude.ai: ${LATTICE_PUBLIC_URL:-off}${LATTICE_PUBLIC_URL:+/mcp}
 EOF
 if zfs list -H -o name "$OLD_POOL_DATASET" >/dev/null 2>&1; then
     cat <<EOF
@@ -394,4 +389,12 @@ EOF
     for snap in $(zfs list -H -t snapshot -o name -r "$NAS_POOL_DATASET" | grep '@to-fast-' || true); do
         echo "    sudo zfs destroy $snap   # left on fast by the move"
     done
+fi
+if [ -d /mnt/fast/repos/lattice ]; then
+    cat <<EOF
+
+Lattice is no longer deployed (2026-11-11), and nothing here reads its clone. As admin:
+    rm -rf /mnt/fast/repos/lattice
+Its Cloudflare tunnel and public hostname, and the claude.ai connector, go by hand (docs/deploy.md).
+EOF
 fi

@@ -12,7 +12,7 @@ from im import digest, extract, lattice
 from helpers import run, table
 from test_extract import FakeClaude
 from test_lattice import FakeMatcher, items_for
-from test_review import as_lattice
+from test_review import as_web_role
 from test_triage import HashEmbedder
 
 WEEK = date(2026, 8, 31)   # the fixture stream is said on Tuesday 2026-09-01
@@ -56,7 +56,7 @@ def test_a_week_is_digested_once_from_ideas_not_speech(seeded_lattice, admin):
     assert start.astimezone().date() == WEEK and end - start == timedelta(days=7)   # local Monday to Monday
 
     assert digest.digest_stage(pipe, claude, week=WEEK)["written"] is False and len(claude.calls) == 1
-    (summary, points), = as_lattice(admin, "SELECT summary, points FROM pub.digests")
+    (summary, points), = as_web_role(admin, "SELECT summary, points FROM pub.digests")
     assert summary == "A week about sensors and meetings."
     assert [(p["point"], p["kind"], len(p["idea_ids"]), p["mine"]) for p in points] == \
         [(1, "convergence", 2, None), (2, "project", 1, None)]
@@ -96,15 +96,15 @@ def test_i_can_star_or_dismiss_a_point(seeded_lattice, admin):
     digest.digest_stage(pipe, FakeDigester(), week=WEEK)
     (did,) = table(pipe, "SELECT digest_id FROM im.digests")[0]
     event = "INSERT INTO pub.feedback_events (kind, payload) VALUES (%s, %s)"
-    as_lattice(admin, event, "digest_dismiss", json.dumps({"digest_id": did, "point": 1}))
-    as_lattice(admin, event, "digest_star", json.dumps({"digest_id": did, "point": 2}))
-    as_lattice(admin, event, "digest_star", json.dumps({"digest_id": did, "point": 1, "note": "on reflection"}))
-    (points,), = as_lattice(admin, "SELECT points FROM pub.digests")
+    as_web_role(admin, event, "digest_dismiss", json.dumps({"digest_id": did, "point": 1}))
+    as_web_role(admin, event, "digest_star", json.dumps({"digest_id": did, "point": 2}))
+    as_web_role(admin, event, "digest_star", json.dumps({"digest_id": did, "point": 1, "note": "on reflection"}))
+    (points,), = as_web_role(admin, "SELECT points FROM pub.digests")
     assert [p["mine"] for p in points] == ["star", "star"]
     for bad in [{}, {"digest_id": did}, {"digest_id": str(did), "point": 1}, {"digest_id": did, "point": 1,
                                                                              "note": "x" * 501}]:
         with pytest.raises(psycopg.errors.CheckViolation):
-            as_lattice(admin, event, "digest_star", json.dumps(bad))
+            as_web_role(admin, event, "digest_star", json.dumps(bad))
 
 
 def test_forgetting_takes_the_digest(seeded_lattice, cfg, stream):

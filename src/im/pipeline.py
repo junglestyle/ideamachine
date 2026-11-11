@@ -32,7 +32,7 @@ def _finish_run(conn, run_id: int, stats: dict) -> None:
 
 def _purge_tombstoned(conn) -> tuple[set[str], int]:
     """Delete everything that holds a forgotten segment (ROADMAP §3.4): every episode (current or retired), label,
-    idea, digest, verdict, observation and Lattice event made from it, and the classifiers trained on its labels.
+    idea, digest, verdict, observation and feedback event made from it, and the classifiers trained on its labels.
     Labels are human input, and this is the only thing that deletes them."""
     labels = [r[0] for r in conn.execute(
         """DELETE FROM im.labels l WHERE EXISTS (
@@ -46,7 +46,7 @@ def _purge_tombstoned(conn) -> tuple[set[str], int]:
     # evidence; that evidence row goes with its item.
     conn.execute("""DELETE FROM im.ideas d WHERE EXISTS (
                       SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(d.segment_ids))""")
-    # Lattice's events on a capture of forgotten speech, whether or not the capture is still there.
+    # The feedback events on a capture of forgotten speech, whether or not the capture is still there.
     conn.execute("""DELETE FROM pub.feedback_events f WHERE EXISTS (
                       SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(f.item_segment_ids))""")
     # A digest may paraphrase forgotten speech anywhere in its text, so the whole digest goes.
@@ -158,7 +158,7 @@ def reset(conn: psycopg.Connection, stage: str) -> dict:
                      "episodes_deleted": conn.execute("DELETE FROM im.episodes").rowcount}
         elif stage == "triage":
             stats = {"triage_deleted": conn.execute("DELETE FROM im.triage").rowcount}
-        elif stage == "extract":  # routes read items, so they go too. The egress log and Lattice's events stay, and
+        elif stage == "extract":  # routes read items, so they go too. The egress log and feedback events stay, and
             # so do the archive's captures (no episode): the next run reads the stream, not the ChatGPT export.
             stats = {"routes_deleted": conn.execute("DELETE FROM im.routes").rowcount,
                      "items_deleted": conn.execute("DELETE FROM im.items WHERE episode_id IS NOT NULL").rowcount,

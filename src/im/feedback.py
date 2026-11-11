@@ -1,8 +1,8 @@
-"""My verdicts on captures, arriving as pub.feedback_events from Lattice (ROADMAP §3.5).
+"""My verdicts on captures, arriving as pub.feedback_events (ROADMAP §3.5).
 
 Each item_keep / item_discard / item_star event becomes a row in im.item_verdicts (the same table `im ideas
 --review` writes), with the event's note. Applied events are recorded in im.feedback_applied, so each applies once.
-An event that repeats the item's latest verdict and note adds nothing (a resend from Lattice's offline queue).
+An event that repeats the item's latest verdict and note adds nothing (a resend, e.g. from an offline queue).
 Theme events are applied by im.themes; idea stars are read straight from the events by pub.ideas.
 
 Verdicts are carried forward too (`carry_verdicts`): when the episode an item was on is replaced, and Claude
@@ -16,7 +16,7 @@ ITEM_KINDS = {"item_keep": "keep", "item_discard": "discard", "item_star": "star
 
 
 def _how(payload: dict) -> str:
-    """Lattice marks a keep made without reading {"bulk": true}, and a spot check {"audit": true}."""
+    """A keep made without reading carries {"bulk": true}, and a spot check {"audit": true} (as Lattice marked them)."""
     return "bulk" if payload.get("bulk") is True else "audit" if payload.get("audit") is True else "one"
 
 
@@ -34,7 +34,7 @@ def apply_item_feedback(conn) -> dict:
             latest = conn.execute(
                 """SELECT verdict, note, how FROM im.item_verdicts WHERE item_id = %s
                    ORDER BY decided_at DESC, verdict_id DESC LIMIT 1""", (item_id,)).fetchone()
-            if latest == (verdict, note, how):   # e.g. Lattice resent a queued event whose response was lost
+            if latest == (verdict, note, how):   # e.g. a client resent a queued event whose response was lost
                 result = "repeat"
             else:
                 inserted = conn.execute(

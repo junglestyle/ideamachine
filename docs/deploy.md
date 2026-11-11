@@ -1,18 +1,19 @@
 # Deploying to the NAS
 
-Idea Machine and Lattice run on TrueNAS SCALE next to Hearsay (ROADMAP §1 stack assumptions):
-- Postgres, the pipeline run and Lattice run in Docker. The run is a kind on [corral](https://github.com/junglestyle/corral)'s
-  NAS worker: Hearsay enqueues it at the end of its pipeline, once the stream has new turns. Set up corral's server
-  and NAS worker (in `/mnt/fast/corral-worker`, deployed from the infra repo) before `install/nas.sh`.
+Idea Machine runs on TrueNAS SCALE next to Hearsay (ROADMAP §1 stack assumptions):
+- Postgres, the pipeline run and the web view run in Docker. The run is a kind on
+  [corral](https://github.com/junglestyle/corral)'s NAS worker: Hearsay enqueues it at the end of its pipeline, once
+  the stream has new turns. Set up corral's server and NAS worker (in `/mnt/fast/corral-worker`, deployed from the
+  infra repo) before `install/nas.sh`.
 - The data lives in the `fast/ideamachine` dataset, on the NVMe pool, so the spinning disks in `storage` can idle.
   `fast` is snapshotted nightly at 4:00 and replicated to `storage/fast-replica`.
 - The clones live in `/mnt/fast/repos` (dataset `fast/repos`), owned by `admin`. Clone and pull as admin, never
   as root; run the install script with sudo from there.
 - Hearsay's stream is mounted read-only, from whichever pool Hearsay is on (below).
-- Lattice is on the tailnet at `https://truenas.<tailnet>.ts.net:8444/` via `tailscale serve`, and the neutral view
-  (`im web`, container `ideamachine-web`) at `:8445`, with Lattice's token.
+- The neutral view (`im web`, container `ideamachine-web`) is on the tailnet at
+  `https://truenas.<tailnet>.ts.net:8445/` via `tailscale serve`, with its own token (`IM_WEB_TOKEN`).
 - Logs go to the journal: `journalctl -t ideamachine-run`, `-t ideamachine-backup`, `-t ideamachine-db`,
-  `-t lattice`, `-t lattice-tunnel`.
+  `-t ideamachine-web`.
 
 eeyore keeps the dev and test databases.
 
@@ -22,7 +23,6 @@ On the NAS, as admin:
 
 ```sh
 git clone https://github.com/junglestyle/ideamachine.git /mnt/fast/repos/ideamachine
-git clone https://github.com/junglestyle/lattice.git /mnt/fast/repos/lattice
 sudo /mnt/fast/repos/ideamachine/install/nas.sh
 ```
 
@@ -41,9 +41,9 @@ On the NAS again: `sudo /mnt/fast/repos/ideamachine/install/nas.sh`. It does the
 - restores the database;
 - checks that nothing already sent to Claude would be sent again (`im pending --expect-none-resent`; this catches
   a time zone that differs from eeyore's);
-- starts Lattice and the neutral view and publishes both with `tailscale serve`;
+- starts the neutral view and publishes it with `tailscale serve`;
 - adds the run to corral's NAS worker and registers nightly backups;
-- checks that it all works (below) and prints Lattice's address and login token.
+- checks that it all works (below) and prints the view's address and login token.
 
 On the phone, open that address in Safari, log in, then Share → Add to Home Screen. Finally, on eeyore:
 `systemctl --user disable --now lattice.service`.
@@ -54,7 +54,7 @@ Until 2026-10-15 everything lived in `storage/ideamachine`, with root-owned clon
 it once, when `fast/ideamachine` has no database yet and `storage/ideamachine` has one:
 1. switches off both cron jobs and waits for a run in progress;
 2. counts the rows of every table in the running database (`/mnt/fast/ideamachine/rowcounts-before-move.txt`);
-3. stops Lattice and Postgres, snapshots `config`, `backups` and `pg` together (`@to-fast-<time>`), and copies
+3. stops the web view and Postgres, snapshots `config`, `backups` and `pg` together (`@to-fast-<time>`), and copies
    each with `zfs send -p | zfs recv`, so their properties come along;
 4. copies any file in `logs/` that isn't a `*.log` into `saved/` (there were two, kept by hand: an
    `im trial` report and a text export). The old logs stay on `storage`;
@@ -68,7 +68,6 @@ On the NAS, as admin:
 
 ```sh
 git clone https://github.com/junglestyle/ideamachine.git /mnt/fast/repos/ideamachine   # if not there yet
-git clone https://github.com/junglestyle/lattice.git /mnt/fast/repos/lattice
 sudo /mnt/fast/repos/ideamachine/install/nas.sh
 ```
 
@@ -85,20 +84,36 @@ conversations were forgotten on purpose in between, choose by hand:
 
 ## Updates
 
-As admin, `git pull` in both clones, then `sudo /mnt/fast/repos/ideamachine/install/nas.sh`. It's idempotent:
+As admin, `git pull` in the clone, then `sudo /mnt/fast/repos/ideamachine/install/nas.sh`. It's idempotent:
 existing secrets are kept, images are rebuilt, migrations applied, the worker's kind and the backup cron job
 rewritten.
 
-Every time, it ends by checking that it all works: Postgres is up; one run finishes; one backup, the same way, writes a readable dump to `backups/`; Lattice answers on 127.0.0.1:8790 and,
-through `tailscale serve`, at the tailnet address on 8444. So each re-run also does a run and a backup.
+Every time, it ends by checking that it all works: Postgres is up; one run finishes; one backup, the same way,
+writes a readable dump to `backups/`; the neutral view, logged in with its token, loads its feed (as its own
+role) on 127.0.0.1:8792 and, through `tailscale serve`, at the tailnet address on 8445. So each re-run also does a
+run and a backup.
 
-## Lattice's MCP endpoint for claude.ai (optional)
+## Lattice, removed (2026-11-11)
 
-Off unless `lattice.env` sets `LATTICE_PUBLIC_URL`. Then `install/nas.sh` asks once for the Cloudflare tunnel
-token (kept in `config/cloudflared.env`) and starts the `cloudflared` container, which publishes only Lattice's MCP
-listener (127.0.0.1:8791). Removing the line and re-running `install/nas.sh` stops it. The Cloudflare side (the
-tunnel's hostname, two WAF rules) and how to add the connector are in Lattice's `docs/public-mcp.md`. Read its
-"How it's protected" first: this is the one thing reachable from the internet.
+Lattice, the old presentation app, left the deploy on 2026-11-11, and with it its MCP endpoint for claude.ai: the
+connector stops working until M5 builds the MCP server into this repo (SPEC §2 keeps the contract it must honor).
+The next run of `install/nas.sh` after the change, and every one after it, does nothing once these are gone:
+- removes the `lattice` and `lattice-tunnel` (cloudflared) containers and their images, and Lattice's address on
+  the tailnet (`tailscale serve` on 8444);
+- moves `config/lattice.env` to `config/web.env`, renaming `LATTICE_DATABASE_URL` and `LATTICE_TOKEN` to
+  `IM_WEB_DATABASE_URL` and `IM_WEB_TOKEN` (same values: the token on the phone still works) and deleting
+  `LATTICE_PUBLIC_URL`, `LATTICE_MCP_ALLOW` and `LATTICE_DEMO_HIDE`; renames `LATTICE_APP_PASSWORD` in `db.env`
+  to `IM_WEB_PASSWORD`; deletes `config/cloudflared.env`, the tunnel's token;
+- migration 058 drops what only Lattice read: `pub.idea_neighbours`, `pub.ideas_near()`, `pub.idea_positions`,
+  `pub.review_items`, `pub.item_context`, `pub.runs`, `pub.spend`, and the columns of `pub.ideas` only it showed,
+  along with `archive_ref` and the theme origin `archive`.
+
+The web view's role keeps its name, `lattice_app`: migrations 008 to 052 grant to it by name, so a new database
+needs that name while they run, and the pipeline role that runs migrations can't rename roles.
+
+By hand, once: delete the Cloudflare tunnel and its public hostname (and the two WAF rules) in the Cloudflare
+dashboard, remove the connector in claude.ai's settings, and, as admin, `rm -rf /mnt/fast/repos/lattice` (the
+script says so while the clone is there). On a dev box, rename the same three lines in `.env` (`.env.example`).
 
 ## Policy C, retired (2026-11-11)
 
@@ -129,13 +144,13 @@ nightly job no longer prunes them).
 
 | What | Where |
 |---|---|
-| Secrets | `/mnt/fast/ideamachine/config/` (`db.env`, `pipeline.env`, `lattice.env`, `cloudflared.env`; root only) |
+| Secrets | `/mnt/fast/ideamachine/config/` (`db.env`, `pipeline.env`, `web.env`; root only) |
 | Config | `/mnt/fast/ideamachine/config/im/im.toml` (e.g. `extract.prompt`; read by the run container) |
 | Database | `/mnt/fast/ideamachine/pg` |
 | Nightly dumps (14 days) | `/mnt/fast/ideamachine/backups/` |
 | Kept by hand (trial reports, exports) | `/mnt/fast/ideamachine/saved/` (root and apps only: they quote people) |
-| Clones | `/mnt/fast/repos/ideamachine`, `/mnt/fast/repos/lattice` (admin) |
-| Logs | `journalctl -t ideamachine-run` (and `-t ideamachine-backup`, `-t ideamachine-db`, `-t lattice`, `-t lattice-tunnel`) |
+| Clone | `/mnt/fast/repos/ideamachine` (admin) |
+| Logs | `journalctl -t ideamachine-run` (and `-t ideamachine-backup`, `-t ideamachine-db`, `-t ideamachine-web`) |
 | Run now | `im` as root (`install/bin/im`; `install/nas.sh` puts it on root's PATH), or `docker compose -f /mnt/fast/repos/ideamachine/install/compose.yaml run --rm run` |
 | Any im command | `im check`, `im lattice`, ...: the command runs in the pipeline image, with `saved/` at `/saved` |
 | psql | `docker compose -f /mnt/fast/repos/ideamachine/install/compose.yaml exec db psql -U postgres -d im` |

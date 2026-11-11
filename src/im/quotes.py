@@ -14,7 +14,7 @@ A quote can begin with the transcript's own line label ("[23] me: "), copied by 
 stitched from pieces ("...", " / ") is lined up piece by piece.
 
 Every place forgetting finds a capture's speech by segment gets the added lines too: the capture's observation, the
-idea it made, my verdicts on it, Lattice's events on it, and the matcher's request that sent it.
+idea it made, my verdicts on it, the feedback events on it, and the matcher's request that sent it.
 """
 
 import difflib

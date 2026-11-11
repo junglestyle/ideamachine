@@ -10,10 +10,9 @@ NAS_CONFIG="$NAS_ROOT/config"
 NAS_PG="$NAS_ROOT/pg"
 NAS_BACKUPS="$NAS_ROOT/backups"
 NAS_SAVED="$NAS_ROOT/saved"   # outputs kept by hand, e.g. `im trial` reports (they quote people: root and apps only)
-NAS_LATTICE_REPO="/mnt/fast/repos/lattice"
 NAS_DB_ENV="$NAS_CONFIG/db.env"
 NAS_PIPELINE_ENV="$NAS_CONFIG/pipeline.env"
-NAS_LATTICE_ENV="$NAS_CONFIG/lattice.env"
+NAS_WEB_ENV="$NAS_CONFIG/web.env"   # the web view's database URL and login token
 NAS_MOVE_DUMP="$NAS_BACKUPS/from-eeyore.dump"
 # Before 2026-10-15 everything was on storage. install/nas.sh moves it once and never deletes it.
 OLD_POOL_DATASET="storage/ideamachine"
@@ -21,7 +20,6 @@ OLD_ROOT="/mnt/storage/ideamachine"
 # Hearsay's stream, on whichever pool Hearsay is on (pick_hearsay_stream).
 HEARSAY_STREAM_FAST="/mnt/fast/hearsay/stream"
 HEARSAY_STREAM_STORAGE="/mnt/storage/hearsay/stream"
-LATTICE_HTTPS_PORT=8444
 WEB_HTTPS_PORT=8445   # the neutral view (im web)
 DB_CONTAINER=ideamachine-db
 RUN_LOCK=/run/ideamachine-run.lock
@@ -53,6 +51,14 @@ env_ensure() {
     (umask 077; touch "$file")
     printf '%s=%s\n' "$key" "$value" >> "$file"
     chmod 600 "$file"
+}
+
+# Renames KEY to NEW, keeping its value, unless NEW is already there. Does nothing once it's done.
+env_rename() {
+    local file="$1" key="$2" new="$3"
+    [ -n "$(env_get "$file" "$key")" ] && [ -z "$(env_get "$file" "$new")" ] || return 0
+    sed -i "s/^${key}=/${new}=/" "$file"
+    echo "renamed $key to $new in $file"
 }
 
 # Removes KEY, if it's there: a secret nothing uses any more.
@@ -169,4 +175,17 @@ db_sql() {  # runs SQL as the database superuser, prints unaligned tuples
 
 im() {  # runs one `im` command in the pipeline image
     "${COMPOSE[@]}" run --rm -T run "$@" </dev/null
+}
+
+# Logs in to the web view at BASE (ending in /) with its token, then loads the feed; prints the feed's HTTP status.
+# Any more arguments go to both curls. The token goes on stdin, not the command line.
+web_feed() {
+    local base="$1" jar code
+    shift
+    jar="$(mktemp)"
+    printf %s "$(env_get "$NAS_WEB_ENV" IM_WEB_TOKEN)" \
+        | curl -s -o /dev/null -c "$jar" --data-urlencode token@- "$@" "${base}login" || true
+    code="$(curl -s -o /dev/null -w '%{http_code}' -b "$jar" "$@" "$base" || true)"
+    rm -f "$jar"
+    echo "$code"
 }

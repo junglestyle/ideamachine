@@ -26,7 +26,7 @@ def test_a_capture_i_discarded_still_shows(matched, admin):  # noqa: F811
     matched.execute("""INSERT INTO im.item_verdicts (item_id, segment_ids, quote, verdict)
                        SELECT i.item_id, i.source_segment_ids, i.quote, 'discard'
                        FROM im.items i JOIN im.idea_evidence ev USING (item_id) WHERE ev.idea_id = %s""", (new,))
-    assert table(matched, "SELECT 1 FROM pub.ideas WHERE idea_id = %s", new) == []     # Lattice hides it
+    assert table(matched, "SELECT 1 FROM pub.ideas WHERE idea_id = %s", new) == []     # pub.ideas hides it
     assert as_app(admin, lambda c: c.execute("SELECT maturity, by_me FROM pub.cards WHERE idea_id = %s",
                                              (new,)).fetchall()) == [("candidate", 1)]
 
@@ -58,7 +58,7 @@ def test_my_latest_event_is_the_last_to_arrive_whatever_time_it_carries(matched,
 
     new = str(idea(matched, "Something new"))
 
-    def events(*rows):   # as Lattice, in one transaction: (at or None for now(), kind, payload)
+    def events(*rows):   # as a client sends them, in one transaction: (at or None for now(), kind, payload)
         as_app(admin, lambda c: [c.execute("""INSERT INTO pub.feedback_events (at, kind, idea_id, payload)
                                                VALUES (coalesce(%s, now()), %s, %s, %s)""",
                                            (at, kind, new, json.dumps(p))) for at, kind, p in rows])
@@ -81,19 +81,19 @@ def test_my_latest_event_is_the_last_to_arrive_whatever_time_it_carries(matched,
 
 
 def test_only_a_cookie_signed_with_the_token_logs_in(monkeypatch):
-    monkeypatch.setenv("LATTICE_TOKEN", "a-long-enough-test-token")
+    monkeypatch.setenv("IM_WEB_TOKEN", "a-long-enough-test-token")
     assert web.logged_in(f"other=1; {web.COOKIE}={web._session()}")
     assert not web.logged_in(f"{web.COOKIE}=forged") and not web.logged_in(None)
-    monkeypatch.setenv("LATTICE_TOKEN", "short")
+    monkeypatch.setenv("IM_WEB_TOKEN", "short")
     with pytest.raises(SystemExit):
         web.logged_in(f"{web.COOKIE}=x")
 
 
 @pytest.fixture
-def served(matched, lattice_dsn, monkeypatch):  # noqa: F811
+def served(matched, web_dsn, monkeypatch):  # noqa: F811
     """The view, served on a loopback port as `im web` serves it: its port."""
-    monkeypatch.setenv("LATTICE_TOKEN", TOKEN)
-    monkeypatch.setattr(web.Handler, "dsn", lattice_dsn)
+    monkeypatch.setenv("IM_WEB_TOKEN", TOKEN)
+    monkeypatch.setattr(web.Handler, "dsn", web_dsn)
     server = ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
@@ -152,7 +152,7 @@ def sky_data(page):
                       .replace("<\\/", "</"))
 
 
-def test_the_sky_places_every_card_even_one_lattice_hides(matched, admin):  # noqa: F811
+def test_the_sky_places_every_card_even_one_pub_ideas_hides(matched, admin):  # noqa: F811
     from im import lattice
     from test_triage import HashEmbedder
 
@@ -163,7 +163,7 @@ def test_the_sky_places_every_card_even_one_lattice_hides(matched, admin):  # no
     lattice.place(matched, HashEmbedder().model_version)
     data = sky_data(as_app(admin, web.sky))
     cards = as_app(admin, lambda c: {r[0] for r in c.execute("SELECT idea_id::text FROM pub.cards")})
-    assert {s[0] for s in data["stars"]} == cards and str(new) in cards   # discarded, so not in Lattice, but here
+    assert {s[0] for s in data["stars"]} == cards and str(new) in cards   # discarded, so not in pub.ideas, but here
     assert data["rel"] is None and data["seed"] is None   # the home sky: no lens, the encodings light it
 
 

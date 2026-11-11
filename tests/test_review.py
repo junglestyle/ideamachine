@@ -1,4 +1,4 @@
-"""Reviewing captures from Lattice: feedback events in, verdicts out, and what Lattice sees meanwhile."""
+"""Reviewing captures through feedback events: events in, verdicts out, and what the review queue shows meanwhile."""
 
 import json
 
@@ -11,22 +11,22 @@ from helpers import table
 
 
 
-def as_lattice(admin, sql, *args):
+def as_web_role(admin, sql, *args):
+    """Runs SQL as the web view's role, lattice_app."""
     with admin.transaction():
         admin.execute("SET LOCAL ROLE lattice_app")
         return admin.execute(sql, args or None).fetchall() if sql.lstrip().upper().startswith("SELECT") \
             else admin.execute(sql, args or None)
 
 
-def test_a_tap_hides_the_capture_now_and_becomes_a_verdict_on_the_next_run(seeded_lattice, admin):
+def test_a_discard_hides_the_capture_now_and_becomes_a_verdict_on_the_next_run(seeded_lattice, admin):
     pipe = seeded_lattice
-    queue = as_lattice(admin, "SELECT item_id, quote FROM pub.review_items ORDER BY confidence DESC, quote")
+    queue = extract.review_items(pipe)
     assert len(queue) == 3
-    (lora,) = [i for i, q in queue if "LoRa" in q]
-    as_lattice(admin, """INSERT INTO pub.feedback_events (kind, item_id, payload) VALUES ('item_discard', %s, %s)""",
-               lora, json.dumps({"note": "already in my notes"}))
-    assert len(as_lattice(admin, "SELECT item_id FROM pub.review_items")) == 2
-    assert lora not in [r[0] for r in extract.review_items(pipe)]
+    (lora,) = [r[0] for r in queue if "LoRa" in r[2]]
+    as_web_role(admin, """INSERT INTO pub.feedback_events (kind, item_id, payload) VALUES ('item_discard', %s, %s)""",
+                lora, json.dumps({"note": "already in my notes"}))
+    assert lora not in [r[0] for r in extract.review_items(pipe)] and len(extract.review_items(pipe)) == 2
     assert feedback.apply_item_feedback(pipe) == {"discard": 1}
     assert feedback.apply_item_feedback(pipe) == {}
     assert table(pipe, "SELECT verdict, note FROM im.item_verdicts WHERE item_id = %s", lora) == \
@@ -35,39 +35,31 @@ def test_a_tap_hides_the_capture_now_and_becomes_a_verdict_on_the_next_run(seede
     assert not table(pipe, "SELECT 1 FROM pub.ideas WHERE title = 'Something new'")
 
 
-def test_a_star_is_a_keep_that_counts(seeded_lattice, admin):
+def test_a_star_is_a_verdict_the_evidence_shows(seeded_lattice, admin):
     pipe = seeded_lattice
     (item,) = [r[0] for r in table(pipe, "SELECT item_id FROM im.items WHERE quote LIKE %s", "%coffee%")]
-    as_lattice(admin, "INSERT INTO pub.feedback_events (kind, item_id) VALUES ('item_star', %s)", item)
+    as_web_role(admin, "INSERT INTO pub.feedback_events (kind, item_id) VALUES ('item_star', %s)", item)
     assert feedback.apply_item_feedback(pipe) == {"star": 1}
-    assert table(pipe, "SELECT kept FROM pub.ideas WHERE statement LIKE %s", "%coffee%") == [(1,)]
+    assert table(pipe, "SELECT verdict FROM pub.evidence WHERE item_id = %s", item) == [("star",)]
 
 
-def test_context_lines_surround_the_capture(seeded_lattice, admin):
-    rows = as_lattice(admin, """SELECT c.ord, c.source, c.speaker, c.text FROM pub.item_context c
-                                JOIN pub.review_items r USING (item_id) WHERE r.quote LIKE '%%coffee%%'
-                                ORDER BY c.ord""")
-    assert [r[1] for r in rows].count(True) == 1 and len(rows) == 6   # all of that short episode
-    assert any(r[2] == "Alice" for r in rows)   # local names: Lattice is on the tailnet, not sent anywhere
-
-
-def test_lattice_still_only_appends(seeded_lattice, admin):
+def test_the_web_role_only_appends(seeded_lattice, admin):
     (item,) = [r[0] for r in table(seeded_lattice, "SELECT item_id FROM im.items LIMIT 1")]
     for sql in ["UPDATE pub.feedback_events SET kind = 'item_keep'", "DELETE FROM pub.feedback_events",
                 "SELECT 1 FROM im.item_verdicts"]:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            as_lattice(admin, sql)
+            as_web_role(admin, sql)
     with pytest.raises(psycopg.errors.CheckViolation):
-        as_lattice(admin, "INSERT INTO pub.feedback_events (kind) VALUES ('item_keep')")   # an item event names its item
+        as_web_role(admin, "INSERT INTO pub.feedback_events (kind) VALUES ('item_keep')")   # an item event names it
     with pytest.raises(psycopg.errors.CheckViolation):
-        as_lattice(admin, "INSERT INTO pub.feedback_events (kind, item_id) VALUES ('star', %s)", item)
+        as_web_role(admin, "INSERT INTO pub.feedback_events (kind, item_id) VALUES ('star', %s)", item)
 
 
 def test_a_resent_verdict_is_recorded_once(seeded_lattice, admin):
     pipe = seeded_lattice
     (item,) = [r[0] for r in table(pipe, "SELECT item_id FROM im.items WHERE quote LIKE %s", "%coffee%")]
     for kind in ["item_keep", "item_keep", "item_star", "item_keep"]:   # the second keep is a resend
-        as_lattice(admin, "INSERT INTO pub.feedback_events (kind, item_id) VALUES (%s, %s)", kind, item)
+        as_web_role(admin, "INSERT INTO pub.feedback_events (kind, item_id) VALUES (%s, %s)", kind, item)
     assert feedback.apply_item_feedback(pipe) == {"keep": 2, "repeat": 1, "star": 1}
     assert table(pipe, "SELECT verdict FROM im.item_verdicts WHERE item_id = %s ORDER BY verdict_id", item) == \
         [("keep",), ("star",), ("keep",)]
@@ -75,16 +67,15 @@ def test_a_resent_verdict_is_recorded_once(seeded_lattice, admin):
 
 def test_review_says_how_each_verdict_was_made(seeded_lattice, admin):
     pipe = seeded_lattice
-    queue = as_lattice(admin, "SELECT item_id FROM pub.review_items ORDER BY confidence, item_id")
-    spot, *rest = [r[0] for r in queue]
+    spot, *rest = sorted(r[0] for r in extract.review_items(pipe))
     event = "INSERT INTO pub.feedback_events (kind, item_id, payload) VALUES (%s, %s, %s)"
-    as_lattice(admin, event, "item_discard", spot, json.dumps({"audit": True}))
+    as_web_role(admin, event, "item_discard", spot, json.dumps({"audit": True}))
     for i in rest:
-        as_lattice(admin, event, "item_keep", i, json.dumps({"bulk": True}))
-    as_lattice(admin, event, "item_keep", rest[0], json.dumps({"bulk": True}))   # a resend
-    as_lattice(admin, event, "item_keep", rest[0], json.dumps({}))   # then read and kept on its own: not a repeat
+        as_web_role(admin, event, "item_keep", i, json.dumps({"bulk": True}))
+    as_web_role(admin, event, "item_keep", rest[0], json.dumps({"bulk": True}))   # a resend
+    as_web_role(admin, event, "item_keep", rest[0], json.dumps({}))   # then read and kept on its own: not a repeat
     assert feedback.apply_item_feedback(pipe) == {"discard": 1, "keep": len(rest) + 1, "repeat": 1}
     hows = table(pipe, "SELECT item_id, how FROM im.item_verdicts ORDER BY verdict_id")
     assert hows == [(spot, "audit"), *[(i, "bulk") for i in rest], (rest[0], "one")]
-    shown = dict(as_lattice(admin, "SELECT item_id, how FROM pub.evidence WHERE item_id = ANY(%s)", [spot, *rest]))
+    shown = dict(as_web_role(admin, "SELECT item_id, how FROM pub.evidence WHERE item_id = ANY(%s)", [spot, *rest]))
     assert shown == {spot: "audit", rest[0]: "one", **{i: "bulk" for i in rest[1:]}}   # the latest verdict's

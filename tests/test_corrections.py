@@ -31,12 +31,15 @@ def test_my_wording_wins_and_the_original_stays(seeded_lattice, admin):
     idea = idea_where(pipe, "Something new")
     event(admin, "idea_correct", idea, {"title": "Garden telemetry", "statement": "Soil sensors over LoRa, solar-powered."})
     event(admin, "idea_note", idea, {"note": "This is about my backyard, not a product."})
-    assert table(pipe, """SELECT title, statement, claude_title, my_note, corrected FROM pub.ideas
-                          WHERE idea_id = %s""", idea) == \
+    corrected = "title IS DISTINCT FROM claude_title OR statement IS DISTINCT FROM claude_statement"
+    assert table(pipe, f"""SELECT title, statement, claude_title, my_note, {corrected} FROM im.idea_text
+                           WHERE idea_id = %s""", idea) == \
         [("Garden telemetry", "Soil sensors over LoRa, solar-powered.", "Something new",
           "This is about my backyard, not a product.", True)]
+    assert table(pipe, "SELECT title, statement FROM pub.ideas WHERE idea_id = %s", idea) == \
+        [("Garden telemetry", "Soil sensors over LoRa, solar-powered.")]
     event(admin, "idea_correct", idea, {"title": ""})   # an empty field reverts to Claude's
-    assert table(pipe, "SELECT title, statement, corrected FROM pub.ideas WHERE idea_id = %s", idea) == \
+    assert table(pipe, f"SELECT title, statement, {corrected} FROM im.idea_text WHERE idea_id = %s", idea) == \
         [("Something new", "Soil sensors over LoRa, solar-powered.", True)]
 
 

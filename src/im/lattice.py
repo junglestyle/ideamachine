@@ -7,7 +7,7 @@ cluster, with the title and statement the matcher wrote. It decides membership o
 another is the connection judge's, so the matcher writes no lineage. It only links, never merges destructively.
 Discarded items are skipped. Captures are matched in the order I said them, speech and the archive (captures of
 what I typed into the ChatGPT Idea Machine, with no episode, migration 055) alike. Related-idea edges come from the
-embeddings and are rebuilt every run, and so are the ideas' positions on Lattice's map.
+embeddings and are rebuilt every run, and so are the cards' positions on the sky.
 
 A thought I relay and a thought I hold are never the same point: a relayed capture (`attributed_to`, extraction v5)
 is shown only clusters that began from a relayed capture, and my own only the rest. Captures from before v5 have no
@@ -25,7 +25,7 @@ from im.config import ModelConfig
 
 MATCH_K = 5                    # nearest clusters shown to the matcher
 RELATED_K, RELATED_MIN = 3, 0.70   # related edges: top 3 neighbors at cosine >= 0.70. bge-small puts a typical
-                                   # nearest neighbor at 0.68 (p90 0.73) on my ideas; tune by eye in Lattice.
+                                   # nearest neighbor at 0.68 (p90 0.73) on my ideas; tune by eye.
 MEMBERS = 3                    # a candidate's observations shown, newest first
 
 MATCH_SYSTEM = """You place one newly captured thought of mine among my existing clusters. A cluster is a group \
@@ -423,7 +423,7 @@ def project(M: np.ndarray, prev: np.ndarray | None = None, shared: np.ndarray | 
 
 
 def place(conn, model_version: str) -> int:
-    """Recompute im.idea_positions for every card (the neutral view's clusters, a superset of what Lattice shows)
+    """Recompute im.idea_positions for every card (the neutral view's clusters, pub.card_positions)
     that has an embedding: the one map every view shares (decision 0005, amended). Returns how many."""
     rows = conn.execute(
         """SELECT e.idea_id, e.embedding::text, p.x, p.y, p.method FROM im.idea_embeddings e

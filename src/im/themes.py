@@ -5,7 +5,7 @@
 - The proposer, once enough ideas fit no theme, asks Claude to group them into new themes. These arrive unpinned
   (`origin = 'clustered'`) and stay proposals until I pin, rename or reject them.
 - My theme feedback (pin, unpin, rename, reject, merge, split, filing or unfiling one idea) arrives as events in
-  pub.feedback_events, from Lattice or the CLI, and applies the moment it's inserted (a trigger running
+  pub.feedback_events (from `im themes`), and applies the moment it's inserted (a trigger running
   im.apply_theme_event, migration 024). Rejected names, and proposals I merged away, are never proposed again. An
   idea I unfiled is never filed into that theme again, and re-filing never removes a placement I made.
 - A theme without a description (one I split off) gets one from Claude on the run, since the filer reads them.

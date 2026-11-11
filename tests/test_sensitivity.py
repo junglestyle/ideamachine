@@ -8,7 +8,7 @@ import pytest
 from im import jev, sensitivity, themes
 
 from helpers import table
-from test_review import as_lattice
+from test_review import as_web_role
 
 
 def tagger(word="coffee", broken=0):
@@ -27,7 +27,7 @@ def tagger(word="coffee", broken=0):
 
 
 def shown(admin):
-    return {(k, str(i)): (s, c, b) for k, i, s, c, b in as_lattice(
+    return {(k, str(i)): (s, c, b) for k, i, s, c, b in as_web_role(
         admin, 'SELECT kind, id, sensitive, categories, "by" FROM pub.sensitivity')}
 
 
@@ -44,7 +44,7 @@ def test_jev_tags_once_and_again_when_the_text_changes(seeded_lattice, admin):
     assert p == {t: 0.9 if t == "violence" else 0.1 for t in sensitivity.TAGS}   # kept, to set the cut from my marks
     assert sensitivity.tag_stage(pipe, client)["pending"] == 0
 
-    as_lattice(admin, "INSERT INTO pub.feedback_events (kind, idea_id, payload) VALUES ('idea_correct', %s, %s)",
+    as_web_role(admin, "INSERT INTO pub.feedback_events (kind, idea_id, payload) VALUES ('idea_correct', %s, %s)",
                coffee, json.dumps({"title": "Tea runs it", "statement": "The tea order is the real meeting."}))
     stats = sensitivity.tag_stage(pipe, client)   # the changed idea alone, asked again
     assert (stats["pending"], stats["tagged"]) == (1, 1) and "The tea order" in json.dumps(sent[-1]["state"])
@@ -56,8 +56,8 @@ def test_my_marks_win_at_once_either_way(seeded_lattice, admin):
     coffee = table(pipe, "SELECT idea_id FROM pub.ideas WHERE statement LIKE '%%coffee%%'")[0][0]
     jokes = themes.find(pipe, "jokes")
     mark = "INSERT INTO pub.feedback_events (kind, idea_id, theme_id, payload) VALUES (%s, %s, %s, %s)"
-    as_lattice(admin, mark, "idea_sensitive", coffee, None, json.dumps({"sensitive": False}))
-    as_lattice(admin, mark, "theme_sensitive", None, jokes, json.dumps({"sensitive": True}))
+    as_web_role(admin, mark, "idea_sensitive", coffee, None, json.dumps({"sensitive": False}))
+    as_web_role(admin, mark, "theme_sensitive", None, jokes, json.dumps({"sensitive": True}))
     assert shown(admin) == {("idea", str(coffee)): (False, ["violence"], "owner"),
                             ("theme", str(jokes)): (True, [], "owner")}
     for kind, idea, theme, payload in [("idea_sensitive", coffee, None, {}),
@@ -65,10 +65,10 @@ def test_my_marks_win_at_once_either_way(seeded_lattice, admin):
                                        ("idea_sensitive", coffee, None, {"sensitive": "yes"}),
                                        ("theme_sensitive", None, None, {"sensitive": True})]:
         with pytest.raises(psycopg.errors.CheckViolation):
-            as_lattice(admin, mark, kind, idea, theme, json.dumps(payload))
+            as_web_role(admin, mark, kind, idea, theme, json.dumps(payload))
     themes.record(pipe, "reject_theme", jokes)   # not a proposal: stays; a merge would leave the mark harmless
     other = themes.find(pipe, "models")
-    as_lattice(admin, "INSERT INTO pub.feedback_events (kind, theme_id, payload) VALUES ('merge_theme', %s, %s)",
+    as_web_role(admin, "INSERT INTO pub.feedback_events (kind, theme_id, payload) VALUES ('merge_theme', %s, %s)",
                jokes, json.dumps({"into": str(other)}))
     assert ("theme", str(jokes)) not in shown(admin)   # the theme is gone; its old mark stays as history
 
@@ -79,8 +79,8 @@ def test_my_latest_mark_is_what_demo_mode_hides(seeded_lattice, admin):
     jokes = themes.find(pipe, "jokes")
     mark = "INSERT INTO pub.feedback_events (kind, idea_id, theme_id, payload) VALUES (%s, %s, %s, %s)"
     for sensitive in (True, False, True, False):   # I change my mind, and back, and again
-        as_lattice(admin, mark, "idea_sensitive", coffee, None, json.dumps({"sensitive": sensitive}))
-        as_lattice(admin, mark, "theme_sensitive", None, jokes, json.dumps({"sensitive": not sensitive}))
+        as_web_role(admin, mark, "idea_sensitive", coffee, None, json.dumps({"sensitive": sensitive}))
+        as_web_role(admin, mark, "theme_sensitive", None, jokes, json.dumps({"sensitive": not sensitive}))
         assert shown(admin) == {("idea", str(coffee)): (sensitive, [], "owner"),
                                 ("theme", str(jokes)): (not sensitive, [], "owner")}
 

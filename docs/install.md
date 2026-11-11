@@ -58,9 +58,9 @@ Settings are env vars:
   directories it created itself.
 - `ANTHROPIC_API_KEY` (or an `ant auth login` profile): for idea extraction. Without it `im run` skips extraction
   and says so. What's sent, and how, is in [decisions/0004-claude-extraction.md](decisions/0004-claude-extraction.md).
-- `LATTICE_DATABASE_URL` and `LATTICE_TOKEN`: for `im web`, the neutral view (every cluster past the gates, newest
+- `IM_WEB_DATABASE_URL` and `IM_WEB_TOKEN`: for `im web`, the neutral view (every cluster past the gates, newest
   first, no score; [decision 0007](decisions/0007-neutral-proposals.md)). It reads `pub` and appends feedback as
-  Lattice's role, logs in with Lattice's token, and listens on 127.0.0.1:8792. A link toggles demo mode, where
+  role `lattice_app`, logs in with its token, and listens on 127.0.0.1:8792. A link toggles demo mode, where
   nothing sensitive shows and nothing can be kept or dismissed; `im web --demo` serves demo mode only.
 - `IM_DEV_ADMIN_URL`: the local dev superuser, used only by tests to create and drop `im_test`. Code refuses it
   unless every host it (or `PGHOST`) names is localhost, a loopback address or a socket directory. Each test gets a
@@ -129,7 +129,7 @@ One REPEATABLE READ transaction:
    `utterance_id` when the transcript is the same, by time overlap otherwise. Then purge everything that overlaps
    a `forgotten.json` span.
 2. **Purge.** Delete everything made from a forgotten segment: every episode (current or retired) that contains
-   one; every label, idea, digest, verdict and observation made from one; Lattice's events on captures of it, even
+   one; every label, idea, digest, verdict and observation made from one; the feedback events on captures of it, even
    once the capture is gone; and the classifiers trained on those labels.
 3. **Segment.** Re-segment conversations whose membership changed, or whose episodes are stale or missing.
    Episodes are content-addressed (`uuid5(stage_version, input_hash)`), so unchanged episodes aren't touched,
@@ -142,15 +142,15 @@ Then, outside that transaction:
   Ollama is down or the GPU is busy, the run notes it and goes on.
 - **Quotes** (`src/im/quotes.py`). Each new capture's quote is lined up with the lines it cites and the line
   either side, and the capture then cites every line its words are on: a model's citation can stop a line short or
-  point a line off. Citations only grow, and the capture's observation, its idea, my verdicts on it, Lattice's
+  point a line off. Citations only grow, and the capture's observation, its idea, my verdicts on it, the feedback
   events on it and the matcher's request that sent it grow with it, so forgetting any line it quotes reaches all of
   them. A line label copied into the quote ("[23] me: ") is dropped. `im.items.quote_in_lines` keeps the share of
   the quote's words found; under 0.6 the quote isn't from its lines. The first run after migration 044 does this
   for every existing capture.
-- **Lattice.** Each new capture is shown the nearest clusters on its side (relayed or my own; local embeddings), and
-  the matcher says of each whether the capture makes the same point. It joins the nearest that does, else starts a
-  new cluster. Two or more matches are logged in `im.merge_review` as a possible duplicate, for my review. Related-
-  idea edges are rebuilt. Lattice, the separate presentation app, reads the result through schema `pub`
+- **Match into the lattice.** Each new capture is shown the nearest clusters on its side (relayed or my own; local
+  embeddings), and the matcher says of each whether the capture makes the same point. It joins the nearest that
+  does, else starts a new cluster. Two or more matches are logged in `im.merge_review` as a possible duplicate, for
+  my review. Related-idea edges are rebuilt. The web view reads the result through schema `pub`
   ([ROADMAP §3.5](ROADMAP.md)).
 - **Digest.** Claude writes the last completed week's digest (Monday to Monday) once every episode of that week
   has been read and its captures matched; until then the run leaves it, with `"waiting": true` in its stats, and a
