@@ -33,7 +33,10 @@ BATCH = 32
 THREADS_ENV = "IM_NER_THREADS"   # torch threads on the CPU: overrides the default, 2 (or every core for `warm`)
 COMMON = 4.5             # Zipf: "will" and "may" are above, "julie" and "mark" below
 TOKEN = re.compile(r"\bP-[A-Z2-7]{5}\b")
-NOT_NAMES = {"i", "me", "my", "you", "he", "she", "they", "we", "him", "her", "them", "us", "mom", "dad", "god"}
+# Words that are capitalized like names but aren't one: pronouns, and words for parents and for God ("Hashem",
+# Hebrew for "the Name", is how Jews refer to God).
+NOT_NAMES = {"i", "me", "my", "you", "he", "she", "they", "we", "him", "her", "them", "us", "mom", "dad", "god",
+             "hashem"}
 POLICY = "C1;speakers-pseudonymized;spoken-names-hmac;ner={model}@{threshold};no-registry"
 
 
