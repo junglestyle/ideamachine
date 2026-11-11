@@ -20,7 +20,7 @@ import json
 import random
 from pathlib import Path
 
-from im import summary_audit, trial
+from im import egress, summary_audit, trial
 
 HEADER = """# Captures (blind)
 
@@ -41,11 +41,11 @@ def _capture(eid, i: int, it: dict) -> dict:
             "segments": it["source_segment_ids"]}
 
 
-def captures(conn, candidate: tuple[str, str], reference: tuple[str, str], replicate: tuple[str, str],
-             policy: str) -> tuple[list[dict], list[dict]]:
+def captures(conn, candidate: tuple[str, str], reference: tuple[str, str],
+             replicate: tuple[str, str]) -> tuple[list[dict], list[dict]]:
     """The reference's solid captures (its replicate made them too), as (missed by the candidate, found by it), on
     the episodes all three read with the same payload. Each is (prompt_version, model)."""
-    ref, rep, cand = (trial._reads(conn, *r, policy) for r in (reference, replicate, candidate))
+    ref, rep, cand = (trial._reads(conn, *r) for r in (reference, replicate, candidate))
     if not rep:
         raise SystemExit("the reference has no replicate to tell its solid captures from the ones it makes only "
                          "sometimes: im trial <prompt> --model <reference> --replicate 2")
@@ -60,10 +60,10 @@ def captures(conn, candidate: tuple[str, str], reference: tuple[str, str], repli
     return missed, found
 
 
-def both_ways(conn, candidate: tuple[str, str], reference: tuple[str, str], policy: str) -> dict[str, list[dict]]:
+def both_ways(conn, candidate: tuple[str, str], reference: tuple[str, str]) -> dict[str, list[dict]]:
     """Every capture on the episodes both read with the same payload, as made only by the candidate, only by the
     reference, or by both (the reference's, standing for the pair)."""
-    ref, cand = (trial._reads(conn, *r, policy) for r in (reference, candidate))
+    ref, cand = (trial._reads(conn, *r) for r in (reference, candidate))
     sets = {"candidate_only": [], "reference_only": [], "both": []}
     for eid in sorted(ref, key=str):
         if not (eid in cand and ref[eid][0] == cand[eid][0]):
@@ -77,19 +77,18 @@ def both_ways(conn, candidate: tuple[str, str], reference: tuple[str, str], poli
     return sets
 
 
-def build(conn, candidate, reference, replicate, policy: str, seed: int = 13,
-          size: int | None = None) -> tuple[str, dict]:
+def build(conn, candidate, reference, replicate, seed: int = 13, size: int | None = None) -> tuple[str, dict]:
     """With a replicate: every solid capture the candidate missed (or `size` of them), and as many it found. Without:
     `size` (default BOTH_WAYS_SIZE) from each of both_ways' sets."""
     rng = random.Random(seed)
     if replicate:
-        missed, found = captures(conn, candidate, reference, replicate, policy)
+        missed, found = captures(conn, candidate, reference, replicate)
         if not missed:
             raise SystemExit(f"{candidate[1]} missed none of {reference[1]}'s solid captures on the episodes all three "
                              "read")
         sets, n = {"missed": missed, "found": found}, min(size or len(missed), len(missed), len(found))
     else:
-        sets = both_ways(conn, candidate, reference, policy)
+        sets = both_ways(conn, candidate, reference)
         n = min(size or BOTH_WAYS_SIZE, *map(len, sets.values()))
         if not n:
             raise SystemExit(f"{candidate[1]} and {reference[1]} leave a set empty on the episodes both read: "
@@ -104,19 +103,19 @@ def build(conn, candidate, reference, replicate, policy: str, seed: int = 13,
            "reference": reference[1],
            "prompt_versions": {"candidate": candidate[0], "reference": reference[0]}
            | ({"replicate": replicate[0]} if replicate else {}),
-           "policy": policy, "sizes": {s: n for s in sets}, "available": {s: len(cs) for s, cs in sets.items()},
+           "policy": egress.POLICY_VERSION, "sizes": {s: n for s in sets},
+           "available": {s: len(cs) for s, cs in sets.items()},
            "pairs": {str(num): c for num, c in enumerate(picked, 1)}}
     return "\n".join(lines), key
 
 
-def write(conn, out: Path, candidate, reference, replicate, policy: str, seed: int = 13,
-          size: int | None = None) -> dict:
+def write(conn, out: Path, candidate, reference, replicate, seed: int = 13, size: int | None = None) -> dict:
     """The sheet and its key in `out`; `replicate` None for the both-ways sheet."""
     out.mkdir(parents=True, exist_ok=True)
     sheet, key = out / "sheet.md", out / "key.json"
     if sheet.exists() or key.exists():
         raise SystemExit(f"{out} already has a sheet; score it, or pick another folder")
-    text, k = build(conn, candidate, reference, replicate, policy, seed, size)
+    text, k = build(conn, candidate, reference, replicate, seed, size)
     sheet.write_text(text)
     key.write_text(json.dumps(k, indent=2))
     return {"sheet": str(sheet), "items": len(k["pairs"]), "by_set": k["sizes"], "available": k["available"]}

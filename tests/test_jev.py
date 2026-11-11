@@ -50,7 +50,7 @@ def test_an_analogy_needs_both_and_the_middle_is_unsure():
 
 
 def test_jev_drafts_a_sheet_from_structured_state(lattice_with_clusters, tmp_path):  # noqa: F811
-    # Names said under policy C: test_audit_egress, on a lattice whose clusters name someone.
+    # Names said go out as said: test_audit_egress, on a lattice whose clusters name someone.
     probe_audit.write(lattice_with_clusters, FakeProposer(), None, "tension", tmp_path)
     key = json.loads((tmp_path / "key.json").read_text())
     fill(tmp_path, lambda p: "no")

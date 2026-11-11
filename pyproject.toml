@@ -7,26 +7,15 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "numpy>=2",
     "anthropic>=0.70",
-    "wordfreq>=3.1.1",
 ]
 
 [project.optional-dependencies]
-# The triage backends (Laya, the fallback classifier), embeddings, and GLiNER for names. CPU-only torch.
+# The triage backends (Laya, the fallback classifier) and embeddings. CPU-only torch.
 models = [
     "laya==0.3.23",
     "torch>=2.8",
     "sentence-transformers>=5",
     "scikit-learn>=1.6",
-    "gliner>=0.2.30",          # names said, for policy C (im.names)
-    "protobuf>=5",             # GLiNER's DeBERTa tokenizer converts through it on load
-]
-
-# Only what finds names said (im.names), for the GPU worker's environment (install/gpu.sh), which installs it
-# without this project's CPU-only torch index, so torch comes from PyPI with CUDA.
-ner = [
-    "torch>=2.8",
-    "gliner>=0.2.30",
-    "protobuf>=5",
 ]
 
 [project.scripts]

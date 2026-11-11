@@ -2,7 +2,7 @@
 
 import json
 
-from im import jev, match_bench, names
+from im import jev, match_bench
 
 from helpers import table
 from test_lattice import lat_setup, seeded  # noqa: F401 (fixture)
@@ -24,7 +24,7 @@ def fake_jev(sent):
 def test_jev_replays_the_matchers_decisions_and_is_scored_against_opus(seeded, cfg, stream, tmp_path):
     lat_setup(seeded, cfg, stream)   # Opus (a fake, matcher v2) decided: the coffee capture makes the coffee idea's
     sent = []                        # point; the build and LoRa captures are new
-    out = match_bench.run(seeded, fake_jev(sent), tmp_path, names.Scrubber(b"k"))
+    out = match_bench.run(seeded, fake_jev(sent), tmp_path)
     assert out == {"decisions": 3, "asked": len(sent), "answered": len(sent)}
     assert all(set(b["questions"]) == set(jev.QUESTIONS["match"]) for b in sent)
     # Each request is logged with the capture's segments and those of the idea it was asked about.
@@ -41,7 +41,7 @@ def test_jev_replays_the_matchers_decisions_and_is_scored_against_opus(seeded, c
     # development, which matcher v2 never decides, so Jev and Opus disagree on 1 of 3.
     assert r["agree"]["same 0.5"].split() == ["0.67", "0.67", "0.67", "0.67", "1.00"]
 
-    assert match_bench.run(seeded, fake_jev(sent), tmp_path, names.Scrubber(b"k"))["answered"] == out["answered"]
+    assert match_bench.run(seeded, fake_jev(sent), tmp_path)["answered"] == out["answered"]
     assert len(sent) == out["asked"]   # a rerun sends nothing it has an answer to
 
 

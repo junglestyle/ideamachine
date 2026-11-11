@@ -11,7 +11,7 @@ import json
 import uuid
 from importlib import resources
 
-from im import capture_checks, egress, feedback, llm, names
+from im import capture_checks, egress, feedback, llm
 from im.config import ExtractConfig
 
 SCHEMA_VERSION = 1
@@ -242,10 +242,6 @@ SYSTEM_V5_3 = resources.files("im.prompts").joinpath("extract_v5_3.txt").read_te
 PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3, "v4": SYSTEM_V4, "v5": SYSTEM_V5, "v5.1": SYSTEM_V5_1,
            "v5.2": SYSTEM_V5_2, "v5.3": SYSTEM_V5_3}
 LIVE = ("v1", "v2", "v3", "v5.3")   # what `im run` may read with; v4 and v5 to v5.2 are for `im trial` only
-# The prompts whose payloads keep policy B: names said go out as said. Every later one was written and tried for
-# policy C (decision 0008), names said pseudonymized, so `im run` reads with it under C. v1 to v3 stay on B until
-# cutover retires them, so the live database doesn't re-read every episode (decision 0012).
-POLICY_B = ("v1", "v2", "v3")
 
 
 def system_prompt(name: str = "v1", interests: str = "") -> str:
@@ -338,7 +334,6 @@ SCHEMA_V5 = {
     "additionalProperties": False,
 }
 SCHEMAS = {"v4": SCHEMA_V4, "v5": SCHEMA_V5, "v5.1": SCHEMA_V5, "v5.2": SCHEMA_V5, "v5.3": SCHEMA_V5}   # else SCHEMA
-TEXT = ("quote", "reading", "gist", "attributed_to")   # what a capture says, names unscrubbed back (policy C)
 
 
 def schema_for(name: str) -> dict:
@@ -349,24 +344,22 @@ def prompt_version(model: str, effort: str, system: str = SYSTEM, schema: dict =
     return hashlib.sha256(json.dumps([system, schema, model, effort], sort_keys=True).encode()).hexdigest()[:16]
 
 
-def _pending(conn, model: str, pv: str, scrubber=None) -> list:
-    """Current episodes not yet read under this model/prompt/policy, or whose payload changed. Newest first. With a
-    scrubber, the payloads are policy C's."""
-    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+def _pending(conn, model: str, pv: str) -> list:
+    """Current episodes not yet read under this model/prompt/policy, or whose payload changed. Newest first."""
     rows = conn.execute(
         """SELECT e.episode_id, x.input_hash FROM im.episodes e
            LEFT JOIN im.extractions x ON x.episode_id = e.episode_id AND x.model = %s
                 AND x.prompt_version = %s AND x.privacy_policy_version = %s
-           WHERE e.current ORDER BY e.started_at DESC""", (model, pv, policy)).fetchall()
+           WHERE e.current ORDER BY e.started_at DESC""", (model, pv, egress.POLICY_VERSION)).fetchall()
     out = []
     for eid, done_hash in rows:
-        p = egress.build(conn, eid, scrubber)
+        p = egress.build(conn, eid)
         if p.sha256 != done_hash:
             out.append(p)
     return out
 
 
-def _reuse(conn, p: egress.Payload, model: str, pv: str, scrubber=None) -> tuple[int, list[dict]] | None:
+def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict]] | None:
     """An earlier read of this exact payload on another episode: its egress id and items, mapped onto this one.
 
     Naming a speaker re-derives the episode but sends the same pseudonymized text, so there's nothing new to read.
@@ -379,7 +372,7 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str, scrubber=None) -> tuple
         (p.sha256, model, pv, p.policy, p.episode_id)).fetchone()
     if row is None:
         return None
-    old = egress.build(conn, row[0], scrubber)
+    old = egress.build(conn, row[0])
     if old.sha256 != p.sha256:
         return None
     line = {sid: n for n, sid in enumerate(old.segment_ids)}
@@ -399,9 +392,9 @@ def _reuse(conn, p: egress.Payload, model: str, pv: str, scrubber=None) -> tuple
 
 
 def _items(p: egress.Payload, raw: list[dict]) -> list[dict]:
-    """The model's items, mapped back to segments, local speakers and the names said (policy C). Items citing no
-    real line are dropped. Each keeps `checks`, the capture checks it fails on the transcript as sent (v5 answers have
-    no speaker, being mine, and no confidence)."""
+    """The model's items, mapped back to segments and local speakers. Items citing no real line are dropped. Each
+    keeps `checks`, the capture checks it fails on the transcript as sent (v5 answers have no speaker, being mine, and
+    no confidence)."""
     sent = capture_checks.lines_of(p.text)
     out = []
     for item in raw:
@@ -409,14 +402,13 @@ def _items(p: egress.Payload, raw: list[dict]) -> list[dict]:
         if not lines:
             continue
         said_by = item.get("said_by", "me")
-        out.append(item | {k: names.unscrub(item[k], p.names) for k in TEXT if k in item} | {
-            "themes": [names.unscrub(t, p.names) for t in item.get("themes", [])],
+        out.append(item | {
+            "themes": item.get("themes", []),
             "said_by": p.speakers.get(said_by, said_by),
             "source_segment_ids": [p.segment_ids[n - 1] for n in lines],
             "confidence": min(max(float(item["confidence"]), 0.0), 1.0) if "confidence" in item else None,
             "checks": capture_checks.check(sent, item),
-        } | ({"mishearings": [{k: names.unscrub(m[k], p.names) for k in ("heard", "meant")}
-                              for m in item["mishearings"]]} if "mishearings" in item else {}))
+        })
     return out
 
 
@@ -508,15 +500,15 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
 
 def run_stage(conn, client, model: str = ExtractConfig.model, effort: str = ExtractConfig.effort,
               monthly_cap_usd: float = 20.0, limit: int | None = None, system: str = SYSTEM,
-              max_tokens: int | None = None, schema: dict = SCHEMA, scrubber=None) -> dict:
+              max_tokens: int | None = None, schema: dict = SCHEMA) -> dict:
     """Read every episode not yet read under this model, prompt and schema (schema_for the prompt), and keep what
-    it captures in im.items. With a scrubber, under policy C: names said go out pseudonymized and come back as said."""
+    it captures in im.items."""
     pv = prompt_version(model, effort, system, schema)
-    todo = _pending(conn, model, pv, scrubber)
+    todo = _pending(conn, model, pv)
     stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "reused": 0, "items": 0,
              "refused": 0, "failed": 0, "cost_usd": 0.0, "stopped": None}
     for p in todo[:limit] if limit else todo:
-        if reused := _reuse(conn, p, model, pv, scrubber):
+        if reused := _reuse(conn, p, model, pv):
             _carry_matches(conn, _save(conn, p, model, pv, *reused), reused[1])
             stats["reused"] += 1
             stats["items"] += len(reused[1])

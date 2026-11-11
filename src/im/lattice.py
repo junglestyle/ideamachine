@@ -20,7 +20,7 @@ import re
 
 import numpy as np
 
-from im import citations, egress, llm, names
+from im import citations, egress, llm
 from im.config import ModelConfig
 
 MATCH_K = 5                    # nearest clusters shown to the matcher
@@ -208,7 +208,7 @@ def _members(conn, idea_id) -> list[tuple]:
 
 
 def _relayed_from(item: tuple) -> str:
-    return item[9] or ("" if item[3] == "me" else "someone else")   # a name said goes out as policy C has it
+    return item[9] or ("" if item[3] == "me" else "someone else")
 
 
 def _text(item: tuple, candidates: list[tuple], members: dict) -> str:
@@ -248,17 +248,9 @@ def _statement(answer: dict, item: tuple) -> str:
     return s
 
 
-def _said(answer: dict | None, back: dict) -> dict | None:
-    """The matcher's answer with the names it was shown pseudonymized put back in its title and statement."""
-    if not answer or not back:
-        return answer
-    return answer | {k: names.unscrub(answer[k], back) for k in ("title", "statement") if k in answer}
-
-
 def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: int | None = None,
-                chat: ModelConfig = ModelConfig(), scrubber=None) -> dict:
-    """`chat`: the model that decides, and its effort ([match] in im.toml); a change is a new matcher_version. With a
-    scrubber, names said go out pseudonymized (policy C) and a new cluster's title and statement come back as said."""
+                chat: ModelConfig = ModelConfig()) -> dict:
+    """`chat`: the model that decides, and its effort ([match] in im.toml); a change is a new matcher_version."""
     version = matcher_version(chat)
     carried = carry_by_observation(conn)
     items = _pending_items(conn)
@@ -292,15 +284,12 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
         candidates = [(idea, *info[idea]) for idea in nearest if (idea in relayed) == side][:MATCH_K]
         egress_id, answer = None, None   # the very first cluster on its side: nothing to compare with
         if candidates:
-            text, back = _text(item, candidates, {c[0]: _members(conn, c[0]) for c in candidates}), {}
-            if scrubber:
-                (text,), back, _ = scrubber.scrub([text])
+            text = _text(item, candidates, {c[0]: _members(conn, c[0]) for c in candidates})
             try:
                 for attempt in range(2):   # an answer that misses a candidate, or a new cluster's statement: once more
                     a = egress.ask(conn, client, chat.model, chat.effort, MATCH_SYSTEM, MATCH_SCHEMA, text,
                                    segment_ids=item[6], prompt_version=version, monthly_cap_usd=monthly_cap_usd,
-                                   episode_id=item[1], max_tokens=chat.max_tokens or 4000,
-                                   policy=scrubber.policy if scrubber else egress.POLICY_VERSION)
+                                   episode_id=item[1], max_tokens=chat.max_tokens or 4000)
                     if a.failed or _answer_ok(a.data, len(candidates)):
                         break
                     stats["asked_again"] += not attempt
@@ -310,7 +299,7 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
             if a.failed:   # logged and counted; matched on a later run
                 stats["failed"] += 1
                 continue
-            egress_id, answer = a.egress_id, _said(a.data, back)
+            egress_id, answer = a.egress_id, a.data
         same = sorted({j["candidate"] for j in (answer or {"judgments": []})["judgments"]
                        if j["same_point"] and 1 <= j["candidate"] <= len(candidates)})
         with conn.transaction():

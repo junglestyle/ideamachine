@@ -1,6 +1,6 @@
 """Mishearings: proposed by v5 captures, decided by me, and sent as hints that re-read nothing."""
 
-from im import egress, extract, mishearings, names
+from im import egress, extract, mishearings
 
 from helpers import run, table
 from test_extract import FakeClaude
@@ -44,12 +44,9 @@ def test_a_proposed_mishearing_is_a_hint_for_what_comes_next_and_re_reads_nothin
     assert "Known mishearings" not in egress.build(pipe, episode).text
 
 
-def test_a_pair_i_confirm_goes_out_as_said_even_where_the_name_finder_sees_a_name(pipe, cfg, stream):
+def test_a_pair_i_add_is_confirmed_and_goes_out_as_a_hint(pipe, cfg, stream):
     run(pipe, cfg, stream)
     episode = episode_saying(pipe, "LoRa")
-    scrubber = names.Scrubber(b"k", finder=lambda texts: ["LoRa"])   # a radio taken for a person
-    assert "LoRa" not in egress.build(pipe, episode, scrubber).text
-
     mishearings.decide(pipe, "LoRa", "LoRaWAN", "confirmed")   # nobody proposed it: added, confirmed
-    sent = egress.build(pipe, episode, scrubber).text
+    sent = egress.build(pipe, episode).text
     assert "over LoRa." in sent and 'Known mishearings: "LoRa" for "LoRaWAN" (confirmed).' in sent

@@ -16,7 +16,7 @@ uv run im load-fixtures           # a synthetic Hearsay stream in $IM_STREAM_DIR
 uv run im run                     # import + segment + extract ideas with Claude + route; idempotent
 uv run im ideas                   # what Claude captured; --review to keep or discard each item
 uv run im ideas --discards        # what I discarded and why: material for revising the extraction prompt
-uv run im trial v3 --model openai/gpt-6.1-sol   # B3: a model on the trial sample, names pseudonymized, vs Opus
+uv run im trial v3 --model openai/gpt-6.1-sol   # B3: a model on the trial sample, vs Opus
 uv run im trial v3 --model claude-opus-5-5 --replicate 2   # Opus against itself: the ceiling for recall
 uv run im trial v5 --replicate 2   # extraction v5 (decision 0012) on the trial sample, read twice; the report counts the capture checks each read fails
 uv run im trial v5 --model openai/gpt-6.1-sol --report --same-point   # also count a thought the two quoted from different lines, where Jev says they make the same point (sends only those pairs, to Jev; kept)
@@ -24,16 +24,15 @@ uv run im gate v5 --model openai/gpt-6.1-sol   # the capture gate on a trial rea
 uv run im audit-gate sheet saved/gate-1 v5 --model openai/gpt-6.1-sol   # 80 captures Jev answered about, half it flags; then `draft saved/gate-1 --model openai/gpt-6.1-terra` and `--model claude-opus-5-5`, `review saved/gate-1` (only their disagreements, on review.md), `score saved/gate-1` (each check's AUC and suggested cut)
 uv run im audit-misses sheet saved/misses-terra v3 --model openai/gpt-6.1-terra   # its misses among Opus's solid captures, blind beside ones it found; score my marks
 uv run im audit-misses sheet saved/bar-sol v5 --model openai/gpt-6.1-sol --both-ways   # 20 captures only Sol made, 20 only Opus made, 20 both made, blind: whose bar is right?
-uv run im hard-set saved/hard-1 --per-case 6 --controls 20   # a deliberate hard set of episodes (irony, fragments, relayed thoughts, short thoughts, ones I only acknowledge, ones answering someone), plus controls from the trials' random sample, each as extraction would send it under policy C; sends nothing
+uv run im hard-set saved/hard-1 --per-case 6 --controls 20   # a deliberate hard set of episodes (irony, fragments, relayed thoughts, short thoughts, ones I only acknowledge, ones answering someone), plus controls from the trials' random sample, each as extraction would send it; sends nothing
 uv run im mishearings list   # the transcription's mishearings, proposed by v5 captures or added by me; then `confirm HEARD MEANT` (also adds one) or `reject HEARD MEANT`
 uv run im audit-edges sheet saved/b4-4 --size 75 --seed 7 --exclude saved/b4-1 saved/b4-2 saved/b4-3   # B4: a fresh sheet with no pair I've marked before
 uv run im audit-edges draft saved/b4-3 --model jev-1.14.0   # B4: Jev answers a sheet; score shows connection at every cut
 uv run im audit-edges review saved/b4-1 saved/b4-2   # B4: pairs where a chat model's draft disagrees with my mark, with its case; a pair I left unmarked takes the models' mark where they agree (--all lists those too, to spot-check); answer in review.md, run again to apply
 uv run im bench-match run saved/b1-1 --limit 20   # B1: Opus's logged match decisions, replayed through Jev; `score` compares
-uv run im names warm               # policy C: find names in the trial sample once, before trials in parallel
 uv run im audit-tension draft saved/tension-2 --model jev-1.14.0   # Jev drafts a probe sheet (via OpenRouter); --probes asks more
-                                  # (OpenRouter models need OPENROUTER_API_KEY; policy C needs IM_NAME_KEY)
-uv run im import-chatgpt saved/chatgpt-idea-machine.md saved/chatgpt-curate-sheet.md   # what the ChatGPT Idea Machine's kept messages would send, a session at a time; --write reads them with extraction v5.3 (policy C) into archive captures, once
+                                  # (OpenRouter models need OPENROUTER_API_KEY)
+uv run im import-chatgpt saved/chatgpt-idea-machine.md saved/chatgpt-curate-sheet.md   # what the ChatGPT Idea Machine's kept messages would send, a session at a time; --write reads them with extraction v5.3 into archive captures, once
 uv run im lattice                 # lattice counts: ideas, evidence, connections
 uv run im themes                  # themes; im themes pin|unpin|reject <name>, im themes rename <name> <new name>
 uv run im load-fixtures --scenario edited   # the same stream after every kind of correction and a forget
@@ -85,8 +84,8 @@ Both go into the stage's version. Changing extraction's re-reads every episode, 
 Changing the themes' asks again about every idea that fits no theme.
 The matcher and the digest use a new one from then on; what they've already done stays.
 
-The sensitivity tags have no section: Jev (`jev.MODEL`) answers one yes or no per tag, with names said pseudonymized
-(policy C), and every idea and theme is tagged again when the questions or the cut (`sensitivity.CUT`) change.
+The sensitivity tags have no section: Jev (`jev.MODEL`) answers one yes or no per tag, and every idea and theme is
+tagged again when the questions or the cut (`sensitivity.CUT`) change.
 
 Each section also takes `max_tokens`, a request's output budget, reasoning included (OpenRouter counts it there).
 It isn't part of any version, so raising it changes nothing already done: a request that ran out is simply asked

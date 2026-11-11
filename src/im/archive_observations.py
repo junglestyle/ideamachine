@@ -7,7 +7,7 @@ cross-references are never read or sent.
 
 The kept messages are read a session at a time, so a follow-up is read with what it follows: a gap of SESSION_GAP
 or more between two messages starts a new session. Each session goes out as one payload, as an episode's transcript
-does, under policy C: one line per message, labeled me, with the times on the context line, since a capture's quote
+does, under policy B: one line per message, labeled me, with the times on the context line, since a capture's quote
 is copied from its lines. A capture is said when the message its quote starts in was sent. It's stored as an
 archive capture (migration 055): an item with no episode, and its own archive observation, which records whether I
 edited the message. The matcher then places it among my speech in the order I said things. A session already read
@@ -133,19 +133,13 @@ def source_ref(conversation: str, session: list[dict]) -> str:
     return f"{NAME}:{conversation}:{session[0]['at'].isoformat()}"
 
 
-def payload(session: list[dict], scrubber=None) -> egress.Payload:
+def payload(session: list[dict]) -> egress.Payload:
     """The session as extraction reads it: one line per message, mine, its whitespace collapsed (a quote is copied
     from one line or consecutive ones), and each line's time on the context line. Line n is message n - 1."""
-    said, names, mine = [_ws(m["text"]) for m in session], {}, []
-    if scrubber:
-        said, names, mine = scrubber.scrub(said)
     context = ("Typed messages I sent to a chat, not speech: each line is one whole message of mine. Sent "
                + ", ".join(f"[{n}] {m['at']:%A %Y-%m-%d %H:%M}" for n, m in enumerate(session, 1)) + ".")
-    if names:
-        context += " Names in them are pseudonyms (P-...)" + (f"; mine is {' '.join(mine)}." if mine else ".")
-    text = f"Context: {context}\n\nTranscript:\n" + "\n".join(f"[{n}] me: {t}" for n, t in enumerate(said, 1))
-    return egress.Payload(None, text, list(range(len(session))), {"me": "me"},
-                          scrubber.policy if scrubber else egress.POLICY_VERSION, names)
+    lines = "\n".join(f"[{n}] me: {_ws(m['text'])}" for n, m in enumerate(session, 1))
+    return egress.Payload(None, f"Context: {context}\n\nTranscript:\n{lines}", list(range(len(session))), {"me": "me"})
 
 
 def already_read(conn, p: dict) -> set[str]:
@@ -204,9 +198,9 @@ def _store(conn, conversation: str, session: list[dict], p: egress.Payload, mode
             (ref, model, pv, p.policy, p.sha256, egress_id, len(items)))
 
 
-def import_sessions(conn, client, p: dict, scrubber, model: str, effort: str, monthly_cap_usd: float,
+def import_sessions(conn, client, p: dict, model: str, effort: str, monthly_cap_usd: float,
                     max_tokens: int | None = None) -> dict:
-    """Read each session not read yet with extraction v5.3 (policy C) and store what it captures."""
+    """Read each session not read yet with extraction v5.3 and store what it captures."""
     pv = extract.prompt_version(model, effort, extract.SYSTEM_V5_3, extract.SCHEMA_V5)
     read = already_read(conn, p)
     stats = {"model": model, "prompt_version": pv, "sessions": len(p["sessions"]), "already_read": 0, "read": 0,
@@ -215,7 +209,7 @@ def import_sessions(conn, client, p: dict, scrubber, model: str, effort: str, mo
         if source_ref(p["conversation"], session) in read:
             stats["already_read"] += 1
             continue
-        sent = payload(session, scrubber)
+        sent = payload(session)
         try:
             a = egress.ask(conn, client, model, effort, extract.SYSTEM_V5_3, extract.SCHEMA_V5, sent.text,
                            segment_ids=[], prompt_version=pv, monthly_cap_usd=monthly_cap_usd, policy=sent.policy,

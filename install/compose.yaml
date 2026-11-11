@@ -24,10 +24,6 @@ services:
     volumes:
       - /mnt/fast/ideamachine/pg:/var/lib/postgresql/data
       - ../dev/init:/docker-entrypoint-initdb.d:ro
-    # The NAS's loopback only: the GPU worker's names job (install/gpu.sh) reaches it through `ssh nas`, as role
-    # im_names. Nothing listens on the network.
-    ports:
-      - "127.0.0.1:55433:5432"
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres", "-d", "im"]
       interval: 5s

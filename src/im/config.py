@@ -5,6 +5,7 @@ config change is a version change and re-derives episodes.
 """
 
 import os
+import sys
 import tomllib
 from dataclasses import dataclass, fields
 
@@ -90,14 +91,13 @@ class WeightConfig:
 
 @dataclass(frozen=True)
 class EgressConfig:
-    my_names: tuple[str, ...] = ()       # what people call me: pseudonymized under policy C, and the model told it's me
-    names: tuple[str, ...] = ()          # other names to pseudonymize under policy C, beyond Hearsay's and GLiNER's
-    # Public figures whose names policy C sends as said (0008, amended): each as listed, in full, so "Thomas Sowell"
-    # leaves that name as said and any other Thomas pseudonymized. List "Sowell" too if I say it alone.
-    public_names: tuple[str, ...] = ()
     # Zero data retention: every request goes only to endpoints that keep nothing, Claude's through OpenRouter (to
     # Bedrock or Vertex) since Anthropic's own API keeps requests for 30 days. The route isn't part of any version.
     zdr: bool = False
+
+
+# Policy C's keys, retired with it (decision 0008, amended 2026-11-11): ignored, with a warning, until deleted.
+RETIRED_EGRESS = ("my_names", "names", "public_names")
 
 
 @dataclass(frozen=True)
@@ -122,7 +122,11 @@ def load() -> Config:
     triage = data.get("triage", {})
     if "backends" in triage:
         triage["backends"] = tuple(triage["backends"])
-    egress = {k: tuple(v) if isinstance(v, list) else v for k, v in data.get("egress", {}).items()}
+    egress = {k: tuple(v) if isinstance(v, list) else v for k, v in data.get("egress", {}).items()
+              if k not in RETIRED_EGRESS}
+    if retired := [k for k in RETIRED_EGRESS if k in data.get("egress", {})]:
+        print(f"[egress] {', '.join(retired)}: retired with policy C (decision 0008); delete them from {path}",
+              file=sys.stderr)
     models = {k: ModelConfig(**data.get(k, {})) for k in ("match", "themes", "digest")}
     return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
                   extract=ExtractConfig(**data.get("extract", {})), lattice=LatticeConfig(**data.get("lattice", {})),

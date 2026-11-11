@@ -15,7 +15,7 @@ ranks the marks (AUC) and suggests each decision's cut: for a repair, the highes
 gists marked past or unclear (a repair costs a request); for a drop, the lowest at which 90% of what it drops is
 marked drop (a drop loses a capture). A sheet made before a check was asked scores on the checks its answers have.
 
-The sheet sends nothing; a draft sends each capture, names said pseudonymized as the trial's payload had them.
+The sheet sends nothing; a draft sends each capture, as the trial's payload had it.
 """
 
 import json
@@ -23,7 +23,7 @@ import random
 import re
 from pathlib import Path
 
-from im import egress, gate, jev, llm, names, themes, trial
+from im import egress, gate, jev, llm, themes, trial
 
 SIZE = 80
 FLAGGED_AT = 0.5
@@ -82,7 +82,7 @@ def _capture(c: dict) -> dict:
     return {"quote": c["quote"], "gist": c["gist"], "source_segment_ids": c["segments"]}
 
 
-def write(conn, out: Path, client, read: tuple[str, str], policy: str, seed: int = 13, size: int = SIZE) -> dict:
+def write(conn, out: Path, client, read: tuple[str, str], seed: int = 13, size: int = SIZE) -> dict:
     """The sheet and its key: `size` captures of `read` (prompt_version, model) Jev has answered about (`client`'s
     question set), half flagged at FLAGGED_AT on a deciding check, half not."""
     out.mkdir(parents=True, exist_ok=True)
@@ -91,7 +91,7 @@ def write(conn, out: Path, client, read: tuple[str, str], policy: str, seed: int
         raise SystemExit(f"{out} already has a sheet; score it, or pick another folder")
     kept = jev.kept(conn, jev.question_set(client, "gate"))
     caps = {"flagged": [], "not_flagged": []}
-    for eid, (sha, items, _) in sorted(trial._reads(conn, *read, policy).items(), key=lambda kv: str(kv[0])):
+    for eid, (sha, items, _) in sorted(trial._reads(conn, *read).items(), key=lambda kv: str(kv[0])):
         for it in items:
             if (a := kept.get(gate.key(sha, it))) is None:
                 continue
@@ -106,9 +106,10 @@ def write(conn, out: Path, client, read: tuple[str, str], policy: str, seed: int
     rng.shuffle(picked)
     lines = [HEADER]
     for num, c in enumerate(picked, 1):
-        local = egress.build(conn, c["episode"])   # as I'd read it: names as said
+        local = egress.build(conn, c["episode"])
         lines += [f"## {num}", "", _shown(gate.state(local, _capture(c))), "", "gist: ", "capture: ", "note: ", ""]
-    k = {"benchmark": "gate", "seed": seed, "model": read[1], "prompt_version": read[0], "policy": policy,
+    k = {"benchmark": "gate", "seed": seed, "model": read[1], "prompt_version": read[0],
+         "policy": egress.POLICY_VERSION,
          "question_set": jev.question_set(client, "gate"), "available": {s: len(cs) for s, cs in caps.items()},
          "items": {str(num): c for num, c in enumerate(picked, 1)}}
     sheet.write_text("\n".join(lines))
@@ -118,7 +119,7 @@ def write(conn, out: Path, client, read: tuple[str, str], policy: str, seed: int
             "available": k["available"]}
 
 
-def draft(conn, folder: Path, client, model: str, effort: str, scrubber, monthly_cap_usd: float) -> dict:
+def draft(conn, folder: Path, client, model: str, effort: str, monthly_cap_usd: float) -> dict:
     """A chat model (`client`, llm.client_for) marks every item, blind to mine and the others', into
     draft-<model>.json as it goes. An item whose episode's transcript changed since the trial is skipped."""
     k = json.loads((folder / "key.json").read_text())
@@ -130,14 +131,14 @@ def draft(conn, folder: Path, client, model: str, effort: str, scrubber, monthly
     for num, c in sorted(k["items"].items(), key=lambda kv: int(kv[0])):
         if num in got:
             continue
-        p = egress.build(conn, c["episode"], scrubber)
+        p = egress.build(conn, c["episode"])
         if p.sha256 != c["payload_sha256"]:
             stats["payload_changed"] += 1
             continue
         try:
             a = egress.ask(conn, client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, _shown(gate.state(p, _capture(c))),
                            segment_ids=c["segments"], prompt_version=pv, monthly_cap_usd=monthly_cap_usd,
-                           policy=p.policy, episode_id=c["episode"])
+                           episode_id=c["episode"])
         except llm.Stop as e:
             stats["stopped"] = str(e)[:200]
             break
@@ -145,7 +146,7 @@ def draft(conn, folder: Path, client, model: str, effort: str, scrubber, monthly
         if a.failed or a.data is None:
             stats["failed"] += 1
             continue
-        got[num] = {f: names.unscrub(v, p.names) for f, v in a.data.items()}
+        got[num] = a.data
         stats["drafted"] += 1
         path.write_text(json.dumps(got, indent=2))
     stats["cost_usd"] = round(stats["cost_usd"], 6)

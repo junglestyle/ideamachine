@@ -183,13 +183,13 @@ captures do.
 - **Archive:** `im import-chatgpt <export> <sheet>` reads the ChatGPT conversation's export (ChatGPT Exporter's
   Markdown) and a curation sheet that marks each of my messages `keep`, `drop` (an instruction to ChatGPT) or
   `edit` (with the text to read instead). Only my messages are read: never ChatGPT's replies, numbering, groupings
-  or cross-references. The kept ones go to extraction v5.3 under policy C, one session at a time (a gap of 6 hours
-  starts the next), one line per message with the times on the context line. Each capture is an archive capture: an
-  item with no episode, and its own archive observation, with the time of the message its quote starts in and
-  whether I edited it (`edited`). The matcher places it among my speech in the order I said things; it's an
-  ordinary candidate, never kept automatically. Without `--write` it shows each session as it would go out, and the
-  plan; a session already read (`im.archive_reads`) is never sent again. The archive observations written onto the
-  seeded archive ideas before 055 belong to them directly.
+  or cross-references. The kept ones go to extraction v5.3 under policy B (C until 2026-11-11), one session at a
+  time (a gap of 6 hours starts the next), one line per message with the times on the context line. Each capture
+  is an archive capture: an item with no episode, and its own archive observation, with the time of the message its
+  quote starts in and whether I edited it (`edited`). The matcher places it among my speech in the order I said
+  things; it's an ordinary candidate, never kept automatically. Without `--write` it shows each session as it would
+  go out, and the plan; a session already read (`im.archive_reads`) is never sent again. The archive observations
+  written onto the seeded archive ideas before 055 belong to them directly.
 - **Typed:** each idea I add gets one observation of what I typed, at the time, from its first `idea_add` event. It
   belongs to its idea directly.
 - **Recurrence** counts them like speech, by conversation and `recurrence_minutes`: two messages to ChatGPT minutes

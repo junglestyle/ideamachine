@@ -1,14 +1,9 @@
 """What leaves the box, and how (docs/decisions/0004-claude-extraction.md).
 
-Policy B (`POLICY_VERSION`):
-- Everyone's words go out verbatim, mine and other people's.
+Policy B (`POLICY_VERSION`), the one policy since policy C was retired (decision 0008, amended 2026-11-11):
+- Everyone's words go out verbatim, mine and other people's, names said included.
 - Speakers are pseudonymized per request: "me", "unknown", and S1, S2... in order of first appearance.
   The mapping back to names stays local and is applied to what comes back.
-- Names *spoken* in the text are not scrubbed (that needs entity extraction, ROADMAP Phase 3).
-
-Policy C (decision 0008) is policy B with names said pseudonymized too (`im.names`). It's what a payload is built
-under when a `Scrubber` is passed: trials, the audits' sheets, drafts and spike, and live extraction with a prompt
-written for it (every one after v3, `extract.POLICY_B`).
 - Nothing from the projects registry goes out.
 - Every request goes through `send` (a chat model's through `ask`): it's sent only while this calendar month's spend
   is below the monthly cap, so the request that reaches the cap can pass it, and none goes after. It's logged in
@@ -19,11 +14,10 @@ written for it (every one after v3, `extract.POLICY_B`).
 import hashlib
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 
 from im import llm, mishearings
-from im.names import words
 from im.triage import _part_of_day
 
 POLICY_VERSION = "B1;speakers-pseudonymized;spoken-names-not-scrubbed;no-registry"
@@ -36,7 +30,6 @@ class Payload:
     segment_ids: list           # line n of the transcript is segment_ids[n - 1]
     speakers: dict              # pseudonym -> local speaker label (never sent)
     policy: str = POLICY_VERSION
-    names: dict = field(default_factory=dict)   # name pseudonym -> the name as said (never sent), policy C
     hints: str = ""             # the context line's known mishearings, as sent: hints, so not in sha256
 
     @property
@@ -58,13 +51,7 @@ def pseudonyms(speakers) -> dict:
     return alias
 
 
-def known_names(conn) -> list[str]:
-    """Everyone Hearsay knows by name, as speakers."""
-    return [n for (n,) in conn.execute(
-        "SELECT DISTINCT speaker_label FROM im.source_segments WHERE speaker_kind = 'person' ORDER BY 1")]
-
-
-def build(conn, episode_id, scrubber=None) -> Payload:
+def build(conn, episode_id) -> Payload:
     rows = conn.execute(
         """SELECT s.segment_id, s.speaker_label, s.speaker_kind, s.text, s.started_at, s.ended_at
            FROM im.episode_segments es JOIN im.source_segments s USING (segment_id)
@@ -80,14 +67,8 @@ def build(conn, episode_id, scrubber=None) -> Payload:
         (episode_id,)).fetchone()[0]
 
     alias = pseudonyms((label, kind) for _, label, kind, *_ in rows)
-    said, names, mine = [r[3] for r in rows], {}, []
+    said = [r[3] for r in rows]
     found = mishearings.hints(conn, said)
-    if scrubber:
-        exempt = mishearings.not_names(conn)
-        seen = {n for n in scrubber.find(conn, [(r[0], r[3]) for r in rows]) if not set(words(n)) <= exempt}
-        out, names, mine = scrubber.scrub(said + [x for h, m, _ in found for x in (h, m)], seen)
-        said, pairs = out[:len(said)], out[len(said):]
-        found = [(pairs[2 * i], pairs[2 * i + 1], s) for i, (_, _, s) in enumerate(found)]
     lines = [f"[{n}] {alias[r[1]]}: {text}" for n, (r, text) in enumerate(zip(rows, said), 1)]
 
     start: datetime = min(r[4] for r in rows).astimezone()
@@ -97,14 +78,11 @@ def build(conn, episode_id, scrubber=None) -> Payload:
                f"Speakers: {', '.join(dict.fromkeys(alias.values()))}.")
     if taps:
         context += " I tapped the pendant at " + ", ".join(f"{t.astimezone():%H:%M:%S}" for t in taps) + "."
-    if names:
-        context += " Names said are pseudonyms (P-...)" + (f"; mine is {' '.join(mine)}." if mine else ".")
     hints = mishearings.line(found)
     if hints:
         context += " " + hints
     text = f"Context: {context}\n\nTranscript:\n" + "\n".join(lines)
-    return Payload(episode_id, text, [r[0] for r in rows], {v: k for k, v in alias.items()},
-                   scrubber.policy if scrubber else POLICY_VERSION, names, hints)
+    return Payload(episode_id, text, [r[0] for r in rows], {v: k for k, v in alias.items()}, hints=hints)
 
 
 def spent_this_month(conn) -> float:

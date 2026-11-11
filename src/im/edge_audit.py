@@ -381,39 +381,35 @@ def _pairs_as_shown(text: str) -> dict[str, str]:
     return {n: shown for n, (shown, _, _) in read_sheet(text).items()}
 
 
-def policy_tag(policy: str) -> str:
-    """What a draft's file name says of the policy its pairs went out under, so a draft under one policy never
-    resumes, or is scored as, a draft under another. Policy C, the CLI's default for drafts, keeps the plain name
-    drafts have always had; any other is named, e.g. `-B1`."""
-    return "" if policy.startswith("C") else "-" + policy.split(";")[0]
+def policy_tag() -> str:
+    """What a draft's file name says of the policy its pairs went out under, e.g. `-B1`, so a draft never resumes, or
+    is scored as, a draft under another. A draft named without one went out under policy C, before it was retired
+    (decision 0008)."""
+    from im import egress
+    return "-" + egress.POLICY_VERSION.split(";")[0]
 
 
-def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: str = "low", scrubber=None,
+def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: str = "low",
           monthly_cap_usd: float = 20.0) -> dict:
-    """A model marks every pair on the sheet, blind to my marks, into draft-<model>-<effort>-labels<n>[-<policy>].json.
-    Each request goes to the egress log, like every other call that sends what was said; with a scrubber (policy C),
-    names said are pseudonymized first. A pair whose answer fails is logged and skipped, so a rerun asks again; the
-    cap, or the model being unavailable, stops the draft."""
-    from im import egress, llm, names, themes
+    """A model marks every pair on the sheet, blind to my marks, into draft-<model>-<effort>-labels<n>-<policy>.json.
+    Each request goes to the egress log, like every other call that sends what was said. A pair whose answer fails is
+    logged and skipped, so a rerun asks again; the cap, or the model being unavailable, stops the draft."""
+    from im import egress, llm, themes
 
     key = json.loads((folder / "key.json").read_text())
     if model.startswith("jev"):
-        return _draft_jev(conn, client, folder, key, scrubber, monthly_cap_usd)
+        return _draft_jev(conn, client, folder, key, monthly_cap_usd)
     shown = _pairs_as_shown((folder / "sheet.md").read_text())
-    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
-    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}-labels{LABELSET}{policy_tag(policy)}.json"
+    out_path = folder / f"draft-{model.replace('/', '_')}-{effort}-labels{LABELSET}{policy_tag()}.json"
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     pv = themes.version(DRAFT_SYSTEM, DRAFT_SCHEMA, model, effort)
     cost, failed, stopped = 0.0, [], None
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         if num in got or num not in shown:
             continue
-        text, back = shown[num], {}
-        if scrubber:
-            (text,), back, _ = scrubber.scrub([text])
         try:
-            a = egress.ask(conn, client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, text, max_tokens=4000,
-                           segment_ids=egress.segments_of(conn, p["ideas"]), prompt_version=pv, policy=policy,
+            a = egress.ask(conn, client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, shown[num], max_tokens=4000,
+                           segment_ids=egress.segments_of(conn, p["ideas"]), prompt_version=pv,
                            monthly_cap_usd=monthly_cap_usd)
         except llm.Stop as e:
             stopped = str(e)[:200]
@@ -426,12 +422,9 @@ def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: st
             got[num] = {"label": "unsure", "direction": "none", "analogy": "", "refused": True}
         else:
             got[num] = a.data
-            for field in ("analogy", "why"):
-                if got[num].get(field):
-                    got[num][field] = names.unscrub(got[num][field], back)
         out_path.write_text(json.dumps(got, indent=2))   # as it goes: a rerun picks up where this stopped
     return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "prompt_version": pv,
-            "policy": policy, **({"failed": failed} if failed else {}), **({"stopped": stopped} if stopped else {})}
+            **({"failed": failed} if failed else {}), **({"stopped": stopped} if stopped else {})}
 
 
 # --- Reviewing where the models disagree with me ---------------------------------------------------------------------
@@ -584,15 +577,14 @@ def jev_label(p: dict[str, float]) -> str:
     return kind if p.get(kind, 0) >= KIND_CUT else "related"
 
 
-def _draft_jev(conn, client, folder: Path, key: dict, scrubber, monthly_cap_usd: float) -> dict:
+def _draft_jev(conn, client, folder: Path, key: dict, monthly_cap_usd: float) -> dict:
     """Jev marks every pair from structured state (each side's quotes and summary, A and B as the sheet shows them),
-    one request of atomic questions per pair, into draft-<model>-<question set>-<probe set>-labels<n>[-<policy>].json.
+    one request of atomic questions per pair, into draft-<model>-<question set>-<probe set>-labels<n>-<policy>.json.
     Each pair keeps every probability beside its label, so connection can be scored at every cut."""
     from im import egress, llm, probe_audit
 
-    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     out_path = folder / (f"draft-{client.model}-{jev.QUESTION_SETS['edge']}-{jev.PROBE_SET['edge']}"
-                         f"-labels{LABELSET}{policy_tag(policy)}.json")
+                         f"-labels{LABELSET}{policy_tag()}.json")
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     cost, failed, stopped = 0.0, [], None
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
@@ -600,11 +592,9 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, monthly_cap_usd:
             continue
         a, b = p.get("sides") or p["ideas"]
         state = {"a": side_data(conn, a), "b": side_data(conn, b)}
-        if scrubber:
-            state, _ = probe_audit._scrubbed(state, scrubber)
         try:
             ans = probe_audit._ask_jev(conn, client, "edge", state, True, egress.segments_of(conn, p["ideas"]),
-                                       policy, monthly_cap_usd)
+                                       monthly_cap_usd)
         except llm.Stop as e:
             stopped = str(e)[:200]
             break
@@ -615,7 +605,7 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, monthly_cap_usd:
         got[num] = {k: round(v, 3) for k, v in ans.data.items()} | {"label": jev_label(ans.data), "direction": "none",
                                                                      "analogy": ""}
         out_path.write_text(json.dumps(got, indent=2))   # as it goes: a rerun picks up where this stopped
-    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 6), "policy": policy,
+    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 6),
             **({"failed": failed} if failed else {}), **({"stopped": stopped} if stopped else {})}
 
 

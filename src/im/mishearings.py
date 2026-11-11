@@ -5,14 +5,9 @@ confirm or reject them, or add my own, confirmed (`im mishearings`). A read's co
 provisional pairs whose heard words occur in its transcript, and v5 applies a confirmed one wherever it fits and
 treats a provisional one as a likely fix. They're hints for what's read next: the line isn't part of what decides
 whether an episode was already read (egress.Payload.sha256), so a new pair re-reads nothing.
-
-A confirmed pair's words also go out as they are: the name finder doesn't pseudonymize them (C9), since a tool or
-term mistaken for a name would otherwise reach the model as a pseudonym.
 """
 
 import re
-
-from im.names import words
 
 STATUSES = ("confirmed", "provisional", "rejected")
 
@@ -56,8 +51,3 @@ def line(found: list[tuple[str, str, str]]) -> str:
         return ""
     return "Known mishearings: " + "; ".join(f'"{h}" for "{m}" ({s})' for h, m, s in found) + "."
 
-
-def not_names(conn) -> set[str]:
-    """The words of confirmed pairs, which the name finder leaves alone."""
-    return {w for h, m in conn.execute(
-        "SELECT heard, meant FROM im.mishearings WHERE status = 'confirmed'") for w in words(h) + words(m)}

@@ -67,7 +67,8 @@ decides anything.
   a mishearings table; observations carry arousal. The grouping overlap's floor rises to 8 words.
 - Retired: the vocab stage's finding and picking prompts and the vocabulary written back to Hearsay (Hearsay stops
   reading it); the rubric; the legacy confidence route; `extract.interests`.
-- Live stages that send what was said pseudonymize names said (0008's policy C) before the rebuild reads anything.
+- ~~Live stages that send what was said pseudonymize names said (0008's policy C) before the rebuild reads anything.~~
+  Policy C was retired 2026-11-11 ([0008](0008-other-providers-and-names.md), amended): the rebuild reads under B.
 - The monthly spending cap rises for the trial and the rebuild; the rebuild uses prompt caching and the Batch API.
 - B4's and the tension sheets' marks stay as they are; new sheets draw from the rebuilt graph.
 

@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
 # The rebuild database (decision 0012): creates im_rebuild beside im in the NAS's Postgres, sets it up as the live one
-# is (dev/init/bootstrap-db.sql.in, the names role's grants), writes its connections and its config (rebuild.toml,
-# only if missing), and migrates it. install/bin/im-rebuild runs Idea Machine against it. The live database isn't
-# touched. Run as root, after install/nas.sh, which re-runs this on every update while im_rebuild exists. Safe to
-# re-run.
+# is (dev/init/bootstrap-db.sql.in), writes its connection and its config (rebuild.toml, only if missing), and migrates
+# it. install/bin/im-rebuild runs Idea Machine against it. The live database isn't touched. Run as root, after
+# install/nas.sh, which re-runs this on every update while im_rebuild exists. Safe to re-run.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
-
-NAMES_ENV="$NAS_ROOT/gpu/names.env"
-NAMES_REBUILD_ENV="$NAS_ROOT/gpu/names-rebuild.env"
 
 rebuild_url() {  # a live connection URL, $1, from file $2, with the rebuild database in place of im
     case "$1" in
@@ -22,9 +18,7 @@ require_root
 say "Checking the live install"
 docker exec "$DB_CONTAINER" pg_isready -q -U postgres -d im 2>/dev/null \
     || die "the database isn't up. Run install/nas.sh first."
-[ -f "$NAMES_ENV" ] || die "no $NAMES_ENV (the names role). Run install/nas.sh first."
 pipeline_url="$(rebuild_url "$(env_get "$NAS_PIPELINE_ENV" IM_DATABASE_URL)" "$NAS_PIPELINE_ENV")"
-names_url="$(rebuild_url "$(env_get "$NAMES_ENV" IM_DATABASE_URL)" "$NAMES_ENV")"
 echo "ok"
 
 say "Database $REBUILD_DB"
@@ -38,16 +32,12 @@ fi
 "${COMPOSE[@]}" exec -T db psql -q -v ON_ERROR_STOP=1 -U postgres -d "$REBUILD_DB" \
     -f /docker-entrypoint-initdb.d/bootstrap-db.sql.in
 
-say "Connections"
-# Derived from the live ones on every run, so no secret is kept twice by hand and a new password carries over. Only
-# the URL: everything else (the API keys, IM_NAME_KEY) comes from pipeline.env, which the run service still loads.
+say "Connection"
+# Derived from the live one on every run, so no secret is kept twice by hand and a new password carries over. Only
+# the URL: everything else (the API keys) comes from pipeline.env, which the run service still loads.
 (umask 077; printf 'IM_DATABASE_URL=%s\n' "$pipeline_url" > "$NAS_REBUILD_ENV")
 chmod 600 "$NAS_REBUILD_ENV"
 echo "$NAS_REBUILD_ENV"
-# For the GPU worker's names job (install/gpu.sh), like names.env: readable by `ssh nas` (the clones' owner) only.
-CLONE_OWNER="$(stat -c %U "$REPO_DIR")"
-printf 'IM_DATABASE_URL=%s\n' "$names_url" | install -o "$CLONE_OWNER" -m 600 /dev/stdin "$NAMES_REBUILD_ENV"
-echo "$NAMES_REBUILD_ENV"
 
 say "Config ($NAS_CONFIG/im/rebuild.toml)"
 if [ ! -f "$NAS_CONFIG/im/rebuild.toml" ]; then
@@ -86,13 +76,8 @@ say "Migrations"
 rebuild_env
 "${COMPOSE[@]}" run --rm -T "${REBUILD_RUN[@]}" run migrate </dev/null
 
-say "The names role's grants in $REBUILD_DB"
-grant_names "$REBUILD_DB"
-echo "ok"
-
 say "Done"
 cat <<EOF
 Run Idea Machine against $REBUILD_DB as root: im-rebuild pending, im-rebuild run (install/bin/im-rebuild; the same
-arguments as im). Its config: $NAS_CONFIG/im/rebuild.toml. For names on the dev box's GPU, re-run install/gpu.sh
-there, then: corral enqueue ideamachine.names-rebuild --needs gpu --key ideamachine.names-rebuild
+arguments as im). Its config: $NAS_CONFIG/im/rebuild.toml.
 EOF

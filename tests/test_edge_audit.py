@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from im import edge_audit, egress, jev, names, observations
+from im import edge_audit, egress, jev, observations
 
 from helpers import table
 from test_lattice import lat_setup, legacy_evolves
@@ -160,11 +160,6 @@ def test_a_draft_sees_the_sheet_without_my_marks_and_score_compares(lattice_with
     assert edge_audit.draft(lattice_with_clusters, claude, tmp_path)["pairs"] == 4 and len(claude.calls) == 4
     d = edge_audit.score(tmp_path)["drafts"][f"claude-opus-5-5-low-labels{edge_audit.LABELSET}-B1"]
     assert d["agree"] == 1.0 and d["analogies"]["both"] == [1]
-    # The same model under another policy is another draft: none of policy B's answers stand in for it.
-    other = edge_audit.draft(lattice_with_clusters, claude, tmp_path, scrubber=names.Scrubber(b"k"))
-    assert other["pairs"] == 4 and len(claude.calls) == 8 and other["draft"] != out["draft"]
-    assert set(edge_audit.score(tmp_path)["drafts"]) == {f"claude-opus-5-5-low-labels{edge_audit.LABELSET}-B1",
-                                                         f"claude-opus-5-5-low-labels{edge_audit.LABELSET}"}
 
 
 def test_review_shows_only_where_a_model_disagrees_with_me_and_my_answers_become_marks(lattice_with_clusters,

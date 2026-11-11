@@ -126,9 +126,6 @@ if [ -z "$(env_get "$NAS_PIPELINE_ENV" ANTHROPIC_API_KEY)" ]; then
     read -rsp "Anthropic API key for idea extraction (input hidden): " key; echo
     env_ensure "$NAS_PIPELINE_ENV" ANTHROPIC_API_KEY "$key"
 fi
-# Policy C's key for pseudonymizing names said (decision 0008). Made once and never changed: a new key changes every
-# pseudonym, and so every payload. Backed up with the rest of config/.
-env_ensure "$NAS_PIPELINE_ENV" IM_NAME_KEY "$(openssl rand -hex 32)"
 # OPENROUTER_API_KEY (optional, by hand in pipeline.env): other providers' models, for `im trial` and edge drafts.
 # Jev (im.jev) goes through OpenRouter on its key, with zero retention; TYPESAFE_API_KEY (optional) calls TypeSafe
 # directly instead.
@@ -213,25 +210,24 @@ fi
     -f /docker-entrypoint-initdb.d/bootstrap-db.sql.in
 im migrate
 
-say "The names role, for the GPU worker's names job (install/gpu.sh)"
-# It finds names said for policy C (decision 0008) on the dev box's GPU, through `ssh nas` to Postgres on this
-# box's loopback. It can read segments and episodes and write names, nothing else. Granted on every run: grants on
-# a table don't survive a restore, and the role may predate the table.
-env_ensure "$NAS_DB_ENV" IM_NAMES_PASSWORD "$(openssl rand -hex 24)"
-"${COMPOSE[@]}" exec -T db psql -q -v ON_ERROR_STOP=1 -U postgres -d im \
-    -v pw="$(env_get "$NAS_DB_ENV" IM_NAMES_PASSWORD)" <<'SQL'
-SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'im_names') AS missing \gset
-\if :missing
-CREATE ROLE im_names LOGIN;
-\endif
-ALTER ROLE im_names PASSWORD :'pw';
-SQL
-grant_names im
-# Where `ssh nas` (the clones' owner) can read it, and nobody else.
-CLONE_OWNER="$(stat -c %U "$REPO_DIR")"
-install -d -o "$CLONE_OWNER" -m 700 "$NAS_ROOT/gpu"
-printf 'IM_DATABASE_URL=postgresql://im_names:%s@127.0.0.1:55433/im\n' "$(env_get "$NAS_DB_ENV" IM_NAMES_PASSWORD)" \
-    | install -o "$CLONE_OWNER" -m 600 /dev/stdin "$NAS_ROOT/gpu/names.env"
+say "Retiring policy C's names role and key (decision 0008, amended 2026-11-11)"
+# The GPU names job read segments and wrote names as role im_names, through `ssh nas` to Postgres on this box's
+# loopback, in im and the rebuild database. DROP OWNED revokes what it was granted in each database, then the role
+# goes, with its password, policy C's key and the job's connection files. Does nothing once they're gone.
+if [ "$(db_sql "SELECT 1 FROM pg_roles WHERE rolname = 'im_names'")" = 1 ]; then
+    for d in $(db_sql "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate"); do
+        "${COMPOSE[@]}" exec -T db psql -q -v ON_ERROR_STOP=1 -U postgres -d "$d" -c "DROP OWNED BY im_names"
+    done
+    db_sql "DROP ROLE im_names" >/dev/null
+    echo "dropped role im_names"
+fi
+env_delete "$NAS_DB_ENV" IM_NAMES_PASSWORD
+env_delete "$NAS_PIPELINE_ENV" IM_NAME_KEY
+for f in "$NAS_ROOT/gpu/names.env" "$NAS_ROOT/gpu/names-rebuild.env"; do
+    [ ! -e "$f" ] || { rm -f "$f"; echo "removed $f"; }
+done
+[ ! -d "$NAS_ROOT/gpu" ] || rmdir "$NAS_ROOT/gpu" 2>/dev/null || true
+echo "ok"
 
 say "Checking that nothing already sent to Claude would be sent again"
 # After a move, a different time zone or locale would change every payload: the next run would re-send every

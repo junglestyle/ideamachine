@@ -1,11 +1,11 @@
-"""Sensitivity tags: Jev's yes or no per tag on each idea and theme, names pseudonymized; my own marks win, at once."""
+"""Sensitivity tags: Jev's yes or no per tag on each idea and theme; my own marks win, at once."""
 
 import json
 
 import psycopg
 import pytest
 
-from im import jev, names, sensitivity, themes
+from im import jev, sensitivity, themes
 
 from helpers import table
 from test_review import as_lattice
@@ -35,31 +35,24 @@ def test_jev_tags_once_and_again_when_the_text_changes(seeded_lattice, admin):
     pipe = seeded_lattice
     client, sent = tagger()
     n = table(pipe, "SELECT (SELECT count(*) FROM pub.ideas) + (SELECT count(*) FROM im.themes)")[0][0]
-    stats = sensitivity.tag_stage(pipe, client, None)
+    stats = sensitivity.tag_stage(pipe, client)
     assert stats["pending"] == stats["tagged"] == len(sent) == n and stats["sensitive"] == 1
     assert set(sent[0]["questions"]) == set(sensitivity.TAGS)
     coffee = table(pipe, "SELECT idea_id FROM pub.ideas WHERE statement LIKE '%%coffee%%'")[0][0]
     assert shown(admin) == {("idea", str(coffee)): (True, ["violence"], "model")}   # untagged: not listed
     (p,) = table(pipe, "SELECT probabilities FROM im.idea_sensitivity WHERE idea_id = %s", coffee)[0]
     assert p == {t: 0.9 if t == "violence" else 0.1 for t in sensitivity.TAGS}   # kept, to set the cut from my marks
-    assert sensitivity.tag_stage(pipe, client, None)["pending"] == 0
+    assert sensitivity.tag_stage(pipe, client)["pending"] == 0
 
     as_lattice(admin, "INSERT INTO pub.feedback_events (kind, idea_id, payload) VALUES ('idea_correct', %s, %s)",
                coffee, json.dumps({"title": "Tea runs it", "statement": "The tea order is the real meeting."}))
-    stats = sensitivity.tag_stage(pipe, client, None)   # the changed idea alone, asked again
+    stats = sensitivity.tag_stage(pipe, client)   # the changed idea alone, asked again
     assert (stats["pending"], stats["tagged"]) == (1, 1) and "The tea order" in json.dumps(sent[-1]["state"])
-
-
-def test_names_said_go_out_pseudonymized(seeded_lattice):
-    client, sent = tagger(word="lora")
-    scrubber = names.Scrubber(b"k", finder=lambda texts: ["LoRa"])   # the radio, taken for a name
-    sensitivity.tag_stage(seeded_lattice, client, scrubber)
-    assert "LoRa" not in json.dumps(sent) and names.token("LoRa", b"k") in json.dumps(sent)
 
 
 def test_my_marks_win_at_once_either_way(seeded_lattice, admin):
     pipe = seeded_lattice
-    sensitivity.tag_stage(pipe, tagger()[0], None)
+    sensitivity.tag_stage(pipe, tagger()[0])
     coffee = table(pipe, "SELECT idea_id FROM pub.ideas WHERE statement LIKE '%%coffee%%'")[0][0]
     jokes = themes.find(pipe, "jokes")
     mark = "INSERT INTO pub.feedback_events (kind, idea_id, theme_id, payload) VALUES (%s, %s, %s, %s)"
@@ -95,7 +88,7 @@ def test_my_latest_mark_is_what_demo_mode_hides(seeded_lattice, admin):
 def test_quotes_are_read_too(seeded_lattice, admin):
     pipe = seeded_lattice
     client, sent = tagger(word="lora")   # only the LoRa idea's quote says "LoRa"; its title doesn't
-    sensitivity.tag_stage(pipe, client, None)
+    sensitivity.tag_stage(pipe, client)
     lora = table(pipe, "SELECT idea_id FROM pub.ideas WHERE title = 'Something new'")[0][0]
     assert ("idea", str(lora)) in shown(admin)
     assert any("said" in b["state"]["item"] for b in sent)
@@ -104,10 +97,10 @@ def test_quotes_are_read_too(seeded_lattice, admin):
 def test_an_answer_that_fails_is_logged_and_asked_again_next_run(seeded_lattice):
     pipe = seeded_lattice
     client, sent = tagger(broken=2)
-    stats = sensitivity.tag_stage(pipe, client, None)
+    stats = sensitivity.tag_stage(pipe, client)
     assert stats["failed"] == 2 and stats["tagged"] == stats["pending"] - 2   # the ones after them were tagged
     logged = table(pipe, "SELECT count(*), count(error) FROM im.egress_log WHERE prompt_version = %s",
                    f"sensitivity:{sensitivity.tagger_version(client)}")
     assert logged == [(len(sent), 2)]
-    again = sensitivity.tag_stage(pipe, tagger()[0], None)
+    again = sensitivity.tag_stage(pipe, tagger()[0])
     assert again["pending"] == again["tagged"] == 2

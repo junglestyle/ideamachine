@@ -5,7 +5,7 @@ import json
 from dataclasses import replace
 from types import SimpleNamespace
 
-from im import cli, egress, extract, jev, names, trial
+from im import cli, egress, extract, jev, trial
 
 from helpers import run, system_of, table
 from test_carry import DATABASE, capture
@@ -74,8 +74,7 @@ def test_a_trial_scores_a_candidate_against_a_reference_on_the_same_sample(pipe,
     assert table(pipe, "SELECT count(*) FROM im.items") == items_before   # nothing reaches the lattice
 
     pv = lambda model: extract.prompt_version(model, "medium", v3)  # noqa: E731
-    r = trial.report(pipe, (pv("claude-sonnet-5-5"), "claude-sonnet-5-5"), (pv("claude-opus-5-5"), "claude-opus-5-5"),
-                     egress.POLICY_VERSION)
+    r = trial.report(pipe, (pv("claude-sonnet-5-5"), "claude-sonnet-5-5"), (pv("claude-opus-5-5"), "claude-opus-5-5"))
     assert (r["episodes"], r["reference_captures"], r["found"], r["candidate_captures"], r["extra"]) == \
         (episodes, 2, 1, 2, 1)
     assert r["recall"] == 0.5 and r["recall_by_kind"] == {"idea": 0.5}
@@ -89,7 +88,7 @@ def test_a_trial_scores_a_candidate_against_a_reference_on_the_same_sample(pipe,
     again = FakeClaude(both(DATABASE))   # a replicate reads everything again, filed apart, scored against the first
     assert trial.run(pipe, again, v3, replicate=2)["read"] == episodes
     r2 = trial.report(pipe, (trial.version("claude-opus-5-5", "medium", v3, 2), "claude-opus-5-5"),
-                      (pv("claude-opus-5-5"), "claude-opus-5-5"), egress.POLICY_VERSION)
+                      (pv("claude-opus-5-5"), "claude-opus-5-5"))
     assert r2["recall"] == 0.5 and trial.version("claude-opus-5-5", "medium", v3, 2) == pv("claude-opus-5-5") + "~2"
     assert trial.run(pipe, opus, extract.system_prompt("v3", "x"), monthly_cap_usd=0)["stopped"]
 
@@ -101,13 +100,12 @@ def test_a_thought_quoted_from_the_next_line_counts_as_found_once_jev_says_its_t
     trial.run(pipe, FakeClaude(both(DATABASE, "lockfile")), v3, model="claude-sonnet-5-5")   # the next line
     pv = lambda model: extract.prompt_version(model, "medium", v3)  # noqa: E731
     cand, ref = (pv("claude-sonnet-5-5"), "claude-sonnet-5-5"), (pv("claude-opus-5-5"), "claude-opus-5-5")
-    policy = egress.POLICY_VERSION
-    by_quote = trial.report(pipe, cand, ref, policy)
+    by_quote = trial.report(pipe, cand, ref)
 
     def counted(nouls):
         judge, sent = fake(nouls)
-        stats = trial.same_point(pipe, judge, cand, ref, policy, None, 20.0)
-        return stats, sent, trial.report(pipe, cand, ref, policy, jev.kept(pipe, jev.question_set(judge, "match")))
+        stats = trial.same_point(pipe, judge, cand, ref, 20.0)
+        return stats, sent, trial.report(pipe, cand, ref, jev.kept(pipe, jev.question_set(judge, "match")))
 
     stats, sent, unsure = counted({"same": 0.7, "same_v2": 0.6})   # below the cut
     assert stats["pairs"] == stats["asked"] == len(sent) == 1 and unsure["found_by_same_point"] == 0
@@ -117,38 +115,33 @@ def test_a_thought_quoted_from_the_next_line_counts_as_found_once_jev_says_its_t
     stats, sent, r = counted({"same": 0.9, "same_v2": 0.8})
     assert r["found_by_same_point"] == 1 and r["found"] == by_quote["found"] + 1
     assert r["extra"] == by_quote["extra"] - 1
-    assert trial.same_point(pipe, fake({})[0], cand, ref, policy, None, 20.0)["asked"] == 0   # kept, not asked again
+    assert trial.same_point(pipe, fake({})[0], cand, ref, 20.0)["asked"] == 0   # kept, not asked again
 
 
-def test_under_policy_c_names_said_go_out_pseudonymized_and_come_back(pipe, cfg, stream):
+def test_a_trial_sends_names_said_as_said_and_logs_each_request(pipe, cfg, stream):
     turns = stream.conversations["c-conv"].turns
     turns[0] = replace(turns[0], text="Did you see the build broke again, Bob?")
     stream.write(stream.dir)
     run(pipe, cfg, stream)
     v3 = extract.system_prompt("v3")
-    scrubber = names.Scrubber(b"k", egress.known_names(pipe), mine=["Nathan"])
-    assert egress.known_names(pipe) == ["Alice", "Bob"]
 
     claude = FakeClaude(both("build broke"))
-    trial.run(pipe, claude, v3, scrubber=scrubber)
+    trial.run(pipe, claude, v3)
     (sent,) = [c["messages"][0]["content"] for c in claude.calls if "build broke" in c["messages"][0]["content"]]
-    bob = names.token("Bob", b"k")
-    assert "Bob" not in sent and f"broke again, {bob}?" in sent and "Names said are pseudonyms (P-...)." in sent
-    assert "S1:" in sent and "Alice" not in sent   # speakers are still pseudonymized as before
+    assert "broke again, Bob?" in sent   # the name said, as said
+    assert "S1:" in sent and "Alice" not in sent   # speakers are pseudonymized
 
     (items,) = [i for (i,) in table(pipe, "SELECT items FROM im.prompt_trials WHERE privacy_policy_version = %s",
-                                    scrubber.policy) if i]
+                                    egress.POLICY_VERSION) if i]
     assert items[0]["quote"] == "Did you see the build broke again, Bob?"
     # One row per request: exactly what was sent, and the episode's segments, line by line.
     logged = table(pipe, """SELECT g.payload, g.segment_ids, (SELECT array_agg(segment_id ORDER BY ord)
                                                               FROM im.episode_segments WHERE episode_id = g.episode_id)
                             FROM im.egress_log g WHERE privacy_policy_version = %s ORDER BY egress_id""",
-                   scrubber.policy)
+                   egress.POLICY_VERSION)
     assert [p for p, _, _ in logged] == [c["messages"][0]["content"] for c in claude.calls]
-    assert all(sent_ids == lines for _, sent_ids, lines in logged) and not any("Bob" in p for p, _, _ in logged)
-
-    # The same model and prompt under policy B is another trial, read again.
-    assert trial.run(pipe, claude, v3)["read"] == table(pipe, "SELECT count(*) FROM im.episodes WHERE current")[0][0]
+    assert all(sent_ids == lines for _, sent_ids, lines in logged)
+    assert trial.run(pipe, claude, v3)["read"] == 0   # read once per payload
 
 
 def test_v4_keeps_the_quote_as_said_apart_from_its_reading_and_attribution(pipe, cfg, stream):
@@ -157,28 +150,26 @@ def test_v4_keeps_the_quote_as_said_apart_from_its_reading_and_attribution(pipe,
     stream.write(stream.dir)
     run(pipe, cfg, stream)
     v4, schema = extract.system_prompt("v4"), extract.schema_for("v4")
-    scrubber = names.Scrubber(b"k", egress.known_names(pipe))
-    bob = names.token("Bob", b"k")
 
     def respond(text):   # the line as said, and the same line tidied: only the first is word for word
         out = []
         for line in text.splitlines():
             if line.startswith("[") and "build broke" in line:
                 n, said = int(line[1:].split("]")[0]), line.split(": ", 1)[1]
-                common = {"kind": "observation", "said_by": "S1", "lines": [n], "reading": f"{bob}, the build broke "
+                common = {"kind": "observation", "said_by": "S1", "lines": [n], "reading": "Bob, the build broke "
                           "again.", "gist": "The build keeps breaking.", "themes": [], "confidence": 0.9}
                 out += [common | {"quote": said, "attributed_to": ""},
-                        common | {"quote": "Did you see that the build broke", "attributed_to": f"{bob}'s lead"}]
+                        common | {"quote": "Did you see that the build broke", "attributed_to": "Bob's lead"}]
         return out
 
     claude = FakeClaude(respond)
-    trial.run(pipe, claude, v4, scrubber=scrubber, schema=schema)
+    trial.run(pipe, claude, v4, schema=schema)
     assert all(c["output_config"]["format"]["schema"] == extract.SCHEMA_V4 for c in claude.calls)
     (items,) = [i for (i,) in table(pipe, "SELECT items FROM im.prompt_trials") if i]
     assert [(it["reading"], it["attributed_to"]) for it in items] == \
-        [("Bob, the build broke again.", ""), ("Bob, the build broke again.", "Bob's lead")]   # names come back
+        [("Bob, the build broke again.", ""), ("Bob, the build broke again.", "Bob's lead")]
     opus = (trial.version("claude-opus-5-5", "medium", v4, schema=schema), "claude-opus-5-5")
-    assert trial.report(pipe, opus, opus, scrubber.policy)["verbatim_quotes"] == {"candidate": 0.5, "reference": 0.5}
+    assert trial.report(pipe, opus, opus)["verbatim_quotes"] == {"candidate": 0.5, "reference": 0.5}
 
     # v4 is for trials only, so the live run doesn't read under it.
     sent = table(pipe, "SELECT count(*) FROM im.egress_log")
@@ -193,32 +184,29 @@ def test_v5_records_which_capture_checks_each_capture_fails(pipe, cfg, stream):
     stream.write(stream.dir)
     run(pipe, cfg, stream)
     v5, schema = extract.system_prompt("v5"), extract.schema_for("v5")
-    scrubber = names.Scrubber(b"k", egress.known_names(pipe))
-    bob = names.token("Bob", b"k")
 
     def respond(text):
         rows = {int(r[1:].split("]")[0]): r.split(": ", 1) for r in text.splitlines() if r.startswith("[")}
         mine = next(n for n, (who, said) in rows.items() if who.endswith("me") and "build broke" in said)
         theirs = next(n for n, (who, _) in rows.items() if not who.endswith("me"))
         said, other = rows[mine][1], rows[theirs][1]
-        base = {"lines": [mine], "attributed_to": "", "reading": f"{bob}, the build broke again.", "mishearings": [],
+        base = {"lines": [mine], "attributed_to": "", "reading": "Bob, the build broke again.", "mishearings": [],
                 "gist": "The build broke again."}
-        return [base | {"quote": said, "attributed_to": bob,
-                        "mishearings": [{"heard": "build", "meant": "build"}]},       # passes, names come back
+        return [base | {"quote": said, "attributed_to": "Bob",
+                        "mishearings": [{"heard": "build", "meant": "build"}]},       # passes
                 base | {"quote": said.lower()},                                           # tidied
                 base | {"quote": other, "lines": [mine, theirs]},                       # someone else's words
-                base | {"quote": said, "attributed_to": "P-ZZZZZ"},                    # a code it wasn't sent
                 base | {"quote": said, "mishearings": [{"heard": "cash", "meant": "cache"}]}]
 
     claude = FakeClaude(respond)
-    trial.run(pipe, claude, v5, scrubber=scrubber, schema=schema)
+    trial.run(pipe, claude, v5, schema=schema)
     assert all(c["output_config"]["format"]["schema"] == extract.SCHEMA_V5 for c in claude.calls)
     (items,) = [i for (i,) in table(pipe, "SELECT items FROM im.prompt_trials") if i]
-    assert [it["checks"] for it in items] == [[], ["quote_inexact"], ["quote_not_mine"], ["unknown_pseudonym"],
+    assert [it["checks"] for it in items] == [[], ["quote_inexact"], ["quote_not_mine"],
                                               ["mishearing_not_in_quote", "mishearing_not_in_reading"]]
     assert items[0]["attributed_to"] == "Bob" and items[0]["said_by"] == "me" and items[0]["confidence"] is None
     opus = (trial.version("claude-opus-5-5", "medium", v5, schema=schema), "claude-opus-5-5")
-    assert trial.report(pipe, opus, opus, scrubber.policy)["checks"]["candidate"]["pass"] == 0.2
+    assert trial.report(pipe, opus, opus)["checks"]["candidate"]["pass"] == 0.25
 
 
 def test_recall_is_split_by_how_far_each_captures_idea_reaches(seeded_lattice):
@@ -227,12 +215,12 @@ def test_recall_is_split_by_how_far_each_captures_idea_reaches(seeded_lattice):
     trial.run(conn, FakeClaude(items_for), v3)                          # the reference: what live captured
     trial.run(conn, FakeClaude(), v3, model="claude-haiku-5-5")          # a candidate that captures nothing
     opus, haiku = ((extract.prompt_version(m, "medium", v3), m) for m in ("claude-opus-5-5", "claude-haiku-5-5"))
-    itself = trial.report(conn, opus, opus, egress.POLICY_VERSION)
+    itself = trial.report(conn, opus, opus)
     reach = itself["recall_by_reach"]
     assert sum(r["captures"] for r in reach.values()) == itself["reference_captures"] == 3
     assert reach["unplaced"]["captures"] == 0   # live matched every one into a cluster
     assert all(r["recall"] in (1.0, None) for r in reach.values())
-    assert all(r["recall"] in (0.0, None) for r in trial.report(conn, haiku, opus, egress.POLICY_VERSION)
+    assert all(r["recall"] in (0.0, None) for r in trial.report(conn, haiku, opus)
                ["recall_by_reach"].values())
     # The LoRa idea is new, said once: a one-off.
     lora = [it for (items,) in table(conn, "SELECT items FROM im.prompt_trials") for it in items if "LoRa" in it["quote"]]

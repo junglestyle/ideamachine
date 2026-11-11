@@ -115,22 +115,16 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   (`served_by`) and cost (`im.egress_log`, 007:3-23; [0008]).
 - **Speaker-alias policy (policy B).** A privacy policy: everyone's words go out verbatim, each speaker is replaced
   by a speaker alias, names said go out as said, and every request is logged ([0004]:24-33). Its identifier is
-  `B1;speakers-pseudonymized;spoken-names-not-scrubbed;no-registry` (`egress.POLICY_VERSION`).
-- **Speaker-and-name pseudonymization policy (policy C).** Policy B, plus every name mention replaced by a name
-  pseudonym ([0008]). Its identifier names the name finder (`names.POLICY`), so changing the finder re-sends.
-  **Status:** used for trials and audits, the sensitivity tags, the matcher, and live extraction with a prompt after
-  `v3` (`extract.POLICY_B`), which is v5.3 in the rebuild. Themes and the digest still send statements as stored.
-  There is no policy A: the rule B replaced was "other people's words never leave the box" ([0004]:24-25).
-- **Pseudonym.** A stand-in for an identity in a request, mapped back locally, so stored text keeps real names. There
-  are two:
-  - **speaker alias**: what stands for a speaker in one request: `me` for the owner, then `S1`, `S2`... in order of
-    first appearance. `unknown` marks an unknown speaker; it isn't an alias (`egress.pseudonyms`);
-  - **name pseudonym**: `P-` plus five characters of an HMAC under `IM_NAME_KEY`. The same name gets the same
-    pseudonym in every request (`names.py`, [0008]:28-36).
-- **Name mention.** A span of a segment's text that names a person, found by GLiNER, or matched from Hearsay's
-  speakers and from config ([0008]:31-33).
-- **Name finder.** The model and threshold that find name mentions, written `model@threshold` (040:6). The finder
-  cache `im.segment_names` holds each segment's name mentions per finder (040).
+  `B1;speakers-pseudonymized;spoken-names-not-scrubbed;no-registry` (`egress.POLICY_VERSION`). **Status:** the one
+  policy every request goes out under.
+- **Speaker-and-name pseudonymization policy (policy C).** Policy B, plus every name said replaced by a stable
+  pseudonym, `P-` and five characters of a keyed hash, the names found by GLiNER ([0008]). **Status:** retired
+  2026-11-11 ([0008], amended): requests made under it keep its identifier, `C1;...`, in the egress log, trials and
+  items, as history. There is no policy A: the rule B replaced was "other people's words never leave the box"
+  ([0004]:24-25).
+- **Pseudonym** (speaker alias). What stands for a speaker in one request, mapped back locally, so stored text keeps
+  real names: `me` for the owner, then `S1`, `S2`... in order of first appearance. `unknown` marks an unknown
+  speaker; it isn't an alias (`egress.pseudonyms`).
 
 ## Capture
 
@@ -174,7 +168,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   when I add it (`im mishearings`; `im.mishearings`, `im.mishearing_decisions`, 050). A rejected pair stays rejected.
   A read's context line lists the confirmed and provisional pairs whose heard words occur in its transcript, as
   hints: they aren't part of what decides whether an episode was read (`egress.Payload.sha256`), so a new pair
-  re-reads nothing. A confirmed pair's words are never taken for names (`mishearings.not_names`).
+  re-reads nothing.
 - **Capture checks.** `v5`: the code checks a capture failed against the transcript as sent, empty when it passed
   (`capture_checks.FAIL`; `im.items.checks`, 047). NULL before `v5`.
 - **Capture kind.** What sort of thought a capture expresses (`im.items.kind`, no CHECK, 007:31). `v5` has none: NULL
@@ -505,9 +499,8 @@ Each role decides one thing. The model behind it can change, so models are liste
 | Connection judge | whether a pair is connected | Terra, chosen on B4 (SPEC §5). **Status:** not writing yet; stand-ins hold |
 | Connection-kind judge | the connection kinds on a connection | none yet |
 | Tension judge | whether a pair is in tension, as a proposal | Jev, `pulls4` |
-| Name finder | name mentions, for policy C | GLiNER (`urchade/gliner_medium-v2.1`) |
 | Embedder | embeddings for neighbors, positions, lens search | `BAAI/bge-small-en-v1.5`, local |
-| Sensitivity tagger | the eight sensitivity tags on each idea and theme | Jev, at `sensitivity.CUT` per tag, policy C |
+| Sensitivity tagger | the eight sensitivity tags on each idea and theme | Jev, at `sensitivity.CUT` per tag |
 | Theme filer, digest writer | as named | `[themes]`, `[digest]`; default Opus (`config.ModelConfig`) |
 
 - **Opus, Sonnet, Haiku.** Anthropic's `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5` (`llm.PRICES`). A
@@ -880,14 +873,12 @@ is what an observation says; a graph node is a cluster, not a point; a digest's 
 **Use:** conversation, utterance, source segment and source context. "Turn" goes. Current source segment, active
 episode, capture on an active episode. Payload line and triage line.
 
-### pseudonym, citation
+### citation
 
-- Pseudonym covers both a speaker alias and a name pseudonym (`egress.pseudonyms`, `names.py`). `unknown` is in the
-  speaker map but isn't an alias.
 - Citation covers both a capture's source citation (`source_segment_ids`) and an edge's observation citation
   (`cited_observation_ids`).
 
-**Use:** speaker alias or name pseudonym, and capture source citation or edge observation citation.
+**Use:** capture source citation or edge observation citation.
 
 ### speaker basis
 
