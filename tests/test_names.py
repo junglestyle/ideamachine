@@ -30,6 +30,15 @@ def test_nothing_known_or_found_leaves_the_text_alone():
     assert "ner=none" in names.Scrubber(KEY).policy
 
 
+def test_a_public_figures_name_goes_out_as_said():
+    s = names.Scrubber(KEY, known=["Julie Chen", "Thomas"], finder=lambda texts: {"Yohami", "Raj"},
+                       public=["Yohami", "Thomas Sowell"])
+    out, back, _ = s.scrub(["Per Yohami and Sowell, Julie, Thomas and Raj come at things from below."])
+    julie, thomas, raj = (names.token(w, KEY) for w in ("Julie", "Thomas", "Raj"))
+    assert out == [f"Per Yohami and Sowell, {julie}, {thomas} and {raj} come at things from below."]
+    assert "Yohami" not in back.values()   # nothing to map back: it went out as said
+
+
 def test_a_long_line_is_read_in_pieces_gliner_can_see_whole():
     long = " ".join(["word"] * 450) + ". Julie said so. " + "Short one."
     pieces = names.chunks(long, size=200)

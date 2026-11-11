@@ -92,6 +92,9 @@ class WeightConfig:
 class EgressConfig:
     my_names: tuple[str, ...] = ()       # what people call me: pseudonymized under policy C, and the model told it's me
     names: tuple[str, ...] = ()          # other names to pseudonymize under policy C, beyond Hearsay's and GLiNER's
+    # Public figures whose names policy C sends as said (0008, amended). Word by word, so list what only they are
+    # called ("Sowell", "Yohami"), not a first name others share; a person Hearsay or `names` knows stays private.
+    public_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

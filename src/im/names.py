@@ -8,6 +8,7 @@ be turned back into a name. What comes back is mapped through the same table, lo
 Where names come from:
 - the people Hearsay knows as speakers (their labels);
 - my own names, and any others, from config (`[egress] my_names`, `names`);
+- except public figures' names I list (`[egress] public_names`), which go out as said (decision 0008, amended);
 - a local entity model (GLiNER, pinned in the policy version), for anyone else. What it finds in each segment is
   kept (im.segment_names), so a segment is looked at once, not once per process per run; `warm` fills it ahead
   of a batch of trials. GLiNER reads lines in batches, and long ones in chunks it can see whole.
@@ -61,11 +62,14 @@ def words(name: str) -> list[str]:
 
 
 class Scrubber:
-    def __init__(self, key: bytes, known=(), mine=(), finder=None, policy: str | None = None):
+    def __init__(self, key: bytes, known=(), mine=(), finder=None, policy: str | None = None, public=()):
         self.key, self.finder = key, finder
-        self.known = {w for n in known for w in words(n)}
         self.mine = [w for n in mine for w in words(n)]
-        self.known |= set(self.mine)
+        private = {w for n in known for w in words(n)} | set(self.mine)
+        # Word by word, as everywhere here: a word of someone Hearsay or config names stays pseudonymized even if a
+        # public figure shares it.
+        self.public = {w.casefold() for n in public for w in words(n)} - {w.casefold() for w in private}
+        self.known = {w for w in private if w.casefold() not in self.public}
         self.policy = policy or policy_c(bool(finder))
 
     def find(self, conn, segments: list[tuple]) -> set[str]:
@@ -81,7 +85,7 @@ class Scrubber:
         `found` is what the finder saw in them already (`find`); otherwise the finder reads them now."""
         if found is None:
             found = set(self.finder(texts)) if self.finder else set()
-        found = set(self.known) | {w for n in found for w in words(n)}
+        found = set(self.known) | {w for n in found for w in words(n) if w.casefold() not in self.public}
         if not found:
             return texts, {}, []
         alternation = "|".join(re.escape(w) for w in sorted(found, key=len, reverse=True))
@@ -103,10 +107,11 @@ class Scrubber:
 
 
 def for_trials(conn, egress_config, finder=None) -> Scrubber:
-    """Policy C's scrubber: the key from the environment, every name Hearsay and config know, and GLiNER."""
+    """Policy C's scrubber: the key from the environment, every name Hearsay and config know, and GLiNER; public
+    figures' names are left as said."""
     from im import egress
     return Scrubber(key_from_env(), [*egress.known_names(conn), *egress_config.names], egress_config.my_names,
-                    finder or Gliner())
+                    finder or Gliner(), public=egress_config.public_names)
 
 
 def cached(conn, finder, segments: list[tuple]) -> set[str]:
