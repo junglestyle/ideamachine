@@ -95,6 +95,9 @@ class EgressConfig:
     # Public figures whose names policy C sends as said (0008, amended). Word by word, so list what only they are
     # called ("Sowell", "Yohami"), not a first name others share; a person Hearsay or `names` knows stays private.
     public_names: tuple[str, ...] = ()
+    # Zero data retention: every request goes only to endpoints that keep nothing, Claude's through OpenRouter (to
+    # Bedrock or Vertex) since Anthropic's own API keeps requests for 30 days. The route isn't part of any version.
+    zdr: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,7 +122,7 @@ def load() -> Config:
     triage = data.get("triage", {})
     if "backends" in triage:
         triage["backends"] = tuple(triage["backends"])
-    egress = {k: tuple(v) for k, v in data.get("egress", {}).items()}
+    egress = {k: tuple(v) if isinstance(v, list) else v for k, v in data.get("egress", {}).items()}
     models = {k: ModelConfig(**data.get(k, {})) for k in ("match", "themes", "digest")}
     return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
                   extract=ExtractConfig(**data.get("extract", {})), lattice=LatticeConfig(**data.get("lattice", {})),

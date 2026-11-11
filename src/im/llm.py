@@ -1,7 +1,8 @@
 """One request to a model, for a JSON answer to a schema: Claude directly, or any other model through OpenRouter.
 
 A model named with a provider prefix (`openai/gpt-6.1-sol`, `z-ai/glm-5.3`) goes to OpenRouter; a bare `claude-*`
-name goes to Anthropic. Both come back as a `Reply`, so every caller logs and costs every request the same way,
+name goes to Anthropic, or under zero data retention (`[egress] zdr`) to OpenRouter's endpoints that keep nothing
+(decision 0008, amended). Both come back as a `Reply`, so every caller logs and costs every request the same way,
 through `egress.ask`. OpenRouter reports what each request cost, so its models need no entry in PRICES.
 """
 
@@ -85,11 +86,20 @@ def cost(model: str, usage) -> float | None:
     return round(tokens_in * p[0] / 1e6 + (usage.output_tokens or 0) * p[1] / 1e6, 6)
 
 
-def client_for(model: str):
-    if via_openrouter(model):
-        return OpenRouter()
+def client_for(model: str, zdr: bool = False):
+    """The client a model is asked through: OpenRouter for a provider-prefixed model, and for Claude too under zero
+    data retention (`[egress] zdr`), since Anthropic's own API keeps requests; Anthropic's SDK otherwise."""
+    if via_openrouter(model) or zdr:
+        return OpenRouter(zdr=zdr)
     import anthropic
     return anthropic.Anthropic()
+
+
+def openrouter_id(model: str) -> str:
+    """OpenRouter's name for a model: a Claude id as Anthropic names it (claude-opus-5-5, also dated) becomes
+    anthropic/claude-opus-5.5; a provider-prefixed id stays as it is."""
+    m = re.fullmatch(r"claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?", model)
+    return f"anthropic/claude-{m.group(1)}-{m.group(2)}.{m.group(3)}" if m else model
 
 
 def max_tokens_for(model: str) -> int:
@@ -98,14 +108,14 @@ def max_tokens_for(model: str) -> int:
 
 def complete(client, model: str, effort: str, system: str, schema: dict, text: str,
              max_tokens: int | None = None) -> Reply:
-    """Ask once, with `max_tokens` of output (None: max_tokens_for the model). Opus falls back to FALLBACK_MODEL on a
-    refusal; other models don't, so their refusal counts as one. Raises Unavailable when it's worth retrying later,
-    and Stop when no request would get through (the credentials, the account's credit, a model id that doesn't exist,
-    a budget Claude would need streamed). An exception raised after an earlier attempt was paid for carries that cost
-    as `cost_usd`, for the egress log."""
-    max_tokens = max_tokens or max_tokens_for(model)
-    if via_openrouter(model):
-        return client.complete(model, effort, system, schema, text, max_tokens)
+    """Ask once, with `max_tokens` of output (None: max_tokens_for the model). Opus asked through Anthropic falls back
+    to FALLBACK_MODEL on a refusal; other models, and Claude through OpenRouter, don't, so their refusal counts as
+    one. Raises Unavailable when it's worth retrying later, and Stop when no request would get through (the
+    credentials, the account's credit, a model id that doesn't exist, a budget Claude would need streamed). An
+    exception raised after an earlier attempt was paid for carries that cost as `cost_usd`, for the egress log."""
+    if via_openrouter(model) or isinstance(client, OpenRouter):
+        return client.complete(openrouter_id(model), effort, system, schema, text, max_tokens or MAX_TOKENS)
+    max_tokens = max_tokens or CLAUDE_MAX_TOKENS
     if max_tokens > CLAUDE_CEILING:
         raise Stop(f"max_tokens {max_tokens} is over {CLAUDE_CEILING}, past which Claude needs a streamed request: "
                    "nothing sent")
@@ -161,11 +171,11 @@ NO_SCHEMA: set[str] = set()   # models found, in this process, to take no JSON s
 class OpenRouter:
     """OpenRouter's chat completions, asking for strict JSON-schema output and the request's cost. An answer that
     isn't JSON is asked for once more: models differ in how well they keep to a schema. A model with no provider
-    that takes a schema is asked again with the schema in its instructions instead. (Jev isn't a chat model: it
-    has its own client, im.jev.)"""
+    that takes a schema is asked again with the schema in its instructions instead. With `zdr`, only endpoints that
+    keep nothing are used (Bedrock and Vertex, for Claude). (Jev isn't a chat model: it has its own client, im.jev.)"""
 
-    def __init__(self, key: str | None = None, post=None):
-        self.key = key or os.environ.get("OPENROUTER_API_KEY")
+    def __init__(self, key: str | None = None, post=None, zdr: bool = False):
+        self.key, self.zdr = key or os.environ.get("OPENROUTER_API_KEY"), zdr
         if not self.key and post is None:
             raise SystemExit("OPENROUTER_API_KEY isn't set: OpenRouter models need it")
         self.post = post or self._post
@@ -191,11 +201,16 @@ class OpenRouter:
         if in_prompt:
             system += ("\n\nAnswer with only a JSON object, no other text, matching this JSON Schema:\n"
                        + json.dumps(schema))
+        # Claude caches only what's marked, as through Anthropic: the system prompt, the same for every request of a
+        # stage. Other models cache on their own, or not at all.
+        cached = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         body = {"model": model, "max_tokens": max_tokens,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}],
+                "messages": [{"role": "system", "content": cached if model.startswith("anthropic/") else system},
+                             {"role": "user", "content": text}],
                 "reasoning": {"effort": effort}, "usage": {"include": True},
                 # Only providers that honor the schema, and none that keep or train on what's sent.
-                "provider": {"require_parameters": not in_prompt, "data_collection": "deny"}}
+                "provider": {"require_parameters": not in_prompt, "data_collection": "deny",
+                             **({"zdr": True} if self.zdr else {})}}
         if not in_prompt:
             body["response_format"] = {"type": "json_schema",
                                        "json_schema": {"name": "answer", "strict": True, "schema": schema}}
