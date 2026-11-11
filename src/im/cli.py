@@ -161,15 +161,20 @@ def _extract_scrubber(conn, cfg, prompt: str):
 
 
 def _lattice(conn, cfg) -> dict:
-    """Match new captures into the lattice, or say why it couldn't run; the run goes on either way."""
+    """Match new captures into the lattice, or say why it couldn't run; the run goes on either way. Names said go out
+    pseudonymized (policy C)."""
     import anthropic
 
-    from im import lattice
+    from im import lattice, names
     from im.backends import SentenceEmbedder
 
     try:
+        scrubber = names.for_trials(conn, cfg.egress)
+    except SystemExit as e:   # no key to pseudonymize names with
+        return {"stopped": str(e)}
+    try:
         return lattice.match_stage(conn, anthropic.Anthropic(), SentenceEmbedder(cfg.lattice.embedding_model),
-                                   cfg.extract.monthly_cap_usd, cfg.lattice.max_items_per_run, cfg.match)
+                                   cfg.extract.monthly_cap_usd, cfg.lattice.max_items_per_run, cfg.match, scrubber)
     except anthropic.AnthropicError as e:
         return {"stopped": f"Claude unavailable: {e}"}
 

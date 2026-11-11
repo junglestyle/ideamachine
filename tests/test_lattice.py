@@ -9,7 +9,7 @@ import numpy as np
 import psycopg
 import pytest
 
-from im import citations, extract, fixtures, lattice, observations, pipeline
+from im import citations, extract, fixtures, lattice, names, observations, pipeline
 from im.checks import run_checks
 from im.config import ModelConfig
 
@@ -198,6 +198,28 @@ def test_a_relayed_thought_is_matched_only_among_relayed_clusters(seeded, cfg, s
     assert stats["new"] == 2 and len(claude.calls) == 1
     shown = claude.calls[0]["messages"][0]["content"]
     assert candidates(shown) == [1] and "relayed from: my teacher" in shown and "coffee" not in shown.lower()
+
+
+def test_the_matcher_sends_names_said_as_pseudonyms_and_keeps_them_as_said(seeded, cfg, stream):
+    run(seeded, cfg, stream)
+
+    def respond(text):   # v5: my LoRa and build lines, both relayed from Alice, by name
+        return [{"quote": said, "lines": [int(row[1:].split("]")[0])], "attributed_to": "Alice", "reading": said,
+                 "mishearings": [], "gist": f"Alice's rule: {said}"}
+                for row in text.splitlines() for said in [row.split(": ", 1)[-1]]
+                if row.startswith("[") and ("LoRa" in row or "build broke" in row)
+                and row.split(": ", 1)[0].endswith(" me")]
+
+    extract.run_stage(seeded, FakeClaude(respond), system=extract.system_prompt("v5"), schema=extract.schema_for("v5"))
+    alice = names.token("Alice", b"k")
+    claude = Scripted(lambda text: {"judgments": [{"candidate": n, "same_point": False} for n in candidates(text)],
+                                    "title": f"{alice}'s rules", "statement": f"{alice} says this."})
+    lattice.match_stage(seeded, claude, HashEmbedder(), scrubber=names.Scrubber(b"k", ["Alice"]))
+    shown = claude.calls[0]["messages"][0]["content"]
+    assert "Alice" not in shown and f"relayed from: {alice}" in shown   # the candidate's text too
+    assert table(seeded, "SELECT statement FROM im.ideas WHERE title = 'Alice''s rules'") == [("Alice says this.",)]
+    assert table(seeded, """SELECT privacy_policy_version LIKE 'C%%' FROM im.egress_log
+                            WHERE prompt_version = %s""", lattice.matcher_version(ModelConfig())) == [(True,)]
 
 
 def test_an_answer_missing_a_candidate_is_asked_again_and_a_statement_shown_as_said_falls_back(seeded, cfg, stream):
