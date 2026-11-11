@@ -44,7 +44,7 @@ def test_the_gate_keeps_repairs_or_drops_each_capture_from_what_jev_says_of_it(p
     turns[0] = replace(turns[0], text="Did you see the build broke again, Bob?")
     stream.write(stream.dir)
     run(pipe, cfg, stream)
-    v5, schema = extract.system_prompt("v5"), extract.schema_for("v5")
+    v5, schema = extract.SYSTEM_V5, extract.SCHEMA_V5
 
     def respond(text):
         rows = {int(r[1:].split("]")[0]): r.split(": ", 1) for r in text.splitlines() if r.startswith("[")}

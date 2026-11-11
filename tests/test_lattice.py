@@ -17,33 +17,32 @@ from test_extract import FakeClaude
 from test_pipeline import LORA
 from test_triage import HashEmbedder
 
-# The ChatGPT archive's ideas as the live database holds them, seeded from ChatGPT's summary before the archive was
-# read by extraction: (title, statement, notes), then its two clusters as (letter, name, description, members).
-ARCHIVE = [("A solitary unsatisfying grape.", "“A solitary unsatisfying grape.”",
-            "Possible associations: disproportionate disappointment."),
-           ("Signal may not be true, but it is…", "“Signal may not be true, but it is always correct.”",
-            "Theme: truth versus correctness. Connects to #1."),
-           ("The coffee order is the real meeting.", "“The coffee order is the real meeting.”",
-            "Theme: office rituals.")]
-ARCHIVE_THEMES = [("A", "Models and signals", "Core recurring concepts: signal versus truth.", [2, 3]),
-                  ("B", "Jokes", "Compact formulations.", [1])]
+# Ideas I added before anything was captured: (title, statement, notes), then my two themes as (name, description,
+# members), and the method of the connection a judge made between the first two.
+SEEDED = [("A solitary unsatisfying grape.", "“A solitary unsatisfying grape.”",
+           "Possible associations: disproportionate disappointment."),
+          ("Signal may not be true, but it is…", "“Signal may not be true, but it is always correct.”",
+           "Theme: truth versus correctness. Connects to #1."),
+          ("The coffee order is the real meeting.", "“The coffee order is the real meeting.”",
+           "Theme: office rituals.")]
+SEEDED_THEMES = [("Models and signals", "Core recurring concepts: signal versus truth.", [2, 3]),
+                 ("Jokes", "Compact formulations.", [1])]
+JUDGED = "opus;edge-v1"
 
 
 def seed(conn) -> None:
-    """The archive's three ideas (origin archive, kept as canonical), its cross-reference from #2 to #1 as a
-    `chatgpt-archive` connection, and its clusters as pinned themes."""
-    ids = {n: conn.execute("""INSERT INTO im.ideas (title, statement, origin, archive_ref, notes)
-                              VALUES (%s, %s, 'archive', %s, %s) RETURNING idea_id""",
-                           (title, statement, f"chatgpt#{n}", notes)).fetchone()[0]
-           for n, (title, statement, notes) in enumerate(ARCHIVE, 1)}
-    conn.execute("INSERT INTO im.connections (a, b, method) VALUES (%s, %s, 'chatgpt-archive')",
-                 sorted((ids[1], ids[2])))
-    for letter, name, description, members in ARCHIVE_THEMES:
-        (theme,) = conn.execute("""INSERT INTO im.themes (name, description, origin, archive_ref, pinned)
-                                   VALUES (%s, %s, 'archive', %s, true) RETURNING theme_id""",
-                                (name, description, f"chatgpt:{letter}")).fetchone()
+    """Three ideas I added (origin mine, kept as canonical), a judge's connection between #1 and #2, and my themes,
+    pinned."""
+    ids = {n: conn.execute("""INSERT INTO im.ideas (title, statement, origin, notes)
+                              VALUES (%s, %s, 'mine', %s) RETURNING idea_id""",
+                           (title, statement, notes)).fetchone()[0]
+           for n, (title, statement, notes) in enumerate(SEEDED, 1)}
+    conn.execute("INSERT INTO im.connections (a, b, method) VALUES (%s, %s, %s)", (*sorted((ids[1], ids[2])), JUDGED))
+    for name, description, members in SEEDED_THEMES:
+        (theme,) = conn.execute("""INSERT INTO im.themes (name, description, origin, pinned)
+                                   VALUES (%s, %s, 'mine', true) RETURNING theme_id""", (name, description)).fetchone()
         for n in members:
-            conn.execute("INSERT INTO im.idea_themes (idea_id, theme_id, origin) VALUES (%s, %s, 'archive')",
+            conn.execute("INSERT INTO im.idea_themes (idea_id, theme_id, origin) VALUES (%s, %s, 'mine')",
                          (ids[n], theme))
 
 
@@ -80,8 +79,8 @@ def items_for(text):
         n, rest = line[1:].split("] ", 1)
         who, said = rest.split(": ", 1)
         if "coffee" in said or "build broke" in said or "LoRa" in said:
-            out.append({"kind": "idea", "said_by": who, "quote": said, "lines": [int(n)], "gist": said,
-                        "themes": [], "confidence": 0.6})
+            out.append({"said_by": who, "quote": said, "lines": [int(n)], "attributed_to": "", "reading": said,
+                        "mishearings": [], "gist": said})
     return out
 
 
@@ -105,7 +104,7 @@ def seeded_lattice(seeded, cfg, stream):
 
 
 def legacy_evolves(conn):
-    """An evolves edge as matcher v1 wrote them, from the broken-builds cluster to the archive's signal idea: lineage
+    """An evolves edge as matcher v1 wrote them, from the broken-builds cluster to my signal idea: lineage
     the live lattice still holds, though matcher v2 writes none."""
     conn.execute("""INSERT INTO im.lineage (from_id, to_id, kind, method)
                     SELECT b.idea_id, s.idea_id, 'evolves', 'match-1:legacy' FROM im.ideas b, im.ideas s
@@ -173,12 +172,12 @@ def test_a_relayed_thought_is_matched_only_among_relayed_clusters(seeded, cfg, s
                 lines.append(said)
         return out
 
-    extract.run_stage(seeded, FakeClaude(respond), system=extract.system_prompt("v5"), schema=extract.schema_for("v5"))
+    extract.run_stage(seeded, FakeClaude(respond), system=extract.SYSTEM_V5)
     claude = Scripted(lambda text: {"judgments": [{"candidate": n, "same_point": False} for n in candidates(text)],
                                     "title": "My teacher's point", "statement": "My teacher says this."})
     stats = lattice.match_stage(seeded, claude, HashEmbedder())
     # The first relayed capture is the first cluster on its side: no candidates, so nothing to ask. The second sees
-    # only that one, never the archive's clusters of my own.
+    # only that one, never the clusters of my own thoughts.
     assert stats["new"] == 2 and len(claude.calls) == 1
     shown = claude.calls[0]["messages"][0]["content"]
     assert candidates(shown) == [1] and "relayed from: my teacher" in shown and "coffee" not in shown.lower()
@@ -194,7 +193,7 @@ def test_the_matcher_sends_names_said_as_said(seeded, cfg, stream):
                 if row.startswith("[") and ("LoRa" in row or "build broke" in row)
                 and row.split(": ", 1)[0].endswith(" me")]
 
-    extract.run_stage(seeded, FakeClaude(respond), system=extract.system_prompt("v5"), schema=extract.schema_for("v5"))
+    extract.run_stage(seeded, FakeClaude(respond), system=extract.SYSTEM_V5)
     claude = Scripted(lambda text: {"judgments": [{"candidate": n, "same_point": False} for n in candidates(text)],
                                     "title": "Alice's rules", "statement": "Alice says this."})
     lattice.match_stage(seeded, claude, HashEmbedder())
@@ -223,7 +222,7 @@ def test_a_re_read_joins_its_observations_cluster_unasked(seeded, cfg, stream):
     # captures join the clusters their observations are already in: no matcher request, no observation split.
     lat_setup(seeded, cfg, stream)
     observations.assign_stage(seeded)
-    extract.run_stage(seeded, FakeClaude(items_for), system=extract.system_prompt("v3"))
+    extract.run_stage(seeded, FakeClaude(items_for), system=extract.SYSTEM_V5_2)
     observations.assign_stage(seeded)
     claude = FakeMatcher()
     stats = lattice.match_stage(seeded, claude, HashEmbedder())
@@ -244,7 +243,7 @@ def test_a_re_read_shows_each_observation_once_with_my_verdict(seeded, cfg, stre
     extract.decide(seeded, coffee, "keep")
     extract.decide(seeded, lora, "discard")
     before = table(seeded, "SELECT idea_id, n_evidence, kept, discarded FROM pub.ideas ORDER BY idea_id")
-    extract.run_stage(seeded, FakeClaude(items_for), system=extract.system_prompt("v3"))
+    extract.run_stage(seeded, FakeClaude(items_for), system=extract.SYSTEM_V5_2)
     observations.assign_stage(seeded)
     lattice.match_stage(seeded, FakeMatcher(), HashEmbedder())
     assert table(seeded, "SELECT count(*) FROM im.items") == [(6,)]
@@ -379,14 +378,14 @@ def test_forgetting_removes_ideas_born_from_it_and_their_stars(seeded, cfg, stre
     extract.run_stage(seeded, FakeClaude(items_for))
     lattice.match_stage(seeded, FakeMatcher(), HashEmbedder())
     (lora,) = table(seeded, "SELECT idea_id FROM pub.ideas WHERE title = 'Something new'")[0]
-    (archived,) = table(seeded, "SELECT idea_id FROM pub.ideas WHERE origin = 'archive' LIMIT 1")[0]
-    for idea in (lora, archived):
+    (added,) = table(seeded, "SELECT idea_id FROM pub.ideas WHERE origin = 'mine' LIMIT 1")[0]
+    for idea in (lora, added):
         seeded.execute("INSERT INTO pub.feedback_events (kind, idea_id, source) VALUES ('star', %s, 'test')", (idea,))
     stream.forget(3600, 3612)   # the LoRa idea's line
     stream.write(stream.dir)
     run(seeded, cfg, stream)
     assert table(seeded, "SELECT count(*) FROM im.ideas WHERE idea_id = %s", lora) == [(0,)]
-    assert table(seeded, "SELECT idea_id FROM pub.feedback_events") == [(archived,)]
+    assert table(seeded, "SELECT idea_id FROM pub.feedback_events") == [(added,)]
 
 
 def _star_the_lora_capture(conn):
@@ -422,8 +421,8 @@ def _captures_of(*words):
     """Claude's reply: a capture of each line saying one of `words`, in the order of `words`."""
     def respond(text):
         lines = [line[1:].split("] ", 1) for line in text.splitlines() if line.startswith("[")]
-        return [{"kind": "idea", "said_by": said.split(": ", 1)[0], "quote": said.split(": ", 1)[1],
-                 "lines": [int(n)], "gist": said, "themes": [], "confidence": 0.6}
+        return [{"said_by": said.split(": ", 1)[0], "quote": said.split(": ", 1)[1], "lines": [int(n)],
+                 "attributed_to": "", "reading": said, "mishearings": [], "gist": said}
                 for word in words for n, said in lines if word in said]
     return respond
 
@@ -536,7 +535,7 @@ def test_my_links_show_at_once_and_unlinking_removes_them(seeded, admin):
 
 
 def test_a_pair_is_one_connection_and_an_unlink_holds_until_a_later_method(seeded):
-    (a, b), = table(seeded, "SELECT a, b FROM im.connections WHERE method = 'chatgpt-archive'")
+    (a, b), = table(seeded, "SELECT a, b FROM im.connections WHERE method = %s", JUDGED)
 
     def shown():
         return table(seeded, "SELECT kind, method FROM pub.card_links WHERE a = %s AND b = %s", a, b)
@@ -544,12 +543,12 @@ def test_a_pair_is_one_connection_and_an_unlink_holds_until_a_later_method(seede
     def links():
         return table(seeded, "SELECT links FROM pub.cards WHERE idea_id = %s", a)
 
-    assert shown() == [("related", "chatgpt-archive")] and links() == [(1,)]
+    assert shown() == [("related", JUDGED)] and links() == [(1,)]
     event = "INSERT INTO pub.feedback_events (kind, idea_id, other_idea_id) VALUES (%s, %s, %s)"
     seeded.execute(event, ("link", b, a))
-    assert shown() == [("mine", "feedback")] and links() == [(1,)]   # mine and the archive's: one connection
+    assert shown() == [("mine", "feedback")] and links() == [(1,)]   # mine and the judge's: one connection
     seeded.execute(event, ("unlink", a, b))
-    assert shown() == [] and links() == [(0,)]   # the archive's method was known when I unlinked
+    assert shown() == [] and links() == [(0,)]   # the judge's method was known when I unlinked
     seeded.execute("UPDATE im.connections SET method = 'terra;edge-v1' WHERE a = %s AND b = %s", (a, b))
     assert shown() == [("related", "terra;edge-v1")]   # a method first used after the unlink connects it again
 
@@ -559,9 +558,9 @@ def test_embedding_neighbours_never_replace_another_methods_connection(seeded, m
     lattice.relate(seeded, HashEmbedder())
     methods = dict(((a, b), m) for a, b, m in table(seeded, "SELECT a, b, method FROM im.connections"))
     assert len(methods) == 3 and sorted(m.split(":")[0] for m in methods.values()) == \
-        ["chatgpt-archive", "embedding", "embedding"]   # one per pair; the archive's stays the archive's
+        ["embedding", "embedding", JUDGED]   # one per pair; the judge's stays the judge's
     decided = next(p for p, m in methods.items() if m.startswith("embedding"))
     seeded.execute("UPDATE im.connections SET method = 'terra;edge-v1' WHERE (a, b) = (%s, %s)", decided)
     monkeypatch.setattr(lattice, "RELATED_MIN", 2.0)   # no neighbors at all now
     lattice.relate(seeded, HashEmbedder())
-    assert sorted(table(seeded, "SELECT method FROM im.connections")) == [("chatgpt-archive",), ("terra;edge-v1",)]
+    assert sorted(table(seeded, "SELECT method FROM im.connections")) == [(JUDGED,), ("terra;edge-v1",)]

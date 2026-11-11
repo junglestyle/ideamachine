@@ -27,7 +27,7 @@ def proposes(heard, meant):
 
 def test_a_proposed_mishearing_is_a_hint_for_what_comes_next_and_re_reads_nothing(pipe, cfg, stream):
     run(pipe, cfg, stream)
-    v5, schema = extract.system_prompt("v5"), extract.schema_for("v5")
+    v5, schema = extract.SYSTEM_V5_3, extract.SCHEMA_V5
     episode = episode_saying(pipe, "lockfile")
     before = egress.build(pipe, episode)
     extract.run_stage(pipe, FakeClaude(proposes("lockfile", "lock file")), system=v5, schema=schema)

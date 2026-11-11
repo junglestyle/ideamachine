@@ -70,10 +70,10 @@ def test_proposals_need_enough_loose_ideas_and_skip_small_groups(lat):
     themes.file_stage(lat, claude)
     assert themes.propose_stage(lat, claude)["proposed"] == 0  # one loose idea is not enough
     for i in range(6):
-        lat.execute("""WITH d AS (INSERT INTO im.ideas (title, statement, origin, archive_ref)
-                                  VALUES (%s, 'a loose idea', 'archive', %s) RETURNING idea_id)
+        lat.execute("""WITH d AS (INSERT INTO im.ideas (title, statement, origin)
+                                  VALUES (%s, 'a loose idea', 'mine') RETURNING idea_id)
                        INSERT INTO im.theme_checks (idea_id, themes_version, result) SELECT idea_id, 'x', 'none' FROM d""",
-                    (f"Loose {i}", f"t#{i}"))
+                    (f"Loose {i}",))
     stats = themes.propose_stage(lat, claude)
     assert stats["proposed"] == 1
     assert table(lat, "SELECT name, origin, pinned, n_ideas FROM pub.themes WHERE name = 'Gadgets'") == \

@@ -37,7 +37,7 @@ BOTH_WAYS_SIZE = 20   # per set, when no --size: 60 captures to mark
 
 
 def _capture(eid, i: int, it: dict) -> dict:
-    return {"episode": str(eid), "item": i, "kind": it.get("kind"), "quote": it["quote"], "gist": it["gist"],
+    return {"episode": str(eid), "item": i, "quote": it["quote"], "gist": it["gist"],
             "segments": it["source_segment_ids"]}
 
 

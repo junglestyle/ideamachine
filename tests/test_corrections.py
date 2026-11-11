@@ -6,6 +6,7 @@ import psycopg
 import pytest
 
 from im import extract, lattice, themes
+from im.fixtures import _me
 
 from helpers import run, table
 from test_extract import FakeClaude
@@ -48,7 +49,7 @@ def test_matching_and_embeddings_use_the_correction(seeded_lattice, admin, cfg, 
     lattice.relate(pipe, HashEmbedder())   # rebuilding the matrix re-embeds changed text
     assert table(pipe, "SELECT input_hash FROM im.idea_embeddings WHERE idea_id = %s", coffee) != before
     # A new capture about coffee: the matcher is shown my statement and note, not Claude's.
-    stream.conversations["c-tv"].turns.append(stream.conversations["c-conv"].turns[2])
+    stream.conversations["c-tv"].turns.append(_me(7218, 7221, "Who's got the coffee order?"))
     stream.write(stream.dir)
     run(pipe, cfg, stream)
     extract.run_stage(pipe, FakeClaude(items_for))
@@ -58,17 +59,17 @@ def test_matching_and_embeddings_use_the_correction(seeded_lattice, admin, cfg, 
     assert "statement (mine): Coffee runs are where the real meeting happens.\\n   my note: office ritual" in sent
 
 
-def test_a_correction_refiles_the_idea_but_keeps_archive_themes(seeded_lattice, admin):
+def test_a_correction_refiles_the_idea_but_keeps_my_themes(seeded_lattice, admin):
     pipe = seeded_lattice
     themes.file_stage(pipe, FakeThemer())
     evolved = idea_where(pipe, "Broken builds%")
-    archived = idea_where(pipe, "%coffee%")
+    added = idea_where(pipe, "%coffee%")
     assert table(pipe, "SELECT origin FROM im.idea_themes WHERE idea_id = %s", evolved) == [("assigned",)]
-    for idea in (evolved, archived):
+    for idea in (evolved, added):
         event(admin, "idea_correct", idea, {"statement": "corrected"})
-    assert themes.refile_corrected(pipe) == 1   # the archive idea had no filer check: nothing to redo
+    assert themes.refile_corrected(pipe) == 1   # the idea I added had no filer check: nothing to redo
     assert table(pipe, "SELECT count(*) FROM im.idea_themes WHERE idea_id = %s", evolved) == [(0,)]
-    assert table(pipe, "SELECT origin FROM im.idea_themes WHERE idea_id = %s", archived) == [("archive",)]
+    assert table(pipe, "SELECT origin FROM im.idea_themes WHERE idea_id = %s", added) == [("mine",)]
     assert themes.file_stage(pipe, FakeThemer())["pending"] >= 1
 
 

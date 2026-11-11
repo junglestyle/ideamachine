@@ -23,10 +23,10 @@ def add(admin, idea, payload, source="lattice"):
 
 def test_an_added_idea_is_shown_at_once_with_its_links(seeded_lattice, admin):
     pipe = seeded_lattice
-    (archived,) = table(pipe, "SELECT idea_id FROM pub.ideas WHERE origin = 'archive' ORDER BY title LIMIT 1")[0]
+    (earlier,) = table(pipe, "SELECT idea_id FROM pub.ideas WHERE origin = 'mine' ORDER BY title LIMIT 1")[0]
     idea = uuid.uuid4()
     payload = {"title": "  Calm is a signal  ", "statement": "Others read your calm more than your words.",
-               "note": "from a talk with a friend", "link_to": [str(archived), str(uuid.uuid4()), str(idea)]}
+               "note": "from a talk with a friend", "link_to": [str(earlier), str(uuid.uuid4()), str(idea)]}
     add(admin, idea, payload, "mcp")
     add(admin, idea, payload, "mcp")   # a resend changes nothing
     shown = as_lattice(admin, """SELECT title, origin, notes, n_evidence, starred FROM pub.ideas
@@ -51,7 +51,7 @@ def test_bad_adds_are_refused(seeded_lattice, admin):
                           (captured, ok)]:   # an existing idea I didn't add
         with pytest.raises(psycopg.errors.CheckViolation):
             add(admin, idea, payload)
-    assert table(seeded_lattice, "SELECT count(*) FROM im.ideas WHERE origin = 'mine'") == [(0,)]
+    assert table(seeded_lattice, "SELECT count(*) FROM im.ideas WHERE origin = 'mine'") == [(3,)]   # the seeded ones
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
         as_lattice(admin, "INSERT INTO im.ideas (title, statement, origin) VALUES ('t', 's', 'mine')")
 

@@ -35,7 +35,7 @@ from im.feedback import CARRY_MIN_SCORE, quote_score
 
 SAMPLE = 150
 EXAMPLES = 15
-KEEP = ("kind", "said_by", "attributed_to", "quote", "reading", "mishearings", "gist", "confidence", "checks")
+KEEP = ("said_by", "attributed_to", "quote", "reading", "mishearings", "gist", "checks")
 SAME = ("same", "same_v2")
 SAME_CUT = jev.YES   # not yet set from marks: Jev's own threshold for a confident yes
 
@@ -48,10 +48,9 @@ def sample(conn, n: int = SAMPLE) -> list:
 
 def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str = "medium",
         monthly_cap_usd: float = 20.0, limit: int | None = None, n: int = SAMPLE,
-        replicate: int = 1, schema: dict = extract.SCHEMA, max_tokens: int | None = None) -> dict:
+        replicate: int = 1, schema: dict = extract.SCHEMA_V5, max_tokens: int | None = None) -> dict:
     """Send the sampled episodes this model hasn't read yet under this prompt and policy (or whose payload changed).
-    `schema` is the prompt's (extract.schema_for); `max_tokens`, each request's output budget, isn't part of the
-    trial's version."""
+    `max_tokens`, each request's output budget, isn't part of the trial's version."""
     pv = version(model, effort, system, replicate, schema)
     policy = egress.POLICY_VERSION
     done = {r[0]: r[1] for r in conn.execute(
@@ -88,7 +87,7 @@ def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str =
     return stats
 
 
-def version(model: str, effort: str, system: str, replicate: int = 1, schema: dict = extract.SCHEMA) -> str:
+def version(model: str, effort: str, system: str, replicate: int = 1, schema: dict = extract.SCHEMA_V5) -> str:
     """The prompt version a trial is filed under; a replicate's is marked `~n`."""
     pv = extract.prompt_version(model, effort, system, schema)
     return pv if replicate == 1 else f"{pv}~{replicate}"
@@ -219,7 +218,6 @@ def report(conn, candidate: tuple[str, str], reference: tuple[str, str], same: d
     n = {"reference_captures": 0, "found": 0, "candidate_captures": 0, "extra": 0,
          "episodes_reference_captured_in": 0, "of_those_candidate_captured_nothing": 0} \
         | ({"found_by_same_point": 0} if same is not None else {})
-    by_kind: dict = {}
     missed, extra, found_by_reach = [], [], []
     for eid in both:
         r_items, c_items = ref[eid][1], cand[eid][1]
@@ -236,20 +234,16 @@ def report(conn, candidate: tuple[str, str], reference: tuple[str, str], same: d
             n["episodes_reference_captured_in"] += 1
             n["of_those_candidate_captured_nothing"] += not c_items
         for i, it in enumerate(r_items):
-            k = by_kind.setdefault(it.get("kind", "-"), [0, 0])
-            k[0] += 1
-            k[1] += i in m
             found_by_reach.append((eid, it, i in m))
             if i not in m:
-                missed.append(f"{it.get('kind', '-')}: {it['quote']}")
+                missed.append(it["quote"])
         used = set(m.values())
-        extra += [f"{it.get('kind', '-')}: {it['quote']}" for j, it in enumerate(c_items) if j not in used]
+        extra += [it["quote"] for j, it in enumerate(c_items) if j not in used]
     rate = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
     cost = lambda reads: sum(reads[e][2] or 0.0 for e in both)  # noqa: E731
     return {"candidate": candidate[1], "reference": reference[1], "episodes": len(both),
             "candidate_only_read": len(cand) - len(both)} | n | {
         "recall": rate(n["found"], n["reference_captures"]),
-        "recall_by_kind": {k: rate(f, t) for k, (t, f) in sorted(by_kind.items())},
         "recall_by_reach": by_reach(conn, found_by_reach),
         "cost_usd": round(cost(cand), 4), "reference_cost_usd": round(cost(ref), 4),
         "cost_vs_reference": rate(cost(cand), cost(ref)),

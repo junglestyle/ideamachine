@@ -3,9 +3,9 @@
 Router v3 (docs/decisions/0004-claude-extraction.md, 0012): an episode comes to me when Claude captured something
 there that I haven't discarded, or when I said "note to self", or tapped the pendant (taps can be accidental, which is
 why everything routed can be discarded). Everything else is auto-filed. Router v2 also asked a capture's confidence
-to be at least 0.5; v5 captures have none, so 0012 retired that bar. The local LLM's flags (router v1, decision 0003)
-are no longer read: against my labels they were mostly false alarms. Routes are labels in im.routes; nothing is
-dropped.
+to be at least 0.5, and gave each capture kind its own reason; v5 captures have neither, so 0012 retired both. The
+local LLM's flags (router v1, decision 0003) are no longer read: against my labels they were mostly false alarms.
+Routes are labels in im.routes; nothing is dropped.
 """
 
 import re
@@ -18,39 +18,37 @@ ROUTER_VERSION = "rules-3;claude-items;tap;note_to_self"
 NOTE_TO_SELF = re.compile(r"\bnote to (my)?self\b", re.IGNORECASE)
 
 
-def route(state: EpisodeState, items: list[str | None] | None) -> tuple[str, list[str]]:
-    """`items`: kinds of the captured, undiscarded items, None for a capture with no kind (v5); None for the list:
-    not read yet."""
+def route(state: EpisodeState, captures: int | None) -> tuple[str, list[str]]:
+    """`captures`: how many undiscarded captures Claude made in the episode; None: not read yet."""
     reasons = []
     if state.taps:
         reasons.append("tap")
     if any(line.startswith("me:") and NOTE_TO_SELF.search(line) for line in state.transcript.splitlines()):
         reasons.append("note_to_self")
-    reasons += sorted({f"claude:{kind}" if kind else "claude" for kind in items or []})
+    if captures:
+        reasons.append("claude")
     return ("review" if reasons else "auto_file"), reasons
 
 
 def run_stage(conn) -> dict:
     """Route every current episode Claude has read (episodes with a tap or a note to self are routed even
-    before that), and every one where I don't speak, which a prompt capturing only my speech never reads
-    (extract.ONLY_MINE). Rewrites a route only when it changed."""
+    before that), and every one where I don't speak, which extraction never reads (it captures only my speech).
+    Rewrites a route only when it changed."""
     ids = [r[0] for r in conn.execute("SELECT episode_id FROM im.episodes WHERE current")]
     read = {r[0] for r in conn.execute(
         """SELECT episode_id FROM im.extractions WHERE episode_id = ANY(%(ids)s)
            UNION SELECT episode_id FROM im.episodes WHERE episode_id = ANY(%(ids)s) AND kind = 'others_only'""",
         {"ids": ids})}
-    kinds: dict = {}
-    for eid, kind in conn.execute(
-            """SELECT i.episode_id, i.kind FROM im.items i
-               WHERE i.episode_id = ANY(%s)
-                 AND NOT EXISTS (SELECT 1 FROM im.item_verdicts v WHERE v.item_id = i.item_id
-                                 AND v.verdict = 'discard')""", (ids,)):
-        kinds.setdefault(eid, []).append(kind)
+    captures = dict(conn.execute(
+        """SELECT i.episode_id, count(*) FROM im.items i
+           WHERE i.episode_id = ANY(%s)
+             AND NOT EXISTS (SELECT 1 FROM im.item_verdicts v WHERE v.item_id = i.item_id AND v.verdict = 'discard')
+           GROUP BY i.episode_id""", (ids,)).fetchall())
     counts = {"auto_file": 0, "review": 0, "waiting_for_claude": 0}
     changed = 0
     with conn.transaction():
         for st in render(conn, ids):
-            got = kinds.get(st.episode_id, []) if st.episode_id in read else None
+            got = captures.get(st.episode_id, 0) if st.episode_id in read else None
             r, reasons = route(st, got)
             if got is None and r == "auto_file":
                 counts["waiting_for_claude"] += 1

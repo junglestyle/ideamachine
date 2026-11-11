@@ -6,11 +6,11 @@ from im import citations, extract, lattice, observations
 
 from helpers import assert_invariants, run, table
 from test_extract import FakeClaude
-from test_lattice import FakeMatcher, items_for, legacy_evolves, seeded  # noqa: F401
+from test_lattice import JUDGED, FakeMatcher, items_for, legacy_evolves, seeded  # noqa: F401
 from test_triage import HashEmbedder
 
-# Every edge with what the old table called its kind: a connection is the archive's or an embedding neighbor's.
-EDGES = """SELECT a, b, CASE WHEN method LIKE '%%-archive' THEN 'archive' ELSE 'related' END AS kind,
+# Every edge with what the old table called its kind, or `judged` for a connection a judge made.
+EDGES = """SELECT a, b, CASE WHEN method LIKE 'embedding:%%' THEN 'related' ELSE 'judged' END AS kind,
                   cited_observation_ids FROM im.connections
            UNION ALL SELECT from_id, to_id, kind, cited_observation_ids FROM im.lineage"""
 
@@ -35,9 +35,9 @@ def matched(conn, cfg, stream, observe_first=True):
 def test_an_edge_cites_what_exists(seeded, cfg, stream):
     matched(seeded, cfg, stream)
     (build,) = table(seeded, BUILD_OBSERVATION)[0]
-    assert edges(seeded, ["archive", "evolves"]) == {
-        "archive": [],          # two archive ideas: nothing said behind either
-        "evolves": [build]}     # the build capture's idea evolves an archive idea: only its end cites
+    assert edges(seeded, ["judged", "evolves"]) == {
+        "judged": [],           # two ideas I added: nothing said behind either
+        "evolves": [build]}     # the build capture's idea evolves an idea I added: only its end cites
     assert_invariants(seeded)   # and every related edge touching a captured idea cites it
 
 
@@ -57,7 +57,7 @@ def test_forgetting_takes_the_edges_made_from_it(seeded, cfg, stream):
     stream.write(stream.dir)
     run(seeded, cfg, stream)
     assert table(seeded, "SELECT count(*) FROM im.lineage WHERE kind = 'evolves'") == [(0,)]
-    assert table(seeded, "SELECT count(*) FROM im.connections WHERE method = 'chatgpt-archive'") == [(1,)]
+    assert table(seeded, "SELECT count(*) FROM im.connections WHERE method = %s", JUDGED) == [(1,)]
     assert_invariants(seeded)
 
 

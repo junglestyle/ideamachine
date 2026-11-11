@@ -34,12 +34,12 @@ class FakeClaude:
 
 
 def coffee_item(text):
-    """An item for the line where S1 (Carol, anon A in the fixtures) asks about coffee."""
+    """An item for the line where S2 (anon A in the fixtures) asks about coffee, said_by naming its speaker."""
     for line in text.splitlines():
         if "coffee" in line:
             n, rest = line[1:].split("] ", 1)
-            return [{"kind": "joke", "said_by": rest.split(":")[0], "quote": "coffee order", "lines": [int(n), 999],
-                     "gist": "who orders the coffee", "themes": ["office"], "confidence": 0.8}]
+            return [{"said_by": rest.split(":")[0], "quote": "coffee order", "lines": [int(n), 999], "attributed_to": "",
+                     "reading": "coffee order", "mishearings": [], "gist": "who orders the coffee"}]
     return []
 
 
@@ -63,12 +63,12 @@ def test_extraction_maps_items_back_and_logs_what_went_out(pipe, cfg, stream):
             [dict(c, quote="nothing on line 0", lines=[0]) for c in coffee_item(text)]
     claude = FakeClaude(respond)
     stats = extract.run_stage(pipe, claude)
-    assert stats["read"] == 9 and stats["items"] == 1 and len(claude.calls) == 9   # citing no real line: dropped
-    (kind, said_by, segs), = table(pipe, "SELECT kind, said_by, source_segment_ids FROM im.items")
-    assert (kind, said_by) == ("joke", "anon A") and len(segs) == 1  # lines 0 and 999 don't exist: dropped
+    assert stats["read"] == 8 and stats["items"] == 1 and len(claude.calls) == 8   # citing no real line: dropped
+    (said_by, segs), = table(pipe, "SELECT said_by, source_segment_ids FROM im.items")
+    assert said_by == "anon A" and len(segs) == 1  # lines 0 and 999 don't exist: dropped
     assert table(pipe, "SELECT text FROM im.source_segments WHERE segment_id = %s", segs[0]) == [(COFFEE,)]
     logged = table(pipe, "SELECT count(*), sum(cost_usd)::float, bool_and(payload IS NOT NULL) FROM im.egress_log")
-    assert logged == [(9, pytest.approx(9 * (1000 * 4 + 200 * 20) / 1e6), True)]
+    assert logged == [(8, pytest.approx(8 * (1000 * 4 + 200 * 20) / 1e6), True)]
     call = claude.calls[0]
     assert call["model"] == "claude-opus-5-5" and call["fallbacks"] == [{"model": "claude-opus-4-8"}]
     assert call["output_config"]["format"]["type"] == "json_schema"
@@ -138,7 +138,7 @@ def test_reuse_after_a_rekey_sends_nothing(pipe, cfg, stream, monkeypatch):
     sent = len(claude.calls)
     run(pipe, cfg, stream)   # every segment rekeyed, so every episode re-derives
     stats = extract.run_stage(pipe, claude, monthly_cap_usd=0)
-    assert len(claude.calls) == sent and stats["read"] == 0 and stats["reused"] == 9 and stats["items"] == 1
+    assert len(claude.calls) == sent and stats["read"] == 0 and stats["reused"] == 8 and stats["items"] == 1
     assert table(pipe, """SELECT w.said_by FROM im.items i JOIN im.item_said_by w USING (item_id)
                           JOIN im.episodes e USING (episode_id) WHERE e.current""") == [("anon A",)]
     assert table(pipe, """SELECT i.source_segment_ids <@ ARRAY(SELECT es.segment_id FROM im.episode_segments es
@@ -181,14 +181,14 @@ def test_budget_cap_refusals_and_outages(pipe, cfg, stream):
     assert table(pipe, "SELECT error IS NOT NULL FROM im.egress_log") == [(True,)]
 
     stats = extract.run_stage(pipe, FakeClaude(coffee_item, stop_reason="refusal"))
-    assert stats["refused"] == 9 and stats["items"] == 0
-    assert table(pipe, "SELECT count(*), sum(n_items) FROM im.extractions") == [(9, 0)]
+    assert stats["refused"] == 8 and stats["items"] == 0
+    assert table(pipe, "SELECT count(*), sum(n_items) FROM im.extractions") == [(8, 0)]
 
 
 def test_forgetting_purges_items_and_payloads_but_reports_what_was_sent(pipe, cfg, stream):
     run(pipe, cfg, stream)
-    extract.run_stage(pipe, FakeClaude(lambda t: [{"kind": "idea", "said_by": "me", "quote": "x", "lines": [2],
-                                                    "gist": "x", "themes": [], "confidence": 0.9}]
+    extract.run_stage(pipe, FakeClaude(lambda t: [{"quote": "x", "lines": [2], "attributed_to": "", "reading": "x",
+                                                    "mishearings": [], "gist": "x"}]
                                        if "Private detail" in t else []))
     (item,) = [r[0] for r in table(pipe, "SELECT item_id FROM im.items")]
     extract.decide(pipe, item, "keep")
@@ -203,7 +203,7 @@ def test_forgetting_purges_items_and_payloads_but_reports_what_was_sent(pipe, cf
     assert_invariants(pipe)
 
 
-def test_router_v2_routes_on_items_taps_and_notes_and_respects_discards(pipe, cfg, stream):
+def test_router_routes_on_captures_taps_and_notes_and_respects_discards(pipe, cfg, stream):
     stream.conversations["c-forget"].taps = [fixtures_iso(14408)]
     stream.write(stream.dir)
     run(pipe, cfg, stream)
@@ -215,7 +215,7 @@ def test_router_v2_routes_on_items_taps_and_notes_and_respects_discards(pipe, cf
     assert stats["review"] == 2 and stats["auto_file"] == 7 and stats["waiting_for_claude"] == 0
     assert router.run_stage(pipe)["changed"] == 0
     (coffee,) = episodes_with_text(pipe, COFFEE)
-    assert table(pipe, "SELECT reasons FROM im.routes WHERE episode_id = %s", coffee) == [(["claude:joke"],)]
+    assert table(pipe, "SELECT reasons FROM im.routes WHERE episode_id = %s", coffee) == [(["claude"],)]
     (item,) = [r[0] for r in table(pipe, "SELECT item_id FROM im.items")]
     extract.decide(pipe, item, "discard")
     router.run_stage(pipe)
@@ -233,7 +233,7 @@ def test_reviewing_items(pipe, cfg, stream):
         [("discard", "coffee order", "a song lyric, not an idea")]
     assert extract.review_items(pipe) == []
     (d,) = extract.discards(pipe)
-    assert d[2] == "coffee order" and d[6] == "a song lyric, not an idea"
+    assert d[1] == "coffee order" and d[4] == "a song lyric, not an idea"
 
 
 def test_a_capture_on_a_replaced_episode_isnt_offered_for_review(pipe, cfg, stream):
@@ -246,18 +246,17 @@ def test_a_capture_on_a_replaced_episode_isnt_offered_for_review(pipe, cfg, stre
     assert extract.review_items(pipe) == []
 
 
-@pytest.mark.parametrize("state, items, expect", [
-    ("me: nothing much", [], ("auto_file", [])),
+@pytest.mark.parametrize("state, captures, expect", [
+    ("me: nothing much", 0, ("auto_file", [])),
     ("me: Note to self, buy batteries", None, ("review", ["note_to_self"])),
-    ("Alice: note to self, she said", [], ("auto_file", [])),
-    ("me: hm", ["idea", "joke", "idea"], ("review", ["claude:idea", "claude:joke"])),
-    ("me: hm", [None], ("review", ["claude"])),   # a v5 capture: no kind, and no confidence to fall short of
+    ("Alice: note to self, she said", 0, ("auto_file", [])),
+    ("me: hm", 3, ("review", ["claude"])),
 ])
-def test_router_rules(state, items, expect):
+def test_router_rules(state, captures, expect):
     from im.triage import EpisodeState
 
-    assert router.route(EpisodeState(1, state), items) == expect
-    assert router.route(EpisodeState(1, state, taps=("t",)), items)[1][0] == "tap"
+    assert router.route(EpisodeState(1, state), captures) == expect
+    assert router.route(EpisodeState(1, state, taps=("t",)), captures)[1][0] == "tap"
 
 
 def test_im_run_goes_on_without_claude(pipe, cfg, stream, monkeypatch, capsys):
@@ -280,16 +279,16 @@ def test_pending_reports_what_would_be_resent(pipe, cfg, stream, monkeypatch, ca
     monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
     cli.main(["pending", "--expect-none-resent"])
     assert json.loads(capsys.readouterr().out)["already_extracted_would_resend"] == 0
-    cli.main(["pending", "--prompt", "v3"])   # what switching prompts would re-read, and what those reads cost
+    cli.main(["pending", "--prompt", "v5.2"])   # what another prompt would read, and what those reads cost
     out = json.loads(capsys.readouterr().out)
-    assert out["episodes_to_extract"] == 9 and out["already_extracted_would_resend"] == 0
+    assert out["episodes_to_extract"] == 8 and out["already_extracted_would_resend"] == 0
     assert out["their_last_reads_cost_usd"] > 0
     monkeypatch.setenv("TZ", "Asia/Tokyo")  # a machine in another time zone renders different payloads
     time.tzset()
     try:
         with pytest.raises(SystemExit):
             cli.main(["pending", "--expect-none-resent"])
-        assert json.loads(capsys.readouterr().out)["already_extracted_would_resend"] == 9
+        assert json.loads(capsys.readouterr().out)["already_extracted_would_resend"] == 8
     finally:
         monkeypatch.delenv("TZ")
         time.tzset()
@@ -321,14 +320,14 @@ def test_a_reply_that_fails_is_logged_and_counted_and_the_next_episodes_are_read
     run(pipe, cfg, stream)
     claude = FailsOn("coffee", how)
     stats = extract.run_stage(pipe, claude)
-    assert (stats["read"], stats["failed"], len(claude.calls)) == (8, 1, 9)
+    assert (stats["read"], stats["failed"], len(claude.calls)) == (7, 1, 8)
     (failed,) = table(pipe, "SELECT cardinality(segment_ids), cost_usd, payload LIKE '%%coffee%%' FROM im.egress_log "
                             "WHERE error IS NOT NULL")
     paid = 0.0 if how == "400" else 1000 * 4.0 / 1e6 + 16000 * 20.0 / 1e6   # Opus 5.5
     assert failed[0] > 0 and float(failed[1]) == pytest.approx(paid) and failed[2]
-    assert egress.spent_this_month(pipe) == pytest.approx(8 * (1000 * 4.0 + 200 * 20.0) / 1e6 + paid)
+    assert egress.spent_this_month(pipe) == pytest.approx(7 * (1000 * 4.0 + 200 * 20.0) / 1e6 + paid)
     again = extract.run_stage(pipe, claude)   # only the failed episode is asked again
-    assert (again["pending"], again["failed"], len(claude.calls)) == (1, 1, 10)
+    assert (again["pending"], again["failed"], len(claude.calls)) == (1, 1, 9)
 
 
 def test_im_run_goes_on_past_a_reply_that_fails_to_the_stages_after_extraction(pipe, cfg, stream, monkeypatch,
@@ -343,7 +342,7 @@ def test_im_run_goes_on_past_a_reply_that_fails_to_the_stages_after_extraction(p
     monkeypatch.setattr(backends, "SentenceEmbedder", lambda model: HashEmbedder())
     cli.main(["run"])
     out = json.loads(capsys.readouterr().out)
-    assert (out["extract"]["read"], out["extract"]["failed"]) == (8, 1)
+    assert (out["extract"]["read"], out["extract"]["failed"]) == (7, 1)
     assert "lattice" in out and "digest" in out and out["route"]["waiting_for_claude"] == 1   # the failed one waits
 
 
@@ -372,7 +371,7 @@ def test_a_v5_capture_keeps_its_reading_attribution_mishearings_and_checks(pipe,
         return [base | {"quote": said}, base | {"quote": said.upper()}]
 
     monkeypatch.setattr(anthropic, "Anthropic", lambda: FakeClaude(respond))
-    stats = cli._extract(pipe, replace(cfg, extract=replace(cfg.extract, prompt="v5.3")))   # the rebuild's, live
+    stats = cli._extract(pipe, cfg)   # v5.3, the live prompt
     assert stats["read"] > 0 and stats["failed"] == 0
     rows = table(pipe, """SELECT kind, confidence, said_by, attributed_to, reading LIKE '%%WORD%%', mishearings,
                                  checks FROM im.items WHERE prompt_version = %s ORDER BY checks""",
@@ -381,7 +380,7 @@ def test_a_v5_capture_keeps_its_reading_attribution_mishearings_and_checks(pipe,
     assert first[:5] == (None, None, "me", "my lead", True) and first[5][0]["meant"] == "WORD" and first[6] == []
     assert {tuple(r[6]) for r in rows} == {(), ("quote_inexact", "mishearing_not_in_quote")}   # recorded, not refused
 
-    # Reviewed like any capture, with no kind or confidence to show.
+    # Reviewed like any capture: who said it, the quote and the gist.
     read, write, out = script("k", "q")
     assert cli._review_items(pipe, extract, read, write) == 1
     assert any("said by me" in line for line in out) and not any("confidence" in line for line in out)
@@ -425,7 +424,7 @@ def test_switching_to_zero_data_retention_reads_nothing_again(pipe, cfg, stream,
 
     run(pipe, cfg, stream)
     monkeypatch.setattr(anthropic, "Anthropic", lambda: FakeClaude(coffee_item))
-    assert cli._extract(pipe, cfg)["read"] == 9
+    assert cli._extract(pipe, cfg)["read"] == 8
     # The route isn't part of extraction's version: the same model through OpenRouter has read it all already.
     monkeypatch.setenv("OPENROUTER_API_KEY", "k")
     posted = []

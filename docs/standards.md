@@ -124,7 +124,7 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
 - Python typing: 165 of the package's 280 functions lack an annotation on a parameter or the return, e.g. every `conn`.
 - Python data modeling: `im.fixtures.Conversation` is a mutable `@dataclass`.
 - Python data modeling: no closed set is a `StrEnum` tested against its column's `CHECK`. Among those Python compares,
-  branches on or parses from outside: item kinds (`extract.KINDS`), digest point kinds (`digest.KINDS`), match
+  branches on or parses from outside: digest point kinds (`digest.KINDS`), match
   decisions (`lattice.py` lines 35 and 258), routes (`router.py` lines 30 and 52), verdicts (`feedback.ITEM_KINDS`,
   `cli.py` line 369), speaker kinds (`importer.py` line 86) and sensitivity categories (`sensitivity.CATEGORIES`).
 - Python testing: 14 of the 21 test files are named for a module (`test_extract.py`, `test_lattice.py`,

@@ -45,8 +45,7 @@ class ExtractConfig:
     enabled: bool = True
     model: str = "claude-opus-5-5"
     effort: str = "medium"
-    prompt: str = "v1"                   # extract.LIVE; a new prompt re-reads every episode, so trial it first
-    interests: str = ""                  # my interests, for prompts with a slot for them (v2); keep it out of the repo
+    prompt: str = "v5.3"                 # extract.LIVE; a new prompt re-reads every episode, so trial it first
     monthly_cap_usd: float = 20.0        # every paid request stops once the month's egress spend reaches this
     max_episodes_per_run: int | None = None
     max_tokens: int | None = None        # a request's output budget, reasoning included (None: llm.MAX_TOKENS)
@@ -98,6 +97,9 @@ class EgressConfig:
 
 # Policy C's keys, retired with it (decision 0008, amended 2026-11-11): ignored, with a warning, until deleted.
 RETIRED_EGRESS = ("my_names", "names", "public_names")
+# extract.interests filled prompt v2's slot, and was retired with prompts v1 to v4 at the cutover (decision 0012):
+# ignored, with a warning, until deleted.
+RETIRED_EXTRACT = ("interests",)
 
 
 @dataclass(frozen=True)
@@ -127,7 +129,11 @@ def load() -> Config:
     if retired := [k for k in RETIRED_EGRESS if k in data.get("egress", {})]:
         print(f"[egress] {', '.join(retired)}: retired with policy C (decision 0008); delete them from {path}",
               file=sys.stderr)
+    extract = {k: v for k, v in data.get("extract", {}).items() if k not in RETIRED_EXTRACT}
+    if retired := [k for k in RETIRED_EXTRACT if k in data.get("extract", {})]:
+        print(f"[extract] {', '.join(retired)}: retired with prompts v1 to v4 (decision 0012); delete it from {path}",
+              file=sys.stderr)
     models = {k: ModelConfig(**data.get(k, {})) for k in ("match", "themes", "digest")}
     return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
-                  extract=ExtractConfig(**data.get("extract", {})), lattice=LatticeConfig(**data.get("lattice", {})),
+                  extract=ExtractConfig(**extract), lattice=LatticeConfig(**data.get("lattice", {})),
                   weight=WeightConfig(**data.get("weight", {})), egress=EgressConfig(**egress), **models)

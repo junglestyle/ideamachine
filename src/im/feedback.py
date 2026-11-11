@@ -86,16 +86,15 @@ def carry_verdicts(conn) -> dict:
              SELECT * FROM unnest(%s::int[], %s::uuid[])
              UNION SELECT d.n, x.new_segment_id FROM d JOIN im.source_supersessions x ON x.old_segment_id = d.seg)"""
     rows = conn.execute(
-        """SELECT v.item_id, v.verdict_id, v.segment_ids, v.quote, i.kind FROM im.item_verdicts v
-           LEFT JOIN im.items i USING (item_id)
+        """SELECT v.item_id, v.verdict_id, v.segment_ids, v.quote FROM im.item_verdicts v
            WHERE NOT EXISTS (SELECT 1 FROM im.items c LEFT JOIN im.episodes e USING (episode_id)
                              WHERE c.item_id = v.item_id AND (e.current OR c.episode_id IS NULL))
              AND NOT EXISTS (SELECT 1 FROM im.verdict_carries k WHERE k.from_item_id = v.item_id)
            ORDER BY v.decided_at, v.verdict_id""").fetchall()
     # Items with the same quote and segments are one capture decided on more than once: one source, latest wins.
     groups: dict = {}
-    for item_id, verdict_id, segs, quote, kind in rows:
-        g = groups.setdefault((quote, tuple(sorted(segs))), {"items": set(), "verdicts": [], "kind": kind})
+    for item_id, verdict_id, segs, quote in rows:
+        g = groups.setdefault((quote, tuple(sorted(segs))), {"items": set(), "verdicts": []})
         g["items"].add(item_id)
         g["verdicts"].append(verdict_id)
     if not groups:
@@ -104,21 +103,21 @@ def carry_verdicts(conn) -> dict:
     pairs = [(n, seg) for n, (_, segs) in enumerate(keys) for seg in segs]
     cands = conn.execute(
         descendants + """
-           SELECT DISTINCT d.n, i.item_id, i.quote, i.kind,
+           SELECT DISTINCT d.n, i.item_id, i.quote,
                   EXISTS (SELECT 1 FROM im.item_verdicts v WHERE v.item_id = i.item_id)
                     OR EXISTS (SELECT 1 FROM pub.feedback_events f WHERE f.item_id = i.item_id)
            FROM d JOIN im.items i ON i.source_segment_ids @> ARRAY[d.seg]
            JOIN im.episodes e ON e.episode_id = i.episode_id AND e.current""",
         ([n for n, _ in pairs], [s for _, s in pairs])).fetchall()
     scored = []
-    for n, item_id, quote, kind, decided in cands:
+    for n, item_id, quote, decided in cands:
         score = quote_score(keys[n][0], quote)
         if score >= CARRY_MIN_SCORE:
-            scored.append((-score, kind != groups[keys[n]]["kind"], str(item_id), n, item_id, decided))
+            scored.append((-score, str(item_id), n, item_id, decided))
     stats = {"carried": 0, "already_decided": 0}
     taken, done = set(), set()
     with conn.transaction():
-        for neg_score, _, _, n, item_id, decided in sorted(scored):
+        for neg_score, _, n, item_id, decided in sorted(scored):
             if n in done or item_id in taken:
                 continue
             done.add(n)
@@ -143,6 +142,7 @@ def carry_verdicts(conn) -> dict:
         descendants + """
            SELECT DISTINCT d.n FROM d JOIN im.episode_segments es ON es.segment_id = d.seg
            JOIN im.episodes e ON e.episode_id = es.episode_id AND e.current
-           WHERE d.n = ANY(%s) AND NOT EXISTS (SELECT 1 FROM im.extractions x WHERE x.episode_id = e.episode_id)""",
+           WHERE d.n = ANY(%s) AND e.kind <> 'others_only'
+             AND NOT EXISTS (SELECT 1 FROM im.extractions x WHERE x.episode_id = e.episode_id)""",
         ([n for n, _ in pairs], [s for _, s in pairs], left))} if left else set()
     return stats | {"waiting": len(unread), "not_captured_again": len(left) - len(unread)}

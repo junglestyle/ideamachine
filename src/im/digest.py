@@ -82,13 +82,15 @@ def _added(conn, start: datetime, end: datetime) -> list[tuple]:
 
 
 def _unread(conn, start: datetime, end: datetime) -> bool:
-    """Whether speech in the week hasn't reached the lattice yet: an episode extraction hasn't read, or a capture
-    matching hasn't placed. Until it has, the week's ideas aren't all there to digest."""
+    """Whether speech in the week hasn't reached the lattice yet: an episode extraction hasn't read (one where I don't
+    speak it never reads), or a capture matching hasn't placed. Until it has, the week's ideas aren't all there to
+    digest."""
     return conn.execute(
         """SELECT EXISTS (
              SELECT 1 FROM im.episodes e
              WHERE e.current AND e.started_at < %s AND e.ended_at >= %s
-               AND (NOT EXISTS (SELECT 1 FROM im.extractions x WHERE x.episode_id = e.episode_id)
+               AND ((e.kind <> 'others_only'
+                     AND NOT EXISTS (SELECT 1 FROM im.extractions x WHERE x.episode_id = e.episode_id))
                     OR EXISTS (SELECT 1 FROM im.items i WHERE i.episode_id = e.episode_id
                                AND NOT EXISTS (SELECT 1 FROM im.item_matches m WHERE m.item_id = i.item_id))))""",
         (end, start)).fetchone()[0]
