@@ -147,9 +147,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   doesn't mean the latest read.
 - **Capture source citation.** The payload lines a capture cites, stored as the segments they map to
   (`items.source_segment_ids`; [0004]:18). _Not_ an edge observation citation.
-- **Prompt revision.** One of the extraction prompts' texts, `v1` to `v5` (`extract.PROMPTS`). Live extraction runs
-  `v1` to `v3` (`extract.LIVE`): the matcher reads nothing later. **Status:** `v4` is for trials only; `v5` is for
-  trials and the rebuild (decision 0012), and `im.items` holds its captures (047).
+- **Prompt revision.** One of the extraction prompts' texts, `v1` to `v5.3` (`extract.PROMPTS`). Live extraction runs
+  `v1` to `v3`, or `v5.3` (`extract.LIVE`). **Status:** `v4` and `v5` to `v5.2` are for trials only; `v5.3` is the
+  rebuild's (decision 0012, amended 2026-11-10), and `im.items` holds its captures (047).
 - **Extraction fingerprint.** A hash of the system prompt, schema, model and effort (`extract.prompt_version`). It's
   stored as `prompt_version` (007:40), and changing any part of it re-reads every episode. _Not_ the prompt revision.
 - **Quote.** The capture's excerpt of its cited lines. Under `v4` it's exactly what the transcript says, character

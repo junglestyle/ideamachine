@@ -180,7 +180,7 @@ def test_v4_keeps_the_quote_as_said_apart_from_its_reading_and_attribution(pipe,
     opus = (trial.version("claude-opus-5-5", "medium", v4, schema=schema), "claude-opus-5-5")
     assert trial.report(pipe, opus, opus, scrubber.policy)["verbatim_quotes"] == {"candidate": 0.5, "reference": 0.5}
 
-    # The live run can't keep a reading or an attribution yet, so it doesn't read under v4.
+    # v4 is for trials only, so the live run doesn't read under it.
     sent = table(pipe, "SELECT count(*) FROM im.egress_log")
     stats = cli._extract(pipe, replace(cfg, extract=replace(cfg.extract, prompt="v4")))
     assert stats["stopped"].startswith("extract.prompt v4 is for `im trial` only")

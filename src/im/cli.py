@@ -137,8 +137,8 @@ def _extract(conn, cfg) -> dict:
 
     x = cfg.extract
     if x.prompt not in extract.LIVE:
-        return {"stopped": f"extract.prompt {x.prompt} is for `im trial` only: the matcher can't read its captures "
-                           "yet (decision 0012)"}
+        return {"stopped": f"extract.prompt {x.prompt} is for `im trial` only; `im run` reads with "
+                           f"{', '.join(extract.LIVE)}"}
     try:
         client = anthropic.Anthropic()
         return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
@@ -639,7 +639,7 @@ def cmd_ideas(args) -> None:
         if args.discards:
             rows = extract.discards(conn)
             for kind, who, quote, gist, conf, at, note, model, pv in rows:
-                print(f"{at.astimezone():%Y-%m-%d %H:%M}  {kind:<11} {who:<16} {conf:.2f}  {model} prompt {pv}")
+                print(f"{at.astimezone():%Y-%m-%d %H:%M}  {_said(kind, who, conf)}  {model} prompt {pv}")
                 print(f"    \u201c{quote}\u201d")
                 print(f"    {gist}")
                 print(f"    why discarded: {note or '(no note)'}\n")
@@ -650,17 +650,22 @@ def cmd_ideas(args) -> None:
                       (SELECT v.verdict FROM im.item_verdicts v WHERE v.item_id = i.item_id
                        ORDER BY v.decided_at DESC LIMIT 1)
                FROM im.items i JOIN im.item_said_by w USING (item_id) JOIN im.episodes e USING (episode_id)
-               WHERE e.current ORDER BY e.started_at DESC, i.confidence DESC""").fetchall()
+               WHERE e.current ORDER BY e.started_at DESC, i.confidence DESC NULLS LAST""").fetchall()
         shown = 0
         for kind, who, quote, gist, conf, at, verdict in rows:
             if verdict == "discard" and not args.all:
                 continue
             mark = {"keep": "kept", "star": "\u2605", "discard": "discarded", None: "new"}[verdict]
-            print(f"{at.astimezone():%Y-%m-%d %H:%M}  {kind:<11} {who:<16} {conf:.2f}  [{mark}]")
+            print(f"{at.astimezone():%Y-%m-%d %H:%M}  {_said(kind, who, conf)}  [{mark}]")
             print(f"    \u201c{quote}\u201d")
             print(f"    {gist}\n")
             shown += 1
         print(f"{shown} shown ({len(rows)} captured on current episodes)")
+
+
+def _said(kind: str | None, who: str, conf: float | None) -> str:
+    """A capture's kind, speaker and confidence as columns. v5 captures have neither kind nor confidence."""
+    return f"{kind or '':<11} {who:<16} {'' if conf is None else f'{conf:.2f}':>4}"
 
 
 def _review_items(conn, extract, read=input, write=print) -> int:
@@ -669,7 +674,8 @@ def _review_items(conn, extract, read=input, write=print) -> int:
     n = 0
     for item_id, kind, who, quote, gist, themes, conf, _, at, _ in extract.review_items(conn):
         write("\n" + "─" * 72)
-        write(f"{at.astimezone():%A %Y-%m-%d %H:%M}  {kind} said by {who}  (confidence {conf:.2f})")
+        said = f"{kind} said by {who}" if kind else f"said by {who}"
+        write(f"{at.astimezone():%A %Y-%m-%d %H:%M}  {said}" + ("" if conf is None else f"  (confidence {conf:.2f})"))
         write(f"  \u201c{quote}\u201d")
         write(f"  {gist}")
         if themes:
