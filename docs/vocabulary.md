@@ -190,8 +190,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
     and meant (`extract.SYSTEM`, `SYSTEM_V2`, `SYSTEM_V3`, `SYSTEM_V4`).
 - **Quote-source coverage.** The share of a quote's words found, in order, in its cited lines. Under 0.6, the quote
   isn't from its lines (`quote_in_lines`, 044:1-4; `quotes.FLAG`).
-- **Quote-overlap score.** The share of the shorter of two quotes' words found, in order, in the other
-  (`feedback.quote_score`).
+- **Quote-overlap score.** The share of the shorter of two quotes' words found, in order, in the other, with each
+  quote counted as at least a floor of words long: 4 for carrying verdicts, 8 for grouping (`feedback.quote_score`,
+  `observations.GROUP_MIN_WORDS`, decision 0012).
 - **Register.** How something is said, such as a joke or irony, as against what it says. **Status:** meant for a
   judging pass after extraction, not built (`extract.SYSTEM_V4`'s comment; ROADMAP-v2 §5 q10-11).
 - **Note-to-self cue.** An explicit spoken instruction, "note to self", to keep the thought that follows. Extraction
@@ -203,7 +204,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Observation.** One source occurrence of a thought: one time it was said, written to the ChatGPT archive, or typed.
   It's a row of `im.observations`, and its `source` is `speech`, `archive` or `typed` (036:9). A speech observation
   is represented by the captures grouped into it: a capture joins when its segments descend from the observation's
-  and its quote-overlap score is at least 0.4 against every capture already in it (034, [M2 design]
+  and its quote-overlap score (floor 8) is at least 0.4 against every capture already in it (034, [M2 design]
   §Observations). Archive and typed observations hold their own quote, time, owner-attribution class and source
   context (036:1-23). Observations are neutral and never judged (SPEC.md:27).
 - **Source context.** What a non-speech observation is grouped by for recurrence: the ChatGPT conversation, or the

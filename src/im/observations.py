@@ -3,9 +3,10 @@ speech, outliving re-extraction.
 
 Each run gives every new item an observation. An item can join an observation when one of its items cites a
 segment the item's own segments descend from (supersession links, as `feedback.carry_verdicts` follows them). It
-joins when its quote matches every capture already there (`quote_score` >= CARRY_MIN_SCORE), the best such
-observation if there are several. That covers a re-read of re-transcribed or re-keyed speech, a reused read, and
-Claude capturing the same line twice in one read. Otherwise the item starts a new observation.
+joins when its quote matches every capture already there (`quote_score` >= CARRY_MIN_SCORE, quotes counted as at
+least GROUP_MIN_WORDS long), the best such observation if there are several. That covers a re-read of re-transcribed
+or re-keyed speech, a reused read, and Claude capturing the same line twice in one read. Otherwise the item starts a
+new observation.
 
 Every capture, not any one: Claude sometimes stitches two passages into one quote with "...", and that quote
 matches each passage, so matching any one capture chained two points into one observation (B5, 2026-11-01).
@@ -16,6 +17,11 @@ Not every observation is speech (migration 036). An idea I add gets one, of what
 
 from im import citations
 from im.feedback import CARRY_MIN_SCORE, quote_score
+
+# A short quote inside a longer one from the same speech, such as one clause of a line beside the whole line, is
+# usually a different point; counting quotes as at least 8 words long keeps a few shared words from grouping them
+# (decision 0012). Carrying a verdict to a re-read of the same quote keeps the lower floor.
+GROUP_MIN_WORDS = 8
 
 # The segments an item's segments descend from, and the segments themselves.
 _ANCESTRY = """WITH RECURSIVE a(seg) AS (
@@ -43,7 +49,8 @@ def assign_stage(conn) -> dict:
                          SELECT c.observation_id FROM im.items c
                          WHERE c.source_segment_ids && ARRAY(SELECT seg FROM a))""", (segs,)):
                 members.setdefault(o, []).append(q)
-            best = max(((min(quote_score(quote, q) for q in qs), str(o), o) for o, qs in members.items()),
+            best = max(((min(quote_score(quote, q, GROUP_MIN_WORDS) for q in qs), str(o), o)
+                        for o, qs in members.items()),
                        default=None)
             if best and best[0] >= CARRY_MIN_SCORE:
                 observation = best[2]
