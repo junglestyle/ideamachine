@@ -424,6 +424,20 @@ def test_v5_3_reads_under_policy_c_and_v3_stays_on_b(pipe, cfg, stream, monkeypa
     assert "Alice" in json.dumps([c["messages"] for c in v3.calls])
 
 
+def test_switching_to_zero_data_retention_reads_nothing_again(pipe, cfg, stream, monkeypatch):
+    from im import cli, llm
+
+    run(pipe, cfg, stream)
+    monkeypatch.setattr(anthropic, "Anthropic", lambda: FakeClaude(coffee_item))
+    assert cli._extract(pipe, cfg)["read"] == 9
+    # The route isn't part of extraction's version: the same model through OpenRouter has read it all already.
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    posted = []
+    monkeypatch.setattr(llm.OpenRouter, "_post", lambda self, body: posted.append(body))
+    stats = cli._extract(pipe, replace(cfg, egress=replace(cfg.egress, zdr=True)))
+    assert (stats["pending"], stats["read"], posted) == (0, 0, [])
+
+
 def status_error(cls, code, body=None):
     return cls("rejected", body=body, response=httpx2.Response(code, request=httpx2.Request("POST", "https://x")))
 

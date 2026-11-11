@@ -89,3 +89,17 @@ still pseudonymized; a name I also use alone ("Sowell") is listed alone too.
 
 Neither changes the policy version, as `[egress] names` doesn't: the version names the method, and the egress log
 keeps every payload as sent. A payload that changes because of either is read again.
+
+## Amendment (2026-11-11): zero data retention
+
+_My decision._
+
+**Every request can go only to endpoints that keep nothing** (`[egress] zdr = true`). Anthropic's own API keeps
+requests for 30 days and may read them for safety, so under ZDR Claude is asked through OpenRouter, which routes
+`provider.zdr` requests to Bedrock or Vertex (at Anthropic's price, plus OpenRouter's fee), with the system prompt
+cached as before. Every other OpenRouter request asks for ZDR too. The route isn't part of any version: it's the same
+model, so nothing is read again, and the egress log records who served each request (`served_by`). Policy C protects
+only names said, while everyone's words go out under both B and C; ZDR protects all of it.
+
+**It goes on when the Anthropic credits end (2026-11-25).** Until then Claude is prepaid through Anthropic, and
+policy C stays as it is. Whether names still need pseudonymizing once every request is ZDR is decided then.

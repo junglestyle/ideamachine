@@ -40,6 +40,18 @@ def test_a_model_with_a_provider_prefix_goes_to_openrouter_with_the_schema():
     assert not llm.via_openrouter("claude-opus-5-5")
 
 
+def test_under_zero_data_retention_claude_goes_through_openrouter_to_endpoints_that_keep_nothing(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    assert isinstance(llm.client_for("claude-opus-5-5", zdr=True), llm.OpenRouter)
+    sent = []
+    client = llm.OpenRouter(post=lambda body: sent.append(body) or answer('{"items": []}'), zdr=True)
+    llm.complete(client, "claude-opus-5-5", "medium", "system", SCHEMA, "text")
+    body = sent[0]
+    assert body["model"] == "anthropic/claude-opus-5.5" and body["provider"]["zdr"] is True
+    # Its system prompt is cached, as through Anthropic; without the mark, Claude caches nothing.
+    assert body["messages"][0]["content"] == [{"type": "text", "text": "system", "cache_control": {"type": "ephemeral"}}]
+
+
 def test_an_answer_that_isnt_json_is_asked_for_again_and_both_are_paid_for():
     client, sent = router(answer("Sure! Here you go"), answer(json.dumps({"items": [1]})))
     r = llm.complete(client, "openai/gpt-6.1-sol", "medium", "s", SCHEMA, "t")

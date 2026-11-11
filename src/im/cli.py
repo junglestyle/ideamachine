@@ -132,7 +132,7 @@ def _extract(conn, cfg) -> dict:
     credentials (llm.Stop)."""
     import anthropic
 
-    from im import extract
+    from im import extract, llm
 
     x = cfg.extract
     if x.prompt not in extract.LIVE:
@@ -143,11 +143,11 @@ def _extract(conn, cfg) -> dict:
     except SystemExit as e:   # no key to pseudonymize names with
         return {"stopped": str(e)}
     try:
-        client = anthropic.Anthropic()
+        client = llm.client_for(x.model, cfg.egress.zdr)
         return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
                                  extract.system_prompt(x.prompt, x.interests), x.max_tokens,
                                  extract.schema_for(x.prompt), scrubber)
-    except anthropic.AnthropicError as e:  # e.g. no credentials configured at all
+    except (anthropic.AnthropicError, SystemExit) as e:  # e.g. no credentials configured at all
         return {"stopped": f"Claude unavailable: {e}"}
 
 
@@ -163,7 +163,7 @@ def _lattice(conn, cfg) -> dict:
     pseudonymized (policy C)."""
     import anthropic
 
-    from im import lattice, names
+    from im import lattice, llm, names
     from im.backends import SentenceEmbedder
 
     try:
@@ -171,9 +171,10 @@ def _lattice(conn, cfg) -> dict:
     except SystemExit as e:   # no key to pseudonymize names with
         return {"stopped": str(e)}
     try:
-        return lattice.match_stage(conn, anthropic.Anthropic(), SentenceEmbedder(cfg.lattice.embedding_model),
-                                   cfg.extract.monthly_cap_usd, cfg.lattice.max_items_per_run, cfg.match, scrubber)
-    except anthropic.AnthropicError as e:
+        return lattice.match_stage(conn, llm.client_for(cfg.match.model, cfg.egress.zdr),
+                                   SentenceEmbedder(cfg.lattice.embedding_model), cfg.extract.monthly_cap_usd,
+                                   cfg.lattice.max_items_per_run, cfg.match, scrubber)
+    except (anthropic.AnthropicError, SystemExit) as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
 
@@ -181,16 +182,16 @@ def _themes(conn, cfg) -> dict:
     """Apply my theme feedback, file unthemed ideas, propose themes for the leftovers."""
     import anthropic
 
-    from im import themes
+    from im import llm, themes
 
     out = {"feedback": themes.apply_feedback(conn)}
     try:
-        client = anthropic.Anthropic()
+        client = llm.client_for(cfg.themes.model, cfg.egress.zdr)
         # Described first: the filer reads the descriptions.
         out["describe"] = themes.describe_stage(conn, client, cfg.extract.monthly_cap_usd, cfg.themes)
         out["file"] = themes.file_stage(conn, client, cfg.extract.monthly_cap_usd, cfg.themes)
         out["propose"] = themes.propose_stage(conn, client, cfg.extract.monthly_cap_usd, cfg.themes)
-    except anthropic.AnthropicError as e:
+    except (anthropic.AnthropicError, SystemExit) as e:
         out["stopped"] = f"Claude unavailable: {e}"
     return out
 
@@ -211,11 +212,12 @@ def _digest(conn, cfg, week=None, again=False) -> dict:
     """Write last week's digest if it isn't written yet, or say why it couldn't; the run goes on either way."""
     import anthropic
 
-    from im import digest
+    from im import digest, llm
 
     try:
-        return digest.digest_stage(conn, anthropic.Anthropic(), cfg.extract.monthly_cap_usd, week, again, cfg.digest)
-    except anthropic.AnthropicError as e:
+        client = llm.client_for(cfg.digest.model, cfg.egress.zdr)
+        return digest.digest_stage(conn, client, cfg.extract.monthly_cap_usd, week, again, cfg.digest)
+    except (anthropic.AnthropicError, SystemExit) as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
 
@@ -304,8 +306,9 @@ def cmd_trial(args) -> None:
         candidate = (trial.version(model, effort, system, args.replicate, schema), model)
         reference = (trial.version(ref_model, ref_effort, system, schema=schema), ref_model)
         if not args.report:
-            out["trial"] = trial.run(conn, llm.client_for(model), system, model, effort, cap, args.limit,
-                                     args.sample, scrubber, args.replicate, schema, args.max_tokens or x.max_tokens)
+            client = llm.client_for(model, cfg.egress.zdr)
+            out["trial"] = trial.run(conn, client, system, model, effort, cap, args.limit, args.sample, scrubber,
+                                     args.replicate, schema, args.max_tokens or x.max_tokens)
         same = None
         if args.same_point:
             judge = jev.Jev()
@@ -358,8 +361,8 @@ def cmd_audit_gate(args) -> None:
         if args.action == "draft":
             if not args.model:
                 raise SystemExit("draft needs --model, the model drafting, e.g. openai/gpt-6.1-terra")
-            _print(gate_audit.draft(conn, folder, llm.client_for(args.model), args.model, args.effort or "low",
-                                    scrubber, cap))
+            client = llm.client_for(args.model, cfg.egress.zdr)
+            _print(gate_audit.draft(conn, folder, client, args.model, args.effort or "low", scrubber, cap))
             return
         if not args.prompt:
             raise SystemExit("sheet needs the trial's prompt, e.g. v5 --model openai/gpt-6.1-sol")
@@ -428,7 +431,8 @@ def cmd_audit_edges(args) -> None:
 
             cfg = config.load()
             scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
-            client = jev.Jev(model=args.model) if args.model.startswith("jev") else llm.client_for(args.model)
+            client = jev.Jev(model=args.model) if args.model.startswith("jev") \
+                else llm.client_for(args.model, cfg.egress.zdr)
             _print(edge_audit.draft(conn, client, Path(args.folder), args.model, args.effort, scrubber,
                                     cfg.extract.monthly_cap_usd))
             return
@@ -456,7 +460,7 @@ def cmd_audit_probe(args) -> None:
 
                 client = jev.Jev(model=args.model)
             else:
-                client = llm.client_for(args.model)
+                client = llm.client_for(args.model, cfg.egress.zdr)
             _print(probe_audit.draft(conn, client, folder, args.model, args.effort, scrubber, args.quotes_only,
                                      args.probes, cfg.extract.monthly_cap_usd))
             return
@@ -465,8 +469,7 @@ def cmd_audit_probe(args) -> None:
 
             _print(summary_audit.write(conn, folder, args.seed, args.size or summary_audit.SIZE))
             return
-        import anthropic
-
+        from im import llm
         from im.backends import SentenceEmbedder
 
         embedder = SentenceEmbedder(cfg.lattice.embedding_model) if args.question == "analogy" else None
@@ -478,7 +481,8 @@ def cmd_audit_probe(args) -> None:
             from im import jev
 
             jev_client = jev.Jev()
-        _print(probe_audit.write(conn, anthropic.Anthropic(), embedder, args.question, folder, args.seed, args.only,
+        client = llm.client_for(probe_audit.FACET_MODEL, cfg.egress.zdr)   # it also asks PICK_MODEL through it
+        _print(probe_audit.write(conn, client, embedder, args.question, folder, args.seed, args.only,
                                  args.size, [Path(f) for f in args.exclude], jev_client, scrubber,
                                  args.pool or probe_audit.JEV_POOL, cfg.extract.monthly_cap_usd))
 
@@ -546,15 +550,14 @@ def cmd_analogy_spike(args) -> None:
     """Rank each `analogy:` pair's partner by structure and by topic (sends to Claude; writes into the folder)."""
     from pathlib import Path
 
-    import anthropic
-
-    from im import analogy_spike, names
+    from im import analogy_spike, llm, names
     from im.backends import SentenceEmbedder
 
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
         scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
-        out = analogy_spike.run(conn, anthropic.Anthropic(), SentenceEmbedder(cfg.lattice.embedding_model),
+        out = analogy_spike.run(conn, llm.client_for(analogy_spike.MODEL, cfg.egress.zdr),
+                                SentenceEmbedder(cfg.lattice.embedding_model),
                                 Path(args.folder), args.others, monthly_cap_usd=cfg.extract.monthly_cap_usd,
                                 scrubber=scrubber)
     _print({k: v for k, v in out.items() if k != "pairs_detail"} | {"pairs": [
