@@ -33,18 +33,18 @@ What the pipeline keeps true, whatever the stage:
 ## Dependencies
 
 - Lean on Postgres before writing your own: `im run`'s import, purge and segmentation share one transaction,
-  embeddings live in pgvector, and roles draw the boundaries (`im_pipeline` owns `im.*`; `lattice_app` reads `pub` and
-  only appends feedback).
+  embeddings live in pgvector, and roles draw the boundaries (`im_pipeline` owns `im.*`; `lattice_app`, the web
+  view's role, reads `pub` and only appends feedback).
 - Outside work on extraction is read for ideas, not copied: the AI Co-Ethnographer (`aicoe`) is AGPL-3, and the
   knowledge-ingestion-pipeline has no license (all rights reserved). psy-qm-skills (MIT) and the hypotheses/claims
   benchmark (Apache-2.0) can be reused with their notices, but nothing here needs them. Write our own.
 
 ## Structure
 
-- One way in for each kind of feedback: `im ideas --review` and Lattice's verdict events land in the same
-  `im.item_verdicts`, and `im themes` inserts the same `pub.feedback_events` Lattice does.
-- Idea Machine reads Hearsay only through its file stream, and Lattice reads Idea Machine only through the views in
-  schema `pub`.
+- One way in for each kind of feedback: `im ideas --review` and the verdict events in `pub.feedback_events` land in
+  the same `im.item_verdicts`, and `im themes` inserts the same `pub.feedback_events` any other client does.
+- Idea Machine reads Hearsay only through its file stream, and the web view reads Idea Machine only through the
+  views in schema `pub`.
 
 ## Testing
 
@@ -54,7 +54,7 @@ What the pipeline keeps true, whatever the stage:
   append feedback, and the monthly cap stops extraction, scoring and the digest.
 - Tests run on synthetic streams from `im.fixtures` and never read the real one. Each gets a fresh `im_test`
   database; the code refuses a dev admin URL that isn't localhost or a local socket, in any DSN form. Each runs
-  without the developer's `IM_*`, `ANTHROPIC_*`, `LATTICE_*`, `CORRAL_*`, OpenRouter and Typesafe variables
+  without the developer's `IM_*`, `ANTHROPIC_*`, `CORRAL_*`, OpenRouter and Typesafe variables
   (`tests/conftest.py`), so a shell that exports the deployment's settings can't send a test to Claude.
 
 ## Running it
@@ -76,10 +76,9 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
 - Dependencies: Postgres 16 is one of [ROADMAP §2](ROADMAP.md#2-principles-applied)'s stack assumptions, "not
   questioned", and no decision says what it gives. [Decision 0006](decisions/0006-graph-in-postgres.md) only weighs a
   graph store beside it.
-- Versions and pins: the deployment runs whatever the NAS's clones have checked out. [deploy.md](deploy.md) updates
-  with `git pull` in both, and `install/nas.sh` builds Idea Machine and Lattice from them; no commit is pinned.
-- Versions and pins: `install/compose.yaml` runs `pgvector/pgvector:pg16` and `cloudflare/cloudflared:2026.9.3` by
-  tag (lines 15 and 81), not by digest.
+- Versions and pins: the deployment runs whatever the NAS's clone has checked out. [deploy.md](deploy.md) updates
+  with `git pull`, and `install/nas.sh` builds Idea Machine from it; no commit is pinned.
+- Versions and pins: `install/compose.yaml` runs `pgvector/pgvector:pg16` by tag (line 15), not by digest.
 - Versions and pins: `pyproject.toml` has no `[tool.uv] required-version`, so CI's `setup-uv`
   (`.github/workflows/test.yml`) installs the newest uv.
 - Versions and pins: the annotated tags `v1` and `v1.1` aren't `vX.Y.Z` or semver, so they aren't releases, though
@@ -88,14 +87,14 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
   neither tag matches the manifest's version.
 - Versions and pins: CI doesn't fail a `vX.Y.Z` tag that doesn't match `pyproject.toml`'s version. No job checks it.
 - Privacy: 14 files, among them `install/compose.yaml`, `dev/pull-stream.sh` and `src/im/backends.py`, name the
-  workstation's hostname, and [deploy.md](deploy.md) (line 12) names the NAS's tailnet host, `truenas`.
+  workstation's hostname, and [deploy.md](deploy.md) (line 14) names the NAS's tailnet host, `truenas`.
 - Privacy: the workstation's layout is committed: `%h/data/code/ideamachine` in
   `dev/systemd/ideamachine-run.service` (lines 10-11) and `~/data/code/lattice` in [ROADMAP.md](ROADMAP.md) (line 149).
 - Privacy: the NAS layout (`/mnt/fast/ideamachine/...`) is committed, and nothing here overrides the org rule for it, as
   hearsay's and lattice's standards do.
 - Privacy: the owner's time zone, `America/New_York`, is the default for reading a ChatGPT export's times
   (`im import-chatgpt --tz`, and `tz` in `archive_observations.parse` and `plan`).
-- Secrets: `install/nas.sh` prints Lattice's login token (`LATTICE_TOKEN`) at the end of every run (line 325).
+- Secrets: `install/nas.sh` prints the web view's login token (`IM_WEB_TOKEN`) at the end of every run (line 378).
 - Docs: V2's roadmap is `docs/ROADMAP-v2.md`, not `docs/ROADMAP.md`, because code comments cite V1's
   [ROADMAP.md](ROADMAP.md) by section. V1's spec stays in its §1–3; V2's is [SPEC.md](SPEC.md).
 - Docs: [SPEC.md](SPEC.md) opens with its scope, not the problem, its requirements have no IDs, and it has no
@@ -107,8 +106,8 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
   [SPEC.md](SPEC.md) requirements they deliver, and M1's and M4's goals are internals (stable segment identity, Jev
   behind `judged_by`), not what I'd notice.
 - Deployment repos: [deploy.md](deploy.md), [ROADMAP.md](ROADMAP.md) and `install/` carry the deployment's values:
-  `/mnt/fast/...` paths, the `fast/ideamachine`, `fast/repos` and `storage/fast-replica` datasets, Lattice's
-  `tailscale serve` port, 8444 (`install/lib.sh` line 25), and the NAS's time zone (`install/compose.yaml` line 47).
+  `/mnt/fast/...` paths, the `fast/ideamachine`, `fast/repos` and `storage/fast-replica` datasets, the web view's
+  `tailscale serve` port, 8445 (`install/lib.sh` line 23), and the NAS's time zone (`install/compose.yaml` line 46).
   `install/lib.sh` and `install/nas.sh` hard-code them. These facts belong in a future `ideamachine-deployment` repo.
 - Prose: [SPEC.md](SPEC.md), [ROADMAP-v2.md](ROADMAP-v2.md), [ROADMAP.md](ROADMAP.md) and the design docs carry dates
   and status trails (`Status: plan, 2026-10-27`, answers struck through with the day they were settled), and
@@ -135,9 +134,6 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
 - Shell: `dev/init/10-roles.sh` sets up the database but fails on a re-run (`CREATE ROLE`, line 5), and
   `install/move-to-nas.sh`'s header doesn't say whether it's safe to re-run.
 - Shell: `make check` doesn't run shellcheck, which reports 19 findings.
-- SQL: `pub.review_items` picks an item's idea with `LIMIT 1` and no `ORDER BY` (`010_review.sql`,
-  `011_corrections.sql`, and its current definition in `029_said_by_segment.sql`), and an item can belong to several
-  ideas.
 - SQL: `pipeline.run` sets `REPEATABLE READ` on the connection, so the later stages of `im run` inherit it.
 - SQL: some table names aren't plural nouns: `im.ingest_state` (001), `im.triage` (004), `im.egress_log` (007),
   `im.feedback_applied` (009), `im.idea_sensitivity` and `im.theme_sensitivity` (027).

@@ -242,16 +242,18 @@ def test_a_re_read_shows_each_observation_once_with_my_verdict(seeded, cfg, stre
     coffee, lora = (next(i for q, i in v1.items() if word in q) for word in ("coffee", "LoRa"))
     extract.decide(seeded, coffee, "keep")
     extract.decide(seeded, lora, "discard")
-    before = table(seeded, "SELECT idea_id, n_evidence, kept, discarded FROM pub.ideas ORDER BY idea_id")
+    shown = """SELECT d.idea_id, d.n_evidence, count(*) FILTER (WHERE ev.verdict IN ('keep', 'star')),
+                      count(*) FILTER (WHERE ev.verdict = 'discard')
+               FROM pub.ideas d LEFT JOIN pub.evidence ev USING (idea_id) GROUP BY 1, 2 ORDER BY 1"""
+    before = table(seeded, shown)
     extract.run_stage(seeded, FakeClaude(items_for), system=extract.SYSTEM_V5_2)
     observations.assign_stage(seeded)
     lattice.match_stage(seeded, FakeMatcher(), HashEmbedder())
     assert table(seeded, "SELECT count(*) FROM im.items") == [(6,)]
-    assert table(seeded, "SELECT idea_id, n_evidence, kept, discarded FROM pub.ideas ORDER BY idea_id") == before
+    assert table(seeded, shown) == before
     assert table(seeded, "SELECT item_id, verdict FROM pub.evidence WHERE verdict IS NOT NULL ORDER BY verdict") == \
         [(lora, "discard"), (coffee, "keep")]   # the capture I judged stands for its observation
-    assert table(seeded, "SELECT count(*) FROM pub.review_items") == [(1,)]   # only the build line, once
-    assert len(extract.review_items(seeded)) == 1
+    assert len(extract.review_items(seeded)) == 1   # only the build line, once
 
 
 def test_two_captures_of_one_line_are_matched_once(seeded, cfg, stream):
@@ -304,7 +306,7 @@ def test_the_matchers_version_follows_its_configured_model():
         assert lattice.matcher_version(other) != lattice.matcher_version()
 
 
-def test_lattice_app_reads_pub_and_only_appends_feedback(seeded, admin):
+def test_the_web_role_reads_pub_and_only_appends_feedback(seeded, admin):
     (idea,) = table(seeded, "SELECT idea_id FROM pub.ideas LIMIT 1")[0]
     with admin.transaction():
         admin.execute("SET LOCAL ROLE lattice_app")
@@ -319,7 +321,7 @@ def test_lattice_app_reads_pub_and_only_appends_feedback(seeded, admin):
     assert table(seeded, "SELECT starred FROM pub.ideas WHERE idea_id = %s", idea) == [(True,)]
 
 
-def test_my_latest_star_or_unstar_is_what_lattice_shows(seeded, admin):
+def test_my_latest_star_or_unstar_is_what_pub_ideas_shows(seeded, admin):
     (idea,) = table(seeded, "SELECT idea_id FROM pub.ideas ORDER BY idea_id LIMIT 1")[0]
     for kind, starred in [("star", True), ("unstar", False), ("star", True)]:
         with admin.transaction():
@@ -358,13 +360,13 @@ def lattice_app_can(admin) -> dict:
     }
 
 
-def test_lattice_app_can_read_pub_append_feedback_and_call_its_functions_and_nothing_else(seeded, admin):
+def test_the_web_role_can_read_pub_append_feedback_and_call_its_functions_and_nothing_else(seeded, admin):
     pub = {r for (r,) in admin.execute("""SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                                           WHERE n.nspname = 'pub' AND c.relkind IN ('r', 'v', 'm')""")}
     assert lattice_app_can(admin) == {
         "relations": {("pub", r, "SELECT") for r in pub} | {("pub", "feedback_events", "INSERT")},
         "columns": set(), "sequences": set(),
-        "functions": {("pub", "card_neighbours"), ("pub", "embedding_model"), ("pub", "ideas_near")},
+        "functions": {("pub", "card_neighbours"), ("pub", "embedding_model")},
         "schemas": {("pub", "USAGE")}, "roles": set()}
     # They run as their owner (SECURITY DEFINER), reading im: only the roles granted them may call them, not PUBLIC.
     assert admin.execute("""SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -490,48 +492,49 @@ def test_projection_holds_still_as_ideas_are_added():
     assert lattice.project(M[:1]).tolist() == [[0.0, 0.0]]
 
 
-def test_every_shown_idea_gets_a_position_lattice_can_read(seeded_lattice, admin):
+def test_every_card_gets_a_position_the_web_role_can_read(seeded_lattice, admin):
     pipe = seeded_lattice
-    shown = {r[0] for r in table(pipe, "SELECT idea_id FROM pub.ideas")}
+    cards = {r[0] for r in table(pipe, "SELECT idea_id FROM pub.cards")}
     with admin.transaction():
         admin.execute("SET LOCAL ROLE lattice_app")
-        pos = admin.execute("SELECT idea_id, x, y, method FROM pub.idea_positions").fetchall()
-    assert {r[0] for r in pos} == shown
-    assert all(abs(x) <= 1.25 and abs(y) <= 1.25 for _, x, y, _ in pos)
-    assert all(m.endswith(f"embedding:{HashEmbedder().model_version}") for *_, m in pos)
+        pos = admin.execute("SELECT idea_id, x, y FROM pub.card_positions").fetchall()
+    assert {r[0] for r in pos} == cards
+    assert all(abs(x) <= 1.25 and abs(y) <= 1.25 for _, x, y in pos)
+    methods = {r[0] for r in table(pipe, "SELECT method FROM im.idea_positions")}
+    assert all(m.endswith(f"embedding:{HashEmbedder().model_version}") for m in methods)
     before = {r[0]: (r[1], r[2]) for r in pos}
-    assert lattice.place(pipe, HashEmbedder().model_version) == len(shown)
+    assert lattice.place(pipe, HashEmbedder().model_version) == len(cards)
     after = {r[0]: (r[1], r[2]) for r in table(pipe, "SELECT idea_id, x, y FROM im.idea_positions")}
-    assert all(np.allclose(after[i], before[i], atol=1e-3) for i in shown)   # same ideas: the map doesn't move
+    assert all(np.allclose(after[i], before[i], atol=1e-3) for i in cards)   # same cards: the map doesn't move
 
 
 def test_my_links_show_at_once_and_unlinking_removes_them(seeded, admin):
     a, b, c = sorted(r[0] for r in table(seeded, "SELECT idea_id FROM pub.ideas"))
 
-    def lattice_does(sql, *args):
+    def as_web_role(sql, *args):
         with admin.transaction():
             admin.execute("SET LOCAL ROLE lattice_app")
             return admin.execute(sql, args or None)
 
     def mine():
-        return lattice_does("SELECT a, b, weight, method FROM pub.connections WHERE kind = 'mine' ORDER BY a, b"
-                            ).fetchall()
+        return as_web_role("SELECT a, b, weight, method FROM pub.connections WHERE kind = 'mine' ORDER BY a, b"
+                           ).fetchall()
 
-    def on_cards():   # the neutral view's edges: the same, links to clusters Lattice hides included
-        return lattice_does("SELECT a, b FROM pub.card_links WHERE kind = 'mine' ORDER BY a, b").fetchall()
+    def on_cards():   # the neutral view's edges: the same, links to clusters pub.ideas hides included
+        return as_web_role("SELECT a, b FROM pub.card_links WHERE kind = 'mine' ORDER BY a, b").fetchall()
 
     link = "INSERT INTO pub.feedback_events (kind, idea_id, other_idea_id) VALUES (%s, %s, %s)"
-    lattice_does(link, "link", b, a)
-    lattice_does(link, "link", a, b)   # the same pair, either way round
-    lattice_does(link, "link", a, c)
+    as_web_role(link, "link", b, a)
+    as_web_role(link, "link", a, b)   # the same pair, either way round
+    as_web_role(link, "link", a, c)
     assert mine() == [(a, b, 1.0, "feedback"), (a, c, 1.0, "feedback")] and on_cards() == [(a, b), (a, c)]
-    lattice_does(link, "unlink", c, a)
+    as_web_role(link, "unlink", c, a)
     assert mine() == [(a, b, 1.0, "feedback")] and on_cards() == [(a, b)]
-    lattice_does(link, "link", c, a)   # linked again: my latest decides
+    as_web_role(link, "link", c, a)   # linked again: my latest decides
     assert on_cards() == [(a, b), (a, c)]
     for args in [("link", a, a), ("unlink", a, None)]:
         with pytest.raises(psycopg.errors.CheckViolation):
-            lattice_does(link, *args)
+            as_web_role(link, *args)
 
 
 def test_a_pair_is_one_connection_and_an_unlink_holds_until_a_later_method(seeded):

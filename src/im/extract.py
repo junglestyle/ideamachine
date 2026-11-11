@@ -178,7 +178,7 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
     A re-read of the same episode (what would be sent changed, e.g. a tap was added) keeps each earlier capture it
     makes again: one citing a line the new one cites, with a matching quote (feedback.quote_score), one to one and
     best first. The earlier item stays as it was, with all that hangs off it: the matcher's decision and the idea's
-    evidence (so the capture doesn't become a second idea), my verdicts, and Lattice's events on it. Only captures
+    evidence (so the capture doesn't become a second idea), my verdicts, and the feedback events on it. Only captures
     the re-read doesn't make again are replaced."""
     with conn.transaction():
         old = conn.execute("""SELECT item_id, quote, source_segment_ids FROM im.items

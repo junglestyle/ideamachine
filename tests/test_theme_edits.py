@@ -1,4 +1,4 @@
-"""Shaping themes from Lattice: merge, split, file and unfile one idea; all applied the moment they're sent, and
+"""Shaping themes by events: merge, split, file and unfile one idea; all applied the moment they're sent, and
 held against the filer and re-filing."""
 
 import json
@@ -10,14 +10,14 @@ import pytest
 from im import themes
 
 from helpers import table
-from test_review import as_lattice
+from test_review import as_web_role
 from test_themes import FakeThemer, lat, results, themed  # noqa: F401  (lat is a fixture)
 
 EVENT = "INSERT INTO pub.feedback_events (kind, theme_id, idea_id, payload) VALUES (%s, %s, %s, %s)"
 
 
 def send(admin, kind, theme, idea=None, payload=None):
-    return as_lattice(admin, EVENT, kind, theme, idea, json.dumps(payload or {}))
+    return as_web_role(admin, EVENT, kind, theme, idea, json.dumps(payload or {}))
 
 
 def idea(conn, title_like):
@@ -41,11 +41,11 @@ def test_a_merge_moves_ideas_and_a_folded_proposal_isnt_proposed_again(lat, admi
     send(admin, "merge_theme", jokes, payload={"into": str(models)})   # a resend: already gone
     assert results(lat) == ["merged", "merged", "no such theme"]
     assert members(lat, models) == sorted(set(before))
-    assert as_lattice(admin, "SELECT name, pinned FROM pub.themes ORDER BY name") == [("Models and signals", True)]
+    assert as_web_role(admin, "SELECT name, pinned FROM pub.themes ORDER BY name") == [("Models and signals", True)]
     assert table(lat, "SELECT name FROM im.theme_rejections") == [("Gadgets",)]   # the archive's isn't a proposal
 
 
-def test_a_split_makes_my_theme_under_lattices_id(lat, admin):
+def test_a_split_makes_my_theme_under_the_senders_id(lat, admin):
     models = themes.find(lat, "models")
     inside = members(lat, models)
     moving = idea(lat, inside[0])
@@ -53,9 +53,9 @@ def test_a_split_makes_my_theme_under_lattices_id(lat, admin):
     split = {"new_theme_id": str(new), "name": "Signals proper", "idea_ids": [str(moving), str(uuid.uuid4())]}
     send(admin, "split_theme", models, payload=split)
     send(admin, "split_theme", models, payload=split)   # a resend
-    send(admin, "pin_theme", new)   # Lattice can act on the new theme at once
+    send(admin, "pin_theme", new)   # the sender can act on the new theme at once
     assert results(lat) == ["split: 1 moved", "repeat", "pinned"]
-    assert as_lattice(admin, "SELECT name, origin, pinned, n_ideas FROM pub.themes WHERE theme_id = %s", new) == \
+    assert as_web_role(admin, "SELECT name, origin, pinned, n_ideas FROM pub.themes WHERE theme_id = %s", new) == \
         [("Signals proper", "mine", True, 1)]
     assert members(lat, models) == inside[1:]
     assert table(lat, "SELECT origin FROM im.idea_themes WHERE theme_id = %s", new) == [("mine",)]
@@ -76,7 +76,7 @@ def test_filing_by_hand_holds_against_the_filer_and_refiling(lat, admin):
     assert themed(lat, "Broken builds%") == []   # but I unfiled it from there
 
     send(admin, "file_idea", models, builds)   # filing it back lifts the block
-    as_lattice(admin, "INSERT INTO pub.feedback_events (kind, idea_id, payload) VALUES ('idea_correct', %s, %s)",
+    as_web_role(admin, "INSERT INTO pub.feedback_events (kind, idea_id, payload) VALUES ('idea_correct', %s, %s)",
                builds, json.dumps({"title": "Builds break on Fridays"}))
     assert themes.refile_corrected(lat) == 1   # a corrected idea loses only the filer's placements
     assert themed(lat, "Broken builds%") == ["Models and signals"]
@@ -95,7 +95,7 @@ def test_theme_events_are_checked(lat, admin):
         with pytest.raises(psycopg.errors.CheckViolation):
             send(admin, kind, theme, i, payload)
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        as_lattice(admin, "DELETE FROM im.idea_themes")
+        as_web_role(admin, "DELETE FROM im.idea_themes")
 
 
 class FakeDescriber:

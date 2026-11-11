@@ -1,11 +1,12 @@
 -- Per-database setup, as the superuser. Safe to re-run: dev/init/10-roles.sh runs it when the volume is created,
 -- install/nas.sh on every install, and the tests on each test database.
--- The pipeline role owns schemas im (its own) and pub (what Lattice reads: ROADMAP §3.5).
+-- The pipeline role owns schemas im (its own) and pub (what the web view reads: ROADMAP §3.5).
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE SCHEMA IF NOT EXISTS im AUTHORIZATION im_pipeline;
 CREATE SCHEMA IF NOT EXISTS pub AUTHORIZATION im_pipeline;
--- Lattice's role: reads pub's views, appends feedback events. Created without a login; dev/init/10-roles.sh
--- (or an admin, by hand) gives it a password.
+-- The web view's role (`im web`): reads pub's views, appends feedback events. Created without a login;
+-- dev/init/10-roles.sh (from IM_WEB_PASSWORD) or an admin, by hand, gives it a password. It keeps the name it had
+-- when Lattice used it: migrations 008 to 052 grant to it by name (058).
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'lattice_app') THEN CREATE ROLE lattice_app NOLOGIN; END IF;
 END $$;

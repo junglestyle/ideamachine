@@ -13,8 +13,9 @@ candidates the system proposes. Edges between ideas say that they're related, an
 (supports, tension, elaborates, sympathy, and more as they're added); each cites its evidence. **Lenses** show the
 graph from any seed: an idea, a subject, a sentence, a question
 ([decision 0010](decisions/0010-connections-kinds-lenses.md)).
-Presentation and the MCP server move into this repo ([decision 0005](decisions/0005-presentation-inside-idea-machine.md)),
-and Lattice is archived.
+Presentation and the MCP server move into this repo ([decision 0005](decisions/0005-presentation-inside-idea-machine.md)).
+Lattice left the deploy on 2026-11-11 (docs/deploy.md); the neutral view (`im web`) is the presentation until
+Emanation, and no MCP server runs until M5 builds one here.
 
 ### Who said it, and what I keep
 
@@ -75,12 +76,15 @@ storing the index's `open` flag per conversation, which the format already carri
 
 - `pub` stays the read model. The web process connects as a read-mostly role: read `pub`, insert into
   `pub.feedback_events`. It never connects as `im_pipeline`.
-- Until cutover (M6), every existing `pub` view keeps its shape, so Lattice keeps working. New views are additions.
-- **MCP tools are a contract.** The 19 tools Lattice serves after the rating tools were retired (lattice#10,
-  2026-10-29; `src/lattice/mcp.py`, `TOOLS`) keep their names, argument schemas and result shapes byte-compatible,
-  along with speaker pseudonymization in every answer and the public listener's OAuth behavior. New tools are
-  additions: `open_lens` (M5). The seven retired tools (`review_digest`, `look_again`, `decide_item`, `keep_rest`,
-  `compare_pair`, `record_comparison`, `rate_digest_point`) asked me for verdicts and ratings that nothing reads.
+- Lattice was removed on 2026-11-11, and with it what only it read from `pub` (migration 058). New views are
+  additions.
+- **MCP tools are a contract**, not served from 2026-11-11 until M5: the claude.ai connector stopped with Lattice.
+  When M5 serves them here (adding the `pub` views they need), the 19 tools Lattice served after the rating tools
+  were retired (lattice#10, 2026-10-29; `src/lattice/mcp.py`, `TOOLS`) keep their names, argument schemas and
+  result shapes byte-compatible, along with speaker pseudonymization in every answer and the public listener's
+  OAuth behavior. New tools are additions: `open_lens` (M5). The seven retired tools (`review_digest`, `look_again`,
+  `decide_item`, `keep_rest`, `compare_pair`, `record_comparison`, `rate_digest_point`) asked me for verdicts and
+  ratings that nothing reads.
 - All human input stays feedback events: stars, links, notes, theme edits, and V2's keep (canonical or pinned) /
   unkeep / dismiss / merge / reject. Old verdict and comparison events stay in the ledger; nothing reads them.
 - Where events disagree (a star and an unstar, a link and an unlink, two corrections, two marks), my latest is the

@@ -61,8 +61,8 @@ def _period(week: date) -> tuple[datetime, datetime]:
 
 
 def _said(conn, start: datetime, end: datetime) -> list[tuple]:
-    """Ideas shown in Lattice with captures said in the week: id, title, statement, themes, said that week, said in
-    all, first said, starred. Most said first."""
+    """Ideas in pub.ideas with captures said in the week: id, title, statement, themes, said that week, said in all,
+    first said, starred. Most said first."""
     return conn.execute(
         """SELECT d.idea_id, d.title, d.statement, d.themes, w.n, d.n_evidence, d.first_said, d.starred
            FROM pub.ideas d

@@ -1,9 +1,9 @@
-# Idea Machine on TrueNAS (install/nas.sh): Postgres, the hourly pipeline run, and Lattice.
+# Idea Machine on TrueNAS (install/nas.sh): Postgres, the pipeline run, and the web view.
 # Hearsay's stream path comes from install/.env, which install/nas.sh writes (it's on whichever pool Hearsay is on).
 name: ideamachine
 
 # Container output goes to the journal (on the boot pool), not to files on the data disks:
-#   journalctl -t ideamachine-db, -t lattice, -t ideamachine-web, -t lattice-tunnel
+#   journalctl -t ideamachine-db, -t ideamachine-web
 x-logging: &logging
   driver: journald
   options:
@@ -51,37 +51,16 @@ services:
       db:
         condition: service_healthy
 
-  # Loopback only: tailscale serve publishes the app (8790) to the tailnet over HTTPS. Never the LAN, never 0.0.0.0,
-  # never tailscale funnel: evidence quotes include other people's words. The one exception is the MCP listener
-  # (8791), which Lattice opens only when LATTICE_PUBLIC_URL is set: cloudflared publishes it to the internet for
-  # claude.ai, behind OAuth and Anthropic's address range (Lattice's docs/public-mcp.md).
-  lattice:
-    build: /mnt/fast/repos/lattice   # admin's clone
-    image: lattice
-    container_name: lattice
-    logging: *logging
-    init: true
-    user: "568:568"
-    env_file: /mnt/fast/ideamachine/config/lattice.env
-    environment:
-      TZ: America/New_York
-    ports:
-      - "127.0.0.1:8790:8790"
-      - "127.0.0.1:8791:8791"   # the public MCP listener; only cloudflared talks to it
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # The neutral view (src/im/web.py; decision 0007). Lattice's role and token, never the pipeline's. Loopback only:
-  # tailscale serve publishes it to the tailnet, like Lattice, never the LAN or the internet.
+  # The neutral view (src/im/web.py; decision 0007). Its own role and token, never the pipeline's. Loopback only:
+  # tailscale serve publishes it to the tailnet over HTTPS. Never the LAN, never 0.0.0.0, never tailscale funnel:
+  # quotes include other people's words.
   web:
     image: ideamachine   # built by install/nas.sh with the run service
     container_name: ideamachine-web
     logging: *logging
     init: true
     user: "568:568"
-    env_file: /mnt/fast/ideamachine/config/lattice.env   # LATTICE_DATABASE_URL, LATTICE_TOKEN
+    env_file: /mnt/fast/ideamachine/config/web.env   # IM_WEB_DATABASE_URL, IM_WEB_TOKEN
     environment:
       TZ: America/New_York
     command: ["web", "--host", "0.0.0.0", "--port", "8792"]   # inside the container; the host port is loopback
@@ -90,16 +69,4 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    restart: unless-stopped
-
-  # Publishes only Lattice's MCP listener (Lattice's docs/public-mcp.md). Outbound-only: opens no ports. Started by
-  # install/nas.sh only when lattice.env sets LATTICE_PUBLIC_URL; the token is root-only.
-  cloudflared:
-    image: cloudflare/cloudflared:2026.9.3
-    container_name: lattice-tunnel
-    logging: *logging
-    profiles: ["public"]
-    command: tunnel --no-autoupdate run
-    env_file: /mnt/fast/ideamachine/config/cloudflared.env   # TUNNEL_TOKEN=...
-    network_mode: host   # to reach 127.0.0.1:8791
     restart: unless-stopped

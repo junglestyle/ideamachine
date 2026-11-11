@@ -22,7 +22,7 @@ TEST_DB = "im_test"
 BOOTSTRAP = Path(__file__).parent.parent / "dev" / "init" / "bootstrap-db.sql.in"
 DSNS = {name: os.environ.get(name) for name in (db.DEV_ADMIN_ENV, db.PIPELINE_ENV)}
 # The ambient settings no test may see. IM_TEST_MODELS is the suite's own switch.
-AMBIENT = ("IM_", "ANTHROPIC_", "LATTICE_", "CORRAL_", "OPENROUTER_", "TYPESAFE_")
+AMBIENT = ("IM_", "ANTHROPIC_", "CORRAL_", "OPENROUTER_", "TYPESAFE_")
 
 
 @pytest.fixture(autouse=True)
@@ -67,8 +67,8 @@ def admin(dbs):
 
 
 @pytest.fixture
-def lattice_dsn(dbs):
-    """A DSN for the test database that connects as lattice_app, as Lattice and the neutral view do."""
+def web_dsn(dbs):
+    """A DSN for the test database that connects as lattice_app, as the web view does."""
     return make_conninfo(_dsns()[0], options="-c role=lattice_app")
 
 

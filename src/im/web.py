@@ -3,15 +3,15 @@
 Every cluster that passed the gates, newest first, each showing what's known about it: who said it (me, me by
 diarization, not me; never a name), in how many conversations, when, its maturity, how I kept it, and its edges.
 No score orders or filters anything. From a card I keep a cluster (canonical or pinned), un-keep it or dismiss it,
-as the same feedback events Lattice's keep_idea writes.
+as feedback events, the same kinds Lattice's keep_idea wrote.
 
 Demo mode (a toggle, or `im web --demo` for nothing else) reads the `demo` views instead of `pub`'s, so nothing
 sensitive is there to show: the sky keeps a sensitive cluster's star, blank, with its edges, and the lists (the
 feed, a card's quotes and connections) leave it out. Nothing can be kept or dismissed in demo mode.
 
-It connects as Lattice's role (LATTICE_DATABASE_URL: read pub, append feedback), never as im_pipeline, and logs in
-with Lattice's token (LATTICE_TOKEN), exchanged once per device for a signed cookie. Loopback only: tailscale serve
-publishes it to the tailnet (install/nas.sh).
+It connects as its own role (IM_WEB_DATABASE_URL, role lattice_app: read pub, append feedback), never as
+im_pipeline, and logs in with its token (IM_WEB_TOKEN), exchanged once per device for a signed cookie. Loopback only:
+tailscale serve publishes it to the tailnet (install/nas.sh).
 """
 
 import hashlib
@@ -27,8 +27,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import psycopg
 
-DATABASE_ENV = "LATTICE_DATABASE_URL"
-TOKEN_ENV = "LATTICE_TOKEN"
+DATABASE_ENV = "IM_WEB_DATABASE_URL"
+TOKEN_ENV = "IM_WEB_TOKEN"
 COOKIE = "emanation_session"
 DEMO_COOKIE = "emanation_demo"
 PAGE = 50
