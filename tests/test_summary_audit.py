@@ -2,7 +2,7 @@
 
 import json
 
-from im import extract, names, probe_audit, summary_audit, trial
+from im import extract, probe_audit, summary_audit, trial
 
 from helpers import run, system_of
 from test_carry import DATABASE, capture
@@ -13,9 +13,8 @@ from test_probe_audit import FakeProposer, fill
 def test_a_summary_sheet_samples_every_models_captures_blind(pipe, cfg, stream, tmp_path):
     run(pipe, cfg, stream)
     v3 = extract.system_prompt("v3")
-    scrubber = names.Scrubber(b"k")
     for model in ("claude-opus-5-5", "claude-sonnet-5-5"):
-        assert trial.run(pipe, FakeClaude(capture(DATABASE)), v3, model=model, scrubber=scrubber)["read"]
+        assert trial.run(pipe, FakeClaude(capture(DATABASE)), v3, model=model)["read"]
     out = summary_audit.write(pipe, tmp_path, size=4)
     assert out["by_model"] == {"claude-opus-5-5": 1, "claude-sonnet-5-5": 1}   # as many from each as both can give
     sheet = (tmp_path / "sheet.md").read_text()

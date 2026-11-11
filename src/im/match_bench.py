@@ -13,7 +13,7 @@ A decision is replayed only if its request is still logged in full (forgetting b
 Opus chose is found by text: the idea it joined (or developed) as its text reads now, or as Claude first wrote it.
 If neither reads like any candidate shown, as after a later correction, the decision counts for its kind only.
 
-Requests go out under policy C, names said pseudonymized, each logged with the segments of the capture and of every
+Requests go out under policy B, names said as said, each logged with the segments of the capture and of every
 candidate it could be placed with. Jev's answers are kept in the folder (jev-answers.json), so a rerun picks up where
 one stopped and scoring sends nothing.
 """
@@ -108,7 +108,7 @@ def decisions(conn) -> list[dict]:
     return out
 
 
-def run(conn, client, folder: Path, scrubber=None, limit: int | None = None, monthly_cap_usd: float = 20.0) -> dict:
+def run(conn, client, folder: Path, limit: int | None = None, monthly_cap_usd: float = 20.0) -> dict:
     """Ask Jev about each decision's capture against each of its candidates, "egress_id n" -> {question: p}."""
     folder.mkdir(parents=True, exist_ok=True)
     found = decisions(conn)[:limit] if limit else decisions(conn)
@@ -118,10 +118,10 @@ def run(conn, client, folder: Path, scrubber=None, limit: int | None = None, mon
         for n, c in enumerate(d["candidates"], 1):
             state = {"a": d["item"], "b": {"idea": c["text"], **({"my_note": c["note"]} if "note" in c else {})}}
             jobs[f"{d['egress_id']} {n}"] = (
-                lambda s=state: probe_audit._scrubbed(s, scrubber)[0] if scrubber else s,
+                lambda s=state: s,
                 lambda d=d, c=c: sorted(set(d["segments"]) | {str(s) for s in egress.segments_of(conn, c["ideas"])}))
-    got = probe_audit.ask_all(conn, client, "match", jobs, folder / "jev-answers.json",
-                              scrubber.policy if scrubber else egress.POLICY_VERSION, monthly_cap_usd, probes=False)
+    got = probe_audit.ask_all(conn, client, "match", jobs, folder / "jev-answers.json", monthly_cap_usd,
+                              probes=False)
     return {"decisions": len(found), "asked": len(jobs), "answered": sum(k in got for k in jobs)}
 
 

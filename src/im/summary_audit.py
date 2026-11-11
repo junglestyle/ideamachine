@@ -2,7 +2,7 @@
 
 On the first tension sheet, summaries sharpened readings the quotes only allowed ("comfort beats the stigma" for
 "they're pretty comfy"). Every stage that reads summaries inherits what they add. This sheet samples captures
-evenly across the models in the extraction trials (policy C, every prompt), and shows the lines each capture cites,
+evenly across the models in the extraction trials (policy B, every prompt), and shows the lines each capture cites,
 its quote and its summary, without saying which model wrote it. The question: does the summary claim anything those
 lines don't say? `yes` means it adds.
 
@@ -14,6 +14,8 @@ faithfulness pass a cheaper summarizer would need.
 import json
 import random
 from pathlib import Path
+
+from im import egress
 
 SIZE = 50
 HEADER = """# Summaries (blind)
@@ -31,13 +33,13 @@ else.
 
 
 def _captures(conn) -> list[dict]:
-    """Every capture with a summary in the extraction trials under policy C, one read per model (not replicates)."""
+    """Every capture with a summary in the extraction trials, one read per model (not replicates)."""
     out = []
     for model, eid, items in conn.execute(
             """SELECT t.model, t.episode_id::text, t.items FROM im.prompt_trials t
                JOIN im.episodes e ON e.episode_id = t.episode_id AND e.current
-               WHERE t.privacy_policy_version LIKE 'C%%' AND t.prompt_version NOT LIKE '%%~%%'
-               ORDER BY t.model, t.episode_id"""):
+               WHERE t.privacy_policy_version = %s AND t.prompt_version NOT LIKE '%%~%%'
+               ORDER BY t.model, t.episode_id""", (egress.POLICY_VERSION,)):
         for n, it in enumerate(items):
             if (it.get("gist") or "").strip() and it.get("source_segment_ids"):
                 out.append({"model": model, "episode": eid, "item": n, "kind": it["kind"], "quote": it["quote"],
@@ -57,7 +59,7 @@ def build(conn, seed: int = 11, size: int = SIZE) -> tuple[str, dict]:
     for c in _captures(conn):
         by_model.setdefault(c["model"], []).append(c)
     if not by_model:
-        raise SystemExit("no extraction trials under policy C with summaries yet (im trial v3 --model ...)")
+        raise SystemExit("no extraction trials with summaries yet (im trial v3 --model ...)")
     per = max(1, size // len(by_model))
     picked = [c | {"set": model} for model, cs in sorted(by_model.items()) for c in rng.sample(cs, min(per, len(cs)))]
     rng.shuffle(picked)

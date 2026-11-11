@@ -58,6 +58,14 @@ env_ensure() {
     chmod 600 "$file"
 }
 
+# Removes KEY, if it's there: a secret nothing uses any more.
+env_delete() {
+    local file="$1" key="$2"
+    [ -n "$(env_get "$file" "$key")" ] || return 0
+    sed -i "/^${key}=/d" "$file"
+    echo "removed $key from $file"
+}
+
 # Creates or updates a TrueNAS cron job (shown in System -> Advanced -> Cron Jobs). The middleware appends its own
 # redirect to the command, so the caller's redirect sits inside an outer subshell.
 cron_id() {
@@ -182,12 +190,4 @@ rebuild_env() {
     export IM_DATABASE_URL
     # shellcheck disable=SC2034  # read by install/bin/im-rebuild and install/rebuild.sh, which source this
     REBUILD_RUN=(-e IM_DATABASE_URL -e IM_CONFIG=/config/rebuild.toml)
-}
-
-grant_names() {  # the names role's grants in database $1: it reads segments and episodes and writes names, nothing else
-    "${COMPOSE[@]}" exec -T db psql -q -v ON_ERROR_STOP=1 -U postgres -d "$1" <<'SQL'
-GRANT USAGE ON SCHEMA im TO im_names;
-GRANT SELECT ON im.episodes, im.episode_segments, im.source_segments TO im_names;
-GRANT SELECT, INSERT, UPDATE ON im.segment_names TO im_names;
-SQL
 }

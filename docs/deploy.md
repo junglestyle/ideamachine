@@ -101,22 +101,19 @@ listener (127.0.0.1:8791). Removing the line and re-running `install/nas.sh` sto
 tunnel's hostname, two WAF rules) and how to add the connector are in Lattice's `docs/public-mcp.md`. Read its
 "How it's protected" first: this is the one thing reachable from the internet.
 
-## Names said, on the dev box's GPU
+## Policy C, retired (2026-11-11)
 
-Policy C (decision 0008) finds names said with GLiNER and keeps them per segment (`im.segment_names`). The NAS
-reads any segment not looked at yet on its own CPU, which keeps up with live volume. For a backlog (the trial
-sample, the whole history before the live switch, a day of all-day recording), the dev box's GPU does it as a
-corral job:
+Names said go out as said (decision 0008, amended), so nothing looks for names any more. Each run of
+`install/nas.sh` drops role `im_names` if it's still there, deletes `IM_NAME_KEY` and `IM_NAMES_PASSWORD` from the
+config and the names job's connections in `gpu/`, and Postgres no longer listens on the NAS's loopback. `[egress]
+names`, `public_names` and `my_names` are ignored, with a warning, until deleted from `im.toml` and `rebuild.toml`.
+TrueNAS's SSH "Allow TCP Port Forwarding", turned on for the names job's tunnel, can be turned off if nothing else
+uses it.
 
-- On the NAS, `install/nas.sh` puts Postgres on the NAS's loopback (`127.0.0.1:55433`, nothing on the network),
-  creates role `im_names` (reads segments and episodes, writes names, nothing else) and writes its connection to
-  `/mnt/fast/ideamachine/gpu/names.env`, readable only by the clones' owner.
-- On the dev box, as your user: `install/gpu.sh`. Like Hearsay's, it checks the GPU and `ssh nas`, builds an
-  environment with CUDA torch and the pinned GLiNER, copies the connection, and adds `ideamachine.names` to the
-  corral worker. Each job opens an ssh tunnel to the NAS, reads one chunk (corral's suggested size), and requeues
-  itself until nothing is left.
-- Start a backlog: `corral enqueue ideamachine.names --needs gpu --key ideamachine.names`. `corral pause` holds it
-  between chunks; the NAS never waits for it.
+The dev box runs nothing for Idea Machine now. Remove the `ideamachine.names` kinds from its corral worker (delete
+`~/.config/corral/kinds.d/ideamachine.toml`, then `systemctl --user restart corral-worker`), and the environment
+and connections `install/gpu.sh` made: `~/.local/share/ideamachine/gpu-venv`, `~/.config/ideamachine/gpu.env` and
+`gpu-rebuild.env`.
 
 ## The rebuild database
 
@@ -130,10 +127,10 @@ Create it on the NAS, after `install/nas.sh`:
 sudo /mnt/fast/repos/ideamachine/install/rebuild.sh
 ```
 
-It creates `im_rebuild` if it's missing and gives it `im`'s per-database setup (`dev/init/bootstrap-db.sql.in`) and
-the names role's grants. It writes the rebuild's connections, `config/rebuild.env` and `gpu/names-rebuild.env`,
-from the live ones with the database name swapped, so no secret is entered twice. It writes `config/im/rebuild.toml`
-if it's missing, then migrates `im_rebuild`. It never touches `im`, and it's safe to re-run.
+It creates `im_rebuild` if it's missing and gives it `im`'s per-database setup (`dev/init/bootstrap-db.sql.in`). It
+writes the rebuild's connection, `config/rebuild.env`, from the live one with the database name swapped, so no secret
+is entered twice. It writes `config/im/rebuild.toml` if it's missing, then migrates `im_rebuild`. It never touches
+`im`, and it's safe to re-run.
 
 Run it as root with `im-rebuild` (`install/bin/im-rebuild`, on root's PATH next to `im`). It takes the same
 arguments as `im`:
@@ -152,10 +149,6 @@ doesn't schedule it: every run is started by hand.
   charged up to the two caps together.
 - **Matching is off** (`[lattice] enabled = false` in `rebuild.toml`), so the bulk extraction goes first. Set it to
   `true` there to switch matching on; each run reads the file, so nothing needs reinstalling.
-- **Names said** (policy C) are kept per database, and `im_rebuild` starts with none: the NAS's CPU finds them as
-  payloads need them. For the backlog, re-run `install/gpu.sh` on the dev box after `install/rebuild.sh` (it adds
-  the kind `ideamachine.names-rebuild`), then, once the first `im-rebuild run` has imported the stream:
-  `corral enqueue ideamachine.names-rebuild --needs gpu --key ideamachine.names-rebuild`.
 - **Backups.** The nightly backup also dumps `im_rebuild` while it's there, to `backups/im_rebuild-<date>.dump`,
   kept 14 days like `im`'s.
 
@@ -163,8 +156,7 @@ doesn't schedule it: every run is started by hand.
 Lattice, the neutral view and any `im-rebuild` stopped), as `postgres` in the `postgres` database: rename `im` to an
 archive name (for example `ALTER DATABASE im RENAME TO im_v1`), then `ALTER DATABASE im_rebuild RENAME TO im`. The
 old database is archived, not deleted; dump it once, since the nightly backup covers only `im` and `im_rebuild`.
-Then carry `rebuild.toml`'s settings into `im.toml`, delete `config/rebuild.env` and `gpu/names-rebuild.env`, and
-re-run `install/nas.sh`, and `install/gpu.sh` on the dev box.
+Then carry `rebuild.toml`'s settings into `im.toml`, delete `config/rebuild.env`, and re-run `install/nas.sh`.
 
 ## Where things are
 

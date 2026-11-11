@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from im import egress, jev, llm, names, probe_audit
+from im import egress, jev, llm, probe_audit
 
 from helpers import system_of
 from test_edge_audit import lattice_with_clusters  # noqa: F401 (fixture)
@@ -136,7 +136,7 @@ def test_jevs_pool_picks_up_where_a_stopped_run_left_off(lattice_with_clusters, 
     assert len(pairs) > 5
     stopped, sent = fake_jev(fail_after=5)
     with pytest.raises(llm.Unavailable):
-        probe_audit.jev_pool(lattice_with_clusters, stopped, None, pairs, tmp_path)
+        probe_audit.jev_pool(lattice_with_clusters, stopped, pairs, tmp_path)
     kept = json.loads((tmp_path / "jev-pool.json").read_text())
     answered, logged = lattice_with_clusters.execute(
         "SELECT count(*) FILTER (WHERE error IS NULL), count(*) FROM im.egress_log WHERE model = 'jev-1.14.0'"
@@ -144,7 +144,7 @@ def test_jevs_pool_picks_up_where_a_stopped_run_left_off(lattice_with_clusters, 
     assert 0 < len(kept) <= 5 and answered == len(kept)   # what was answered is kept and logged
     assert logged == len(sent)   # and so is every request that went, answered or not
     again, resent = fake_jev()
-    got = probe_audit.jev_pool(lattice_with_clusters, again, None, pairs, tmp_path)
+    got = probe_audit.jev_pool(lattice_with_clusters, again, pairs, tmp_path)
     assert len(got) == len(pairs) and len(resent) == len(pairs) - len(kept)
 
 
@@ -162,7 +162,7 @@ def test_a_pool_stopped_by_anything_sends_nothing_more_and_keeps_only_what_it_lo
     monkeypatch.setattr(probe_audit, "JEV_WORKERS", 1)
     client, sent = fake_jev(takes=0.05)   # slower than logging, so the rest are still queued when it stops
     with pytest.raises(KeyboardInterrupt):
-        probe_audit.jev_pool(lattice_with_clusters, client, None, pairs, tmp_path)
+        probe_audit.jev_pool(lattice_with_clusters, client, pairs, tmp_path)
     kept = json.loads((tmp_path / "jev-pool.json").read_text())
     logged = lattice_with_clusters.execute("SELECT count(*) FROM im.egress_log WHERE model = 'jev-1.14.0'").fetchone()[0]
     assert len(sent) <= 4 < len(pairs)   # the queue was dropped: at most the one in flight went too
@@ -197,10 +197,10 @@ def test_a_pool_answer_that_cant_be_read_stops_the_sheet_and_is_asked_again(latt
         n = next(count)   # atomic: the pool asks from several threads
         return {"model": "jev-1.14.0", "usage": {"input_tokens": 1000}} if n == 2 else good.post(body)
     with pytest.raises(SystemExit):
-        probe_audit.jev_pool(lattice_with_clusters, jev.Jev(post=post), None, pairs, tmp_path)
+        probe_audit.jev_pool(lattice_with_clusters, jev.Jev(post=post), pairs, tmp_path)
     assert len(json.loads((tmp_path / "jev-pool.json").read_text())) == len(pairs) - 1
     again, resent = fake_jev()
-    assert len(probe_audit.jev_pool(lattice_with_clusters, again, None, pairs, tmp_path)) == len(pairs)
+    assert len(probe_audit.jev_pool(lattice_with_clusters, again, pairs, tmp_path)) == len(pairs)
     assert len(resent) == 1
 
 
@@ -241,10 +241,6 @@ def test_a_model_answers_the_sheet_blind_and_is_scored_against_me(lattice_with_c
     mine_yes = sum(1 for p in json.loads((tmp_path / "key.json").read_text())["pairs"].values() if p["set"] == "model")
     assert r["recall"] == (1.0 if mine_yes else None) and r["pairs"] == out["pairs"]
     assert r["precision"] == (round(mine_yes / out["pairs"], 3) if out["pairs"] else None)
-    # Under policy C it's another draft: policy B's answers don't stand in for it, nor are they scored as C's.
-    c = probe_audit.draft(lattice_with_clusters, model, tmp_path, "claude-opus-5-5", scrubber=names.Scrubber(b"k"))
-    assert c["pairs"] == out["pairs"] and len(model.calls) == 2 * out["pairs"] and c["policy"].startswith("C")
-    assert set(probe_audit.score(tmp_path)["drafts"]) == {"claude-opus-5-5-low-B1", "claude-opus-5-5-low"}
 
 
 def test_agreement_counts_only_pairs_both_answered():

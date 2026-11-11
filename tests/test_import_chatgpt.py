@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from im import archive_observations as ao, lattice, names
+from im import archive_observations as ao, egress, lattice
 
 from helpers import assert_invariants, table
 from test_extract import FakeClaude
@@ -141,7 +141,7 @@ def every_line(text):
 
 
 def write(conn, claude, p):
-    return ao.import_sessions(conn, claude, p, names.Scrubber(b"k", ["Michelle"]), "claude-opus-5-5", "medium", 20.0)
+    return ao.import_sessions(conn, claude, p, "claude-opus-5-5", "medium", 20.0)
 
 
 def test_each_session_goes_out_alone_with_only_my_kept_words():
@@ -163,7 +163,7 @@ def test_writing_stores_each_capture_once_as_mine_with_my_edits(pipe):
     stats = write(pipe, claude, p)
     assert (len(claude.calls), stats["read"], stats["items"]) == (3, 3, 4)
     sent = json.dumps([c["messages"] for c in claude.calls])
-    assert "Michelle" not in sent and not [w for w in CHATGPT if w in sent]
+    assert "Michelle says" in sent and not [w for w in CHATGPT if w in sent]
     assert table(pipe, """SELECT o.quote, to_char(o.said_at AT TIME ZONE 'America/New_York', 'MM-DD HH24:MI'),
                                  o.edited, o.said_by, i.episode_id
                           FROM im.items i JOIN im.observations o USING (observation_id)
@@ -173,7 +173,8 @@ def test_writing_stores_each_capture_once_as_mine_with_my_edits(pipe):
         ("Michelle says the meeting is the coffee", "08-20 02:37", False, "me", None),
         ("a broken build is a signal about the team", "08-20 08:37", False, "me", None)]
     assert table(pipe, """SELECT count(*), bool_and(episode_id IS NULL AND segment_ids = '{}'),
-                                 bool_and(privacy_policy_version LIKE 'C%%') FROM im.egress_log""") == [(3, True, True)]
+                                 bool_and(privacy_policy_version = %s) FROM im.egress_log""",
+                 egress.POLICY_VERSION) == [(3, True, True)]
 
     again = FakeClaude(every_line)
     assert write(pipe, again, p)["already_read"] == 3 and again.calls == []

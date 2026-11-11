@@ -6,7 +6,7 @@ import re
 from dataclasses import replace
 from types import SimpleNamespace
 
-from im import egress, extract, gate, gate_audit, jev, names, trial
+from im import extract, gate, gate_audit, jev, trial
 
 from helpers import run
 from test_extract import FakeClaude
@@ -45,36 +45,34 @@ def test_the_gate_keeps_repairs_or_drops_each_capture_from_what_jev_says_of_it(p
     stream.write(stream.dir)
     run(pipe, cfg, stream)
     v5, schema = extract.system_prompt("v5"), extract.schema_for("v5")
-    scrubber = names.Scrubber(b"k", egress.known_names(pipe))
-    bob = names.token("Bob", b"k")
 
     def respond(text):
         rows = {int(r[1:].split("]")[0]): r.split(": ", 1) for r in text.splitlines() if r.startswith("[")}
         n, (_, said) = next((n, r) for n, r in rows.items() if r[0].endswith(" me") and "build broke" in r[1])
         base = {"quote": said, "lines": [n], "attributed_to": "", "reading": said, "mishearings": []}
-        return [base | {"gist": f"{bob}'s build broke again."}, base | {"gist": "Builds always break."},
+        return [base | {"gist": "Bob's build broke again."}, base | {"gist": "Builds always break."},
                 base | {"gist": "Nobody should ever fix builds."}]
 
-    trial.run(pipe, FakeClaude(respond), v5, scrubber=scrubber, schema=schema)
+    trial.run(pipe, FakeClaude(respond), v5, schema=schema)
     read = (trial.version("claude-opus-5-5", "medium", v5, schema=schema), "claude-opus-5-5")
     client, sent = judge({"Builds always break.": ("overstates",), "Nobody should ever fix builds.": ("mocked",
                                                                                                      "two_points")})
-    stats = gate.run(pipe, client, read, scrubber.policy, scrubber, 20.0)
+    stats = gate.run(pipe, client, read, 20.0)
     assert (stats["captures"], stats["asked"], stats["failed"]) == (3, 3, 0)
     shown = sent[0]["state"]
-    assert shown["gist"] == f"{bob}'s build broke again." and "Bob" not in str(sent)   # names go out as sent
+    assert shown["gist"] == "Bob's build broke again."
     assert "build broke again" in shown["lines"] and shown["lines"] in shown["context"]
 
-    s = gate.summary(pipe, client, read, scrubber.policy)
+    s = gate.summary(pipe, client, read)
     assert s["decisions"] == {"keep": 1, "repair": 1, "drop": 1}
     assert s["by_check"]["overstates"]["likeliest"][0]["gist"] == "Builds always break."
     assert s["by_check"]["two_points"]["at_cut"] == round(1 / 3, 3)   # flagged, and doesn't decide
 
     # Its cuts: a sheet of what Jev answered about, two models' drafts, my review of where they disagree.
     folder = tmp_path / "gate-1"
-    out = gate_audit.write(pipe, folder, client, read, scrubber.policy, size=4)
+    out = gate_audit.write(pipe, folder, client, read, size=4)
     assert out["by_set"] == {"flagged": 2, "not_flagged": 1}
-    assert "Bob" in (folder / "sheet.md").read_text()   # the sheet is mine to read: names as said
+    assert "Bob" in (folder / "sheet.md").read_text()
 
     def marks(lenient):
         def answer(text):
@@ -85,8 +83,8 @@ def test_the_gate_keeps_repairs_or_drops_each_capture_from_what_jev_says_of_it(p
 
     for model, lenient in (("claude-opus-5-5", False), ("claude-sonnet-5-5", True)):
         drafter = Drafter(marks(lenient))
-        d = gate_audit.draft(pipe, folder, drafter, model, "low", scrubber, 20.0)
-        assert d["drafted"] == 3 and "Bob" not in str(drafter.calls)
+        d = gate_audit.draft(pipe, folder, drafter, model, "low", 20.0)
+        assert d["drafted"] == 3
     r = gate_audit.review(folder)
     assert r["to_review"] == 1
     review = (folder / "review.md").read_text()
@@ -97,4 +95,4 @@ def test_the_gate_keeps_repairs_or_drops_each_capture_from_what_jev_says_of_it(p
     assert s["labels"] == {"from_me": 1, "from_drafts": 5, "missing": 0}
     assert (s["repair"]["marked_past_or_unclear"], s["repair"]["auc"], s["repair"]["suggested_cut"]) == (1, 1.0, 0.9)
     assert (s["drop"]["marked_drop"], s["drop"]["auc"], s["drop"]["suggested_cut"]) == (1, 1.0, 0.3)
-    assert gate.run(pipe, client, read, scrubber.policy, scrubber, 20.0)["asked"] == 0 and len(sent) == 3
+    assert gate.run(pipe, client, read, 20.0)["asked"] == 0 and len(sent) == 3

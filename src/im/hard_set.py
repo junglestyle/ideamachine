@@ -3,9 +3,8 @@ earlier read shows the speech is hard, beside the random trial sample (`trial.sa
 ones. Each case is a rule over the captures already made; an episode is picked once, by the first case that picks
 it, in a fixed shuffle so the same seed picks the same set.
 
-What's written is each episode exactly as extraction would send it (`egress.build`), under policy C by default:
-speakers and names said are pseudonymized, so the set can go to another model for review. The folder quotes people:
-keep it in saved/.
+What's written is each episode exactly as extraction would send it (`egress.build`): speakers are pseudonymized,
+names said go out as said. The folder quotes people: keep it in saved/.
 """
 
 import hashlib
@@ -75,7 +74,7 @@ def pick(conn, per_case: int = PER_CASE, seed: int = 1) -> tuple[list[dict], dic
     return out, available
 
 
-def write(conn, folder: Path, per_case: int = PER_CASE, seed: int = 1, scrubber=None, controls: int = 0) -> dict:
+def write(conn, folder: Path, per_case: int = PER_CASE, seed: int = 1, controls: int = 0) -> dict:
     """Each picked episode as extraction would send it, one file per episode named by its case, and index.json
     saying which case and which earlier capture picked it. `controls` adds that many episodes from the trials' random
     sample (`trial.sample`: the episodes every trial reads), leaving out any already picked. Won't write over a set."""
@@ -92,7 +91,7 @@ def write(conn, folder: Path, per_case: int = PER_CASE, seed: int = 1, scrubber=
     for p in picked:
         n[p["case"]] = n.get(p["case"], 0) + 1
         name = f"{p['case']}-{n[p['case']]:02d}.txt"
-        payload = egress.build(conn, p["episode_id"], scrubber)
+        payload = egress.build(conn, p["episode_id"])
         (folder / name).write_text(payload.text + "\n")
         why = CASES[p["case"]][0] if p["case"] in CASES else "a control: from the trials' random sample"
         index.append({"file": name, "case": p["case"], "why": why, "episode_id": p["episode_id"],

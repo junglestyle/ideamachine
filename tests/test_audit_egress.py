@@ -1,12 +1,11 @@
-"""What the audits send: under policy C every request a sheet, a draft or the analogy spike makes goes out with the
-names said pseudonymized, and what comes back is mapped back; each request is one egress row, holding exactly what
-was sent and the segments behind the clusters it showed."""
+"""What the audits send: every request a sheet, a draft or the analogy spike makes goes out under policy B, names
+said as said, and is one egress row, holding exactly what was sent and the segments behind the clusters it showed."""
 
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from im import analogy_spike, edge_audit, names, probe_audit
+from im import analogy_spike, edge_audit, egress, probe_audit
 
 from test_edge_audit import NAMED, fill, named_clusters  # noqa: F401 (fixture)
 from test_lattice import seeded  # noqa: F401 (fixture)
@@ -14,17 +13,9 @@ from test_probe_audit import every_pair, fake_jev
 from test_probe_audit import fill as fill_probe
 from test_triage import HashEmbedder
 
-KEY = b"k"
-BOB = names.token("Bob", KEY)
-
-
-def scrubber():
-    return names.Scrubber(KEY, known=["Bob"])
-
-
 class FakeChat:
-    """Answers any audit's question, naming in its reasoning the first pseudonym it was shown, as a model would
-    name the person; and records every request."""
+    """Answers any audit's question, naming Bob in its reasoning if it was shown him, as a model would; and records
+    every request."""
 
     def __init__(self):
         self.calls = []
@@ -36,7 +27,7 @@ class FakeChat:
     def create(self, **kw):
         self.calls.append(kw)
         text = kw["messages"][0]["content"]
-        who = m[0] if (m := names.TOKEN.search(text)) else "someone"
+        who = "Bob" if "Bob" in text else "someone"
         props = kw["output_config"]["format"]["schema"]["properties"]
         n = text.count("\n")   # a batch: "Ideas:" and then one line per idea
         if "answer" in props:
@@ -67,117 +58,112 @@ def last_egress(conn) -> int:
 
 
 def assert_logged(conn, since: int, requests: list[tuple[str, list]]) -> None:
-    """One egress row per request, in order: what was sent, the segments behind the clusters it showed, policy C."""
+    """One egress row per request, in order: what was sent, the segments behind the clusters it showed, policy B."""
     rows = conn.execute("""SELECT payload, segment_ids, privacy_policy_version FROM im.egress_log
                            WHERE egress_id > %s ORDER BY egress_id""", (since,)).fetchall()
     assert [(p, sorted(s), policy) for p, s, policy in rows] == \
-        [(text, said_on(conn, ideas), scrubber().policy) for text, ideas in requests]
+        [(text, said_on(conn, ideas), egress.POLICY_VERSION) for text, ideas in requests]
     assert any(s for _, s, _ in rows)   # some showed something said, so a row without its segments shows
 
 
-def assert_pseudonymized(sent: list[str]) -> None:
-    assert not any("Bob" in t for t in sent) and any(BOB in t for t in sent)   # he was there, under his pseudonym
+def assert_named(sent: list[str]) -> None:
+    assert any("Bob" in t for t in sent)   # his name went out as said
 
 
-def test_a_b4_draft_sends_names_pseudonymized_and_maps_its_cases_back(named_clusters, tmp_path):  # noqa: F811
+def test_a_b4_draft_sends_names_as_said(named_clusters, tmp_path):  # noqa: F811
     conn = named_clusters
     edge_audit.write(conn, tmp_path)
     assert NAMED in (tmp_path / "sheet.md").read_text()
     fill(tmp_path, lambda p: ("rel", ""))
     since, claude = last_egress(conn), FakeChat()
-    out = edge_audit.draft(conn, claude, tmp_path, scrubber=scrubber())
-    assert out["policy"] == scrubber().policy
-    assert_pseudonymized(claude.sent())
+    out = edge_audit.draft(conn, claude, tmp_path)
+    assert_named(claude.sent())
     pairs = [p for _, p in sorted(json.loads((tmp_path / "key.json").read_text())["pairs"].items(),
                                   key=lambda kv: int(kv[0]))]
     assert_logged(conn, since, [(t, p["ideas"]) for t, p in zip(claude.sent(), pairs, strict=True)])
     draft = json.loads(Path(out["draft"]).read_text()).values()
     for field, said in (("analogy", "Bob moves"), ("why", "Bob belongs")):
-        assert said in [d[field] for d in draft] and not any(BOB in d[field] for d in draft)
+        assert said in [d[field] for d in draft]
 
 
-def test_a_jev_b4_draft_sends_names_pseudonymized(named_clusters, tmp_path):  # noqa: F811
+def test_a_jev_b4_draft_sends_names_as_said(named_clusters, tmp_path):  # noqa: F811
     conn = named_clusters
     edge_audit.write(conn, tmp_path)
     fill(tmp_path, lambda p: ("rel", ""))
     since, (client, sent) = last_egress(conn), fake_jev()
-    out = edge_audit.draft(conn, client, tmp_path, "jev-1.14.0", scrubber=scrubber())
-    assert out["policy"] == scrubber().policy
-    assert_pseudonymized([json.dumps(b["state"]) for b in sent])
+    edge_audit.draft(conn, client, tmp_path, "jev-1.14.0")
+    assert_named([json.dumps(b["state"]) for b in sent])
     pairs = [p for _, p in sorted(json.loads((tmp_path / "key.json").read_text())["pairs"].items(),
                                   key=lambda kv: int(kv[0]))]
     assert_logged(conn, since, [(json.dumps(b), p["ideas"]) for b, p in zip(sent, pairs, strict=True)])
 
 
-def test_a_tension_sheet_and_its_draft_send_names_pseudonymized(named_clusters, tmp_path):  # noqa: F811
+def test_a_tension_sheet_and_its_draft_send_names_as_said(named_clusters, tmp_path):  # noqa: F811
     conn = named_clusters
     since, proposer = last_egress(conn), FakeChat()
-    probe_audit.write(conn, proposer, None, "tension", tmp_path, scrubber=scrubber())
+    probe_audit.write(conn, proposer, None, "tension", tmp_path)
     (picks,) = proposer.sent()   # the model set: one request reading every one of my clusters
-    assert_pseudonymized([picks])
+    assert_named([picks])
     mine = [r[0] for r in edge_audit._clusters(conn) if r[2]]
     assert_logged(conn, since, [(picks, mine)])
-    # Its reasons come back with his name (which of its pairs the sheet draws depends on the clusters' ids).
-    assert [p["why"] for p in probe_audit.picks(conn, FakeChat(), "tension", mine, scrubber=scrubber())] == \
-        ["Bob pulls", "Bob again"]
+    # Its reasons come back as given (which of its pairs the sheet draws depends on the clusters' ids).
+    assert [p["why"] for p in probe_audit.picks(conn, FakeChat(), "tension", mine)] == ["Bob pulls", "Bob again"]
     key = json.loads((tmp_path / "key.json").read_text())
 
     fill_probe(tmp_path, lambda p: "no")
     since, claude = last_egress(conn), FakeChat()
-    d = probe_audit.draft(conn, claude, tmp_path, "claude-opus-5-5", scrubber=scrubber())
-    assert d["policy"] == scrubber().policy
-    assert_pseudonymized(claude.sent())
+    d = probe_audit.draft(conn, claude, tmp_path, "claude-opus-5-5")
+    assert_named(claude.sent())
     pairs = [p for _, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0]))]
     assert_logged(conn, since, [(t, p["ideas"]) for t, p in zip(claude.sent(), pairs, strict=True)])
     whys = [a["why"] for a in json.loads(Path(d["draft"]).read_text()).values()]
-    assert "Bob pulls" in whys and not any(BOB in w for w in whys)
+    assert "Bob pulls" in whys
 
 
-def test_an_analogy_sheets_facets_send_names_pseudonymized(named_clusters, tmp_path):  # noqa: F811
+def test_an_analogy_sheets_facets_send_names_as_said(named_clusters, tmp_path):  # noqa: F811
     conn = named_clusters
     since, claude = last_egress(conn), FakeChat()
-    probe_audit.write(conn, claude, HashEmbedder(), "analogy", tmp_path, only="facets", scrubber=scrubber())
+    probe_audit.write(conn, claude, HashEmbedder(), "analogy", tmp_path, only="facets")
     (batch,) = claude.sent()   # every one of my clusters, in one batch
-    assert_pseudonymized([batch])
+    assert_named([batch])
     mine = [r[0] for r in edge_audit._clusters(conn) if r[2]]
     assert_logged(conn, since, [(batch, mine)])
     lines = [s for structures in json.loads((tmp_path / "facets.json").read_text()).values() for s in structures]
-    assert any(s.startswith("Bob line") for s in lines) and not any(BOB in s for s in lines)
+    assert any(s.startswith("Bob line") for s in lines)
 
 
-def test_jevs_pool_sends_names_pseudonymized(named_clusters, tmp_path, monkeypatch):  # noqa: F811
+def test_jevs_pool_sends_names_as_said(named_clusters, tmp_path, monkeypatch):  # noqa: F811
     conn = named_clusters
     monkeypatch.setattr(probe_audit, "JEV_WORKERS", 1)   # one at a time: sent, logged and answered in order
     pairs = every_pair(conn)
     since, (client, sent) = last_egress(conn), fake_jev()
-    probe_audit.jev_pool(conn, client, scrubber(), pairs, tmp_path)
-    assert_pseudonymized([json.dumps(b["state"]) for b in sent])
+    probe_audit.jev_pool(conn, client, pairs, tmp_path)
+    assert_named([json.dumps(b["state"]) for b in sent])
     assert_logged(conn, since, [(json.dumps(b), p["ideas"]) for b, p in zip(sent, pairs, strict=True)])
 
 
-def test_a_jev_draft_sends_names_pseudonymized(named_clusters, tmp_path):  # noqa: F811
+def test_a_jev_draft_sends_names_as_said(named_clusters, tmp_path):  # noqa: F811
     conn = named_clusters
     probe_audit.write(conn, FakeChat(), None, "tension", tmp_path)
     fill_probe(tmp_path, lambda p: "no")
     since, (client, sent) = last_egress(conn), fake_jev()
-    d = probe_audit.draft(conn, client, tmp_path, "jev-1.14.0", scrubber=scrubber())
-    assert d["policy"] == scrubber().policy
-    assert_pseudonymized([json.dumps(b["state"]) for b in sent])
+    probe_audit.draft(conn, client, tmp_path, "jev-1.14.0")
+    assert_named([json.dumps(b["state"]) for b in sent])
     key = json.loads((tmp_path / "key.json").read_text())
     pairs = [p for _, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0]))]
     assert_logged(conn, since, [(json.dumps(b), p["ideas"]) for b, p in zip(sent, pairs, strict=True)])
 
 
-def test_the_analogy_spike_sends_names_pseudonymized(named_clusters, tmp_path):  # noqa: F811
+def test_the_analogy_spike_sends_names_as_said(named_clusters, tmp_path):  # noqa: F811
     conn = named_clusters
     edge_audit.write(conn, tmp_path, size=2)
     fill(tmp_path, lambda p: ("none", "analogy: same move"))
     since, claude = last_egress(conn), FakeChat()
-    analogy_spike.run(conn, claude, HashEmbedder(), tmp_path, others=10, scrubber=scrubber())
+    analogy_spike.run(conn, claude, HashEmbedder(), tmp_path, others=10)
     (batch,) = claude.sent()   # the pairs' clusters and every other, in one batch
-    assert_pseudonymized([batch])
+    assert_named([batch])
     shown = [i for (i,) in conn.execute("""SELECT c.idea_id::text FROM pub.cards c
                                            JOIN im.idea_embeddings e USING (idea_id)""")]
     assert_logged(conn, since, [(batch, shown)])
     structures = json.loads((tmp_path / "structures.json").read_text()).values()
-    assert any(s.startswith("Bob acts") for s in structures) and not any(BOB in s for s in structures)
+    assert any(s.startswith("Bob acts") for s in structures)

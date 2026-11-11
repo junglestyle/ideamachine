@@ -1,6 +1,6 @@
 """What code can check about a capture, against the transcript the model was sent (decision 0012).
 
-Run on the model's answer as it came, before names are mapped back: the quote must be in the lines the model saw.
+Run on the model's answer as it came: the quote must be in the lines the model saw.
 Each check that fails adds a code to the capture's list; an empty list passes. Trials record them; once extraction v5
 is live, a capture with any of FAIL is refused and its episode read again on the stronger model.
 
@@ -9,17 +9,14 @@ is live, a capture with any of FAIL is refused and its episode read again on the
   diagnostic: v4's "word for word" rate counted those.
 - At least one cited line is mine.
 - Each mishearing's `heard` is in the quote and its `meant` in the reading.
-- A pseudonym in the answer is one the transcript had, so it maps back to a name.
 - Quote, reading and gist aren't empty.
 """
 
 import re
 
-from im.names import TOKEN
-
 LINE = re.compile(r"^\[(\d+)\] ([^:]+): (.*)$")
 FAIL = ("quote_not_in_transcript", "quote_not_mine", "quote_inexact", "quote_lines_not_cited", "cites_none_of_mine",
-        "mishearing_not_in_quote", "mishearing_not_in_reading", "unknown_pseudonym", "empty_field")
+        "mishearing_not_in_quote", "mishearing_not_in_reading", "empty_field")
 
 
 def lines_of(payload_text: str) -> dict[int, tuple[str, str]]:
@@ -95,9 +92,4 @@ def check(lines: dict[int, tuple[str, str]], item: dict) -> list[str]:
             failed.add("mishearing_not_in_quote")
         if _ws(m.get("meant", "")) not in _ws(item.get("reading", "")):
             failed.add("mishearing_not_in_reading")
-    sent = set(TOKEN.findall(" ".join(t for _, t in lines.values())))
-    said = " ".join([item.get(k, "") for k in ("attributed_to", "reading", "gist")]
-                    + [m.get("meant", "") for m in item.get("mishearings", [])])
-    if set(TOKEN.findall(said)) - sent:
-        failed.add("unknown_pseudonym")
     return [c for c in FAIL if c in failed]

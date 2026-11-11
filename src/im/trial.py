@@ -2,7 +2,7 @@
 
 Every model reads the same sample of current episodes (ordered by a hash of their id, so a sample of 100 is the
 first 100 of a sample of 200), through the same egress path as extraction: logged, counted toward the monthly cap,
-and under policy B or C. What it captures is kept in im.prompt_trials, never in im.items, so it reaches nothing.
+and under policy B. What it captures is kept in im.prompt_trials, never in im.items, so it reaches nothing.
 
 The report scores a candidate against a reference's read of the same payloads (Opus, normally): the share of the
 reference's captures it also found, matched the way verdicts are carried forward (overlapping segments,
@@ -47,20 +47,19 @@ def sample(conn, n: int = SAMPLE) -> list:
 
 
 def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str = "medium",
-        monthly_cap_usd: float = 20.0, limit: int | None = None, n: int = SAMPLE, scrubber=None,
+        monthly_cap_usd: float = 20.0, limit: int | None = None, n: int = SAMPLE,
         replicate: int = 1, schema: dict = extract.SCHEMA, max_tokens: int | None = None) -> dict:
     """Send the sampled episodes this model hasn't read yet under this prompt and policy (or whose payload changed).
     `schema` is the prompt's (extract.schema_for); `max_tokens`, each request's output budget, isn't part of the
     trial's version."""
     pv = version(model, effort, system, replicate, schema)
-    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
+    policy = egress.POLICY_VERSION
     done = {r[0]: r[1] for r in conn.execute(
         """SELECT episode_id, payload_sha256 FROM im.prompt_trials
            WHERE prompt_version = %s AND model = %s AND privacy_policy_version = %s""", (pv, model, policy))}
-    todo = [p for p in (egress.build(conn, eid, scrubber) for eid in sample(conn, n))
-            if done.get(p.episode_id) != p.sha256]
-    stats = {"model": model, "prompt_version": pv, "policy": policy, "pending": len(todo), "read": 0, "failed": 0,
-             "cost_usd": 0.0, "stopped": None}
+    todo = [p for p in (egress.build(conn, eid) for eid in sample(conn, n)) if done.get(p.episode_id) != p.sha256]
+    stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "failed": 0, "cost_usd": 0.0,
+             "stopped": None}
     for p in todo[:limit] if limit else todo:
         try:
             a = egress.ask(conn, client, model, effort, system, schema, p.text, segment_ids=p.segment_ids,
@@ -95,12 +94,13 @@ def version(model: str, effort: str, system: str, replicate: int = 1, schema: di
     return pv if replicate == 1 else f"{pv}~{replicate}"
 
 
-def _reads(conn, pv: str, model: str, policy: str) -> dict:
-    """episode_id -> (payload sha, items, cost) for one model's trial."""
+def _reads(conn, pv: str, model: str) -> dict:
+    """episode_id -> (payload sha, items, cost) for one model's trial, under the policy requests go out under now."""
     return {eid: (sha, items, float(cost) if cost is not None else None) for eid, sha, items, cost in conn.execute(
         """SELECT t.episode_id, t.payload_sha256, t.items, g.cost_usd FROM im.prompt_trials t
            JOIN im.egress_log g USING (egress_id)
-           WHERE t.prompt_version = %s AND t.model = %s AND t.privacy_policy_version = %s""", (pv, model, policy))}
+           WHERE t.prompt_version = %s AND t.model = %s AND t.privacy_policy_version = %s""",
+        (pv, model, egress.POLICY_VERSION))}
 
 
 def _matched(ref: list[dict], cand: list[dict]) -> dict:
@@ -137,11 +137,10 @@ def _same_point(ref: list[dict], cand: list[dict], m: dict, answers: dict) -> di
     return out
 
 
-def same_point(conn, client, candidate: tuple[str, str], reference: tuple[str, str], policy: str, scrubber,
-               monthly_cap_usd: float) -> dict:
-    """Ask Jev about every pair quote matching left apart in the episodes both read (see the module's docstring),
-    names said pseudonymized by `scrubber` (None under policy B); answers already kept aren't asked again."""
-    cand, ref = _reads(conn, *candidate, policy), _reads(conn, *reference, policy)
+def same_point(conn, client, candidate: tuple[str, str], reference: tuple[str, str], monthly_cap_usd: float) -> dict:
+    """Ask Jev about every pair quote matching left apart in the episodes both read (see the module's docstring);
+    answers already kept aren't asked again."""
+    cand, ref = _reads(conn, *candidate), _reads(conn, *reference)
     stats = {"pairs": 0, "asked": 0, "failed": 0, "cost_usd": 0.0, "stopped": None}
     for eid in (e for e in cand if e in ref and cand[e][0] == ref[e][0]):
         r_items, c_items = ref[eid][1], cand[eid][1]
@@ -149,15 +148,14 @@ def same_point(conn, client, candidate: tuple[str, str], reference: tuple[str, s
             a, b = r_items[i], c_items[j]
 
             def state(a=a, b=b):
-                texts = [a["quote"], a["gist"], b["quote"], b["gist"]]
-                aq, ag, bq, bg = scrubber.scrub(texts)[0] if scrubber else texts
-                return {"a": {"quote": aq, "summary": ag}, "b": {"quote": bq, "summary": bg}}
+                return {"a": {"quote": a["quote"], "summary": a["gist"]},
+                        "b": {"quote": b["quote"], "summary": b["gist"]}}
 
             stats["pairs"] += 1
             try:
                 got, cost, sent = jev.ask(conn, client, "match", _pair_key(a, b), state,
                                           segment_ids=a["source_segment_ids"] + b["source_segment_ids"],
-                                          policy=policy, monthly_cap_usd=monthly_cap_usd)
+                                          monthly_cap_usd=monthly_cap_usd)
             except llm.Stop as e:
                 stats["stopped"] = str(e)[:200]
                 break
@@ -212,12 +210,11 @@ def by_reach(conn, found: list) -> dict:
     return {r: {"captures": t, "recall": round(f / t, 3) if t else None} for r, (t, f) in n.items()}
 
 
-def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy: str,
-           same: dict | None = None) -> dict:
+def report(conn, candidate: tuple[str, str], reference: tuple[str, str], same: dict | None = None) -> dict:
     """How a candidate's captures compare with a reference's, on the episodes both read with the same payload.
     `candidate` and `reference` are (prompt_version, model). With `same` (Jev's kept answers, jev.kept), a pair
     making the same point counts as found too, and `found_by_same_point` says how many did."""
-    cand, ref = _reads(conn, *candidate, policy), _reads(conn, *reference, policy)
+    cand, ref = _reads(conn, *candidate), _reads(conn, *reference)
     both = [eid for eid in cand if eid in ref and cand[eid][0] == ref[eid][0]]
     n = {"reference_captures": 0, "found": 0, "candidate_captures": 0, "extra": 0,
          "episodes_reference_captured_in": 0, "of_those_candidate_captured_nothing": 0} \
@@ -249,7 +246,7 @@ def report(conn, candidate: tuple[str, str], reference: tuple[str, str], policy:
         extra += [f"{it.get('kind', '-')}: {it['quote']}" for j, it in enumerate(c_items) if j not in used]
     rate = lambda a, b: round(a / b, 3) if b else None  # noqa: E731
     cost = lambda reads: sum(reads[e][2] or 0.0 for e in both)  # noqa: E731
-    return {"candidate": candidate[1], "reference": reference[1], "policy": policy, "episodes": len(both),
+    return {"candidate": candidate[1], "reference": reference[1], "episodes": len(both),
             "candidate_only_read": len(cand) - len(both)} | n | {
         "recall": rate(n["found"], n["reference_captures"]),
         "recall_by_kind": {k: rate(f, t) for k, (t, f) in sorted(by_kind.items())},

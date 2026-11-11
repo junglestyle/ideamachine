@@ -1,8 +1,8 @@
 # 0008: Other providers' models, and names said pseudonymized
 
-_2026-11-04. Status: accepted for trials; the live switch waits on the checklist below; amended 2026-11-11 (public
-figures, words that aren't names). Amends [0004](0004-claude-extraction.md)'s privacy policy and B3's method in
-[ROADMAP-v2.md](../ROADMAP-v2.md); my decision._
+_2026-11-04. Status: accepted; amended 2026-11-11 (public figures, words that aren't names; zero data retention;
+policy C retired, which closes the live-switch checklist below). Amends [0004](0004-claude-extraction.md)'s privacy
+policy and B3's method in [ROADMAP-v2.md](../ROADMAP-v2.md); my decision._
 
 ## Context
 
@@ -102,4 +102,25 @@ model, so nothing is read again, and the egress log records who served each requ
 only names said, while everyone's words go out under both B and C; ZDR protects all of it.
 
 **It goes on when the Anthropic credits end (2026-11-25).** Until then Claude is prepaid through Anthropic, and
-policy C stays as it is. Whether names still need pseudonymizing once every request is ZDR is decided then.
+~~policy C stays as it is. Whether names still need pseudonymizing once every request is ZDR is decided then.~~
+decided the same day: policy C is retired (below).
+
+## Amendment (2026-11-11): policy C retired
+
+_My decision._
+
+**Names said go out as said, everywhere** (policy B, `egress.POLICY_VERSION`). Speakers are still pseudonymized
+(`me`, `unknown`, `S1`...), and every request is still logged with what it sent. Policy C, GLiNER, the names cache
+(`im.segment_names`, dropped by migration 056), `IM_NAME_KEY`, the names role and the dev box's GPU job for names
+are gone, and so are `[egress] names` and `public_names`, and `my_names` with them.
+
+Why: GLiNER was a burden and a problem. It was a second model to pin, bake into the image, cache per segment and run
+on a GPU for backlogs, and it took tools and terms for names (hence the list of public figures and the words that
+aren't names, both this same day). And policy C only ever protected names: everyone's words went out under C as
+under B. Zero data retention protects all of it, from 2026-11-25 when Claude moves to OpenRouter (above); until
+then Anthropic keeps requests for 30 days, which I accept.
+
+The live-switch checklist above is closed: no stage pseudonymizes names. Rows already read under C keep its version
+(`C1;...`) as history; a trial, draft or extraction read under C isn't read under B, so the rebuild database, read
+under C with v5.3, reads its episodes once more under B. Audit drafts carry the policy in their file name (`-B1`); a
+draft without one was made under C.

@@ -126,57 +126,46 @@ def _summary(conn, idea_id: str) -> str:
 
 
 def _ask(conn, client, model: str, effort: str, system: str, schema: dict, text: str, ideas: list[str],
-         monthly_cap_usd: float, scrubber=None) -> tuple[dict | None, dict]:
+         monthly_cap_usd: float) -> dict | None:
     """One request, logged in the egress log with the segments of the clusters it shows: its answer, or None when
-    it was refused; and the map back from the names it pseudonymized, with a scrubber (policy C). A request that
-    failed stops the sheet before it's written, so a rerun can ask again rather than find a smaller sheet in the
-    folder."""
-    back: dict = {}
-    if scrubber:
-        (text,), back, _ = scrubber.scrub([text])
+    it was refused. A request that failed stops the sheet before it's written, so a rerun can ask again rather than
+    find a smaller sheet in the folder."""
     a = egress.ask(conn, client, model, effort, system, schema, text, segment_ids=egress.segments_of(conn, ideas),
-                   prompt_version=themes.version(system, schema, model, effort),
-                   policy=scrubber.policy if scrubber else egress.POLICY_VERSION, monthly_cap_usd=monthly_cap_usd)
+                   prompt_version=themes.version(system, schema, model, effort), monthly_cap_usd=monthly_cap_usd)
     if a.failed:
         raise SystemExit(f"{model} failed ({a.error}); no sheet written, run it again")
-    return a.data, back
+    return a.data
 
 
-def facets(conn, client, ids: list[str], folder: Path, monthly_cap_usd: float = 20.0,
-           scrubber=None) -> dict[str, list[str]]:
+def facets(conn, client, ids: list[str], folder: Path, monthly_cap_usd: float = 20.0) -> dict[str, list[str]]:
     """Each idea's structures, kept in facets.json as they come, so a rerun picks up where one stopped."""
-    from im import names
-
     path = folder / "facets.json"
     out = json.loads(path.read_text()) if path.exists() else {}
     todo = [i for i in ids if i not in out]
     for start in range(0, len(todo), FACET_BATCH):
         batch = todo[start:start + FACET_BATCH]
         text = "Ideas:\n" + "\n".join(f"{n}. {_summary(conn, i)}" for n, i in enumerate(batch, 1))
-        answer, back = _ask(conn, client, FACET_MODEL, FACET_EFFORT, FACET_SYSTEM, FACET_SCHEMA, text, batch,
-                            monthly_cap_usd, scrubber)
+        answer = _ask(conn, client, FACET_MODEL, FACET_EFFORT, FACET_SYSTEM, FACET_SCHEMA, text, batch,
+                      monthly_cap_usd)
         for row in (answer or {}).get("ideas", []):
             if 1 <= row["idea"] <= len(batch) and row["structures"]:
-                out[batch[row["idea"] - 1]] = [names.unscrub(s, back) for s in row["structures"][:FACETS]]
+                out[batch[row["idea"] - 1]] = row["structures"][:FACETS]
         path.write_text(json.dumps(out, indent=2))
     return out
 
 
-def picks(conn, client, question: str, ids: list[str], n: int = PICKS, monthly_cap_usd: float = 20.0,
-          scrubber=None) -> list[dict]:
+def picks(conn, client, question: str, ids: list[str], n: int = PICKS, monthly_cap_usd: float = 20.0) -> list[dict]:
     """A model's proposed pairs, reading every idea at once: [{"ideas": [a, b], "why": ...}], a < b."""
-    from im import names
-
     text = "Ideas:\n" + "\n".join(f"{k}. {_summary(conn, i)}" for k, i in enumerate(ids, 1))
-    answer, back = _ask(conn, client, PICK_MODEL, PICK_EFFORT, PICK_SYSTEM[question].format(n=n), PICK_SCHEMA, text,
-                        ids, monthly_cap_usd, scrubber)
+    answer = _ask(conn, client, PICK_MODEL, PICK_EFFORT, PICK_SYSTEM[question].format(n=n), PICK_SCHEMA, text, ids,
+                  monthly_cap_usd)
     out, seen = [], set()
     for p in (answer or {"pairs": []})["pairs"]:
         if 1 <= p["a"] <= len(ids) and 1 <= p["b"] <= len(ids) and p["a"] != p["b"]:
             pair = tuple(sorted((ids[p["a"] - 1], ids[p["b"] - 1])))
             if pair not in seen:
                 seen.add(pair)
-                out.append({"ideas": list(pair), "why": names.unscrub(p["why"], back)})
+                out.append({"ideas": list(pair), "why": p["why"]})
     return out
 
 
@@ -212,7 +201,7 @@ def _facet_pairs(embedder, structures: dict[str, list[str]], far: set[tuple]) ->
             for p, (s, la, lb) in sorted(best.items(), key=lambda kv: -kv[1][0])]
 
 
-def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path,
+def jev_pool(conn, client, pairs: list[dict], folder: Path,
              monthly_cap_usd: float = 20.0) -> dict[str, dict]:
     """Jev's answer to every analogy question about each pair, "a b" -> {question: p}, kept in jev-pool.json as they
     come (ask_all)."""
@@ -224,17 +213,15 @@ def jev_pool(conn, client, scrubber, pairs: list[dict], folder: Path,
         return sides[i]
 
     def state(p):
-        s = {"a": side(p["ideas"][0]), "b": side(p["ideas"][1])}
-        return _scrubbed(s, scrubber)[0] if scrubber else s
+        return {"a": side(p["ideas"][0]), "b": side(p["ideas"][1])}
 
     jobs = {" ".join(p["ideas"]): (lambda p=p: state(p),
                                    lambda p=p: p.get("segments") or egress.segments_of(conn, p["ideas"]))
             for p in pairs}
-    return ask_all(conn, client, "analogy", jobs, folder / "jev-pool.json",
-                   scrubber.policy if scrubber else egress.POLICY_VERSION, monthly_cap_usd)
+    return ask_all(conn, client, "analogy", jobs, folder / "jev-pool.json", monthly_cap_usd)
 
 
-def ask_all(conn, client, question: str, jobs: dict, path: Path, policy: str, monthly_cap_usd: float,
+def ask_all(conn, client, question: str, jobs: dict, path: Path, monthly_cap_usd: float,
             probes: bool = True) -> dict[str, dict]:
     """Jev's answer to `question` (and its probes) for every job, key -> {name: p}, JEV_WORKERS requests at a time,
     each logged by its worker as it's answered. `jobs` is key -> (the state, its segment ids), each a function, so
@@ -258,7 +245,7 @@ def ask_all(conn, client, question: str, jobs: dict, path: Path, policy: str, mo
         kept.add(f)
 
     workers = ThreadPoolExecutor(JEV_WORKERS)
-    futures = {workers.submit(_ask_jev, conn, client, question, state, probes, segs, policy, monthly_cap_usd): key
+    futures = {workers.submit(_ask_jev, conn, client, question, state, probes, segs, monthly_cap_usd): key
                for key, state, segs in todo}
     try:
         for n, f in enumerate(as_completed(futures), 1):
@@ -323,11 +310,10 @@ def earlier(folders: list[Path]) -> set[tuple]:
 
 
 def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, only: str | None = None,
-          size: int | None = None, exclude: set | None = None, jev=None, scrubber=None,
+          size: int | None = None, exclude: set | None = None, jev=None,
           pool_size: int = JEV_POOL, monthly_cap_usd: float = 20.0) -> tuple[str, dict]:
     """`only` draws every pair from one set (e.g. `model`, the one that found tensions), `size` of them; `exclude`
-    leaves out pairs already asked about. `jev` (a jev.Jev) is for the analogy sheet's jev set; with a `scrubber`
-    (policy C), every request the sheet makes, to Claude or Jev, goes out with names said pseudonymized."""
+    leaves out pairs already asked about. `jev` (a jev.Jev) is for the analogy sheet's jev set."""
     rng = random.Random(seed)
     rows = edge_audit._clusters(conn)
     mine = [r[0] for r in rows if r[2]]
@@ -343,14 +329,14 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
         apart = unrelated(rows)
         far = {tuple(p["ideas"]) for p in apart}
         if wanted("facets"):
-            proposed["facets"] = _facet_pairs(embedder, facets(conn, client, mine, folder, monthly_cap_usd, scrubber),
+            proposed["facets"] = _facet_pairs(embedder, facets(conn, client, mine, folder, monthly_cap_usd),
                                               far)
             tops["facets"] = {tuple(p["ideas"]) for p in proposed["facets"][:TOP]}
         if wanted("jev"):
             if jev is None:
                 raise SystemExit("the jev set needs Jev (OPENROUTER_API_KEY)")
             sample = [p for p in apart if tuple(p["ideas"]) not in (exclude or set())]
-            answers = jev_pool(conn, jev, scrubber, rng.sample(sample, min(pool_size, len(sample))), folder,
+            answers = jev_pool(conn, jev, rng.sample(sample, min(pool_size, len(sample))), folder,
                                monthly_cap_usd)
             proposed["jev"], by_question = _jev_proposals(answers)
             tops |= by_question
@@ -361,7 +347,7 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
             if wanted(kind):
                 proposed[kind] = rng.sample(pool[kind], len(pool[kind]))
         if wanted("model"):
-            proposed["model"] = picks(conn, client, "tension", mine, n_picks, monthly_cap_usd, scrubber)
+            proposed["model"] = picks(conn, client, "tension", mine, n_picks, monthly_cap_usd)
     taken, picked = set(exclude or ()), []
     for kind, n in sizes.items():
         picked += [p | {"set": kind} for p in _limited(proposed[kind], n, taken)]
@@ -390,14 +376,14 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
 
 
 def write(conn, client, embedder, question: str, out: Path, seed: int = 9, only: str | None = None,
-          size: int | None = None, exclude_folders: list[Path] = (), jev=None, scrubber=None,
+          size: int | None = None, exclude_folders: list[Path] = (), jev=None,
           pool_size: int = JEV_POOL, monthly_cap_usd: float = 20.0) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     sheet, key = out / "sheet.md", out / "key.json"
     if sheet.exists() or key.exists():
         raise SystemExit(f"{out} already has a sheet; score it, or pick another folder")
     text, k = build(conn, client, embedder, question, out, seed, only, size, earlier(list(exclude_folders)), jev,
-                    scrubber, pool_size, monthly_cap_usd)
+                    pool_size, monthly_cap_usd)
     sheet.write_text(text)
     key.write_text(json.dumps(k, indent=2))
     sets = [p["set"] for p in k["pairs"].values()]
@@ -450,25 +436,7 @@ def _state(conn, question: str, p: dict, quotes_only: bool) -> dict:
     return sides
 
 
-def _scrubbed(state, scrubber):
-    """The state with names said pseudonymized in every string, consistently across them; and the map back."""
-    texts: list[str] = []
-
-    def walk(x, put):
-        if isinstance(x, dict):
-            return {k: walk(v, put) for k, v in x.items()}
-        if isinstance(x, list):
-            return [walk(v, put) for v in x]
-        if isinstance(x, str):
-            return put(x)
-        return x
-    walk(state, lambda t: texts.append(t) or t)
-    out, back, _ = scrubber.scrub(texts)
-    it = iter(out)
-    return walk(state, lambda t: next(it)), back
-
-
-def _ask_jev(conn, client, question: str, state: dict, probes: bool, segment_ids, policy: str,
+def _ask_jev(conn, client, question: str, state: dict, probes: bool, segment_ids,
              monthly_cap_usd: float) -> egress.Answer:
     """One Jev request by egress.send, logged with the segments of what it showed and versioned by the questions it
     asked (the deciding ones, and the probes when they went too); its data is the probabilities (jev.read)."""
@@ -478,10 +446,10 @@ def _ask_jev(conn, client, question: str, state: dict, probes: bool, segment_ids
     asked = json.dumps(body["questions"], sort_keys=True)
     return egress.send(conn, lambda: client.complete(body), model=client.model, payload=json.dumps(body),
                        segment_ids=segment_ids, prompt_version=themes.version(asked, {}, client.model, ""),
-                       policy=policy, monthly_cap_usd=monthly_cap_usd, read=lambda r: jev.read(question, r, probes))
+                       monthly_cap_usd=monthly_cap_usd, read=lambda r: jev.read(question, r, probes))
 
 
-def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: bool, probes: bool,
+def _draft_jev(conn, client, folder: Path, key: dict, quotes_only: bool, probes: bool,
                monthly_cap_usd: float) -> dict:
     """Jev drafts the sheet from structured state, one request of atomic Nouls per pair, combined in code."""
     from im import jev
@@ -489,8 +457,7 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
     question = key["benchmark"]
     asked = "".join(["-" + jev.QUESTION_SETS[question] if question in jev.QUESTION_SETS else "",
                      "-" + jev.PROBE_SET[question] if probes and question in jev.PROBE_SET else ""])
-    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
-    out_path = folder / (f"draft-{client.model}{asked}{edge_audit.policy_tag(policy)}"
+    out_path = folder / (f"draft-{client.model}{asked}{edge_audit.policy_tag()}"
                          f"{'-quotes' if quotes_only else ''}.json")
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     cost, failed, stopped = 0.0, [], None
@@ -498,11 +465,9 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
         if num in got:
             continue
         state = _state(conn, question, p, quotes_only)
-        if scrubber:
-            state, _ = _scrubbed(state, scrubber)
         try:
             a = _ask_jev(conn, client, question, state, probes,
-                         p.get("segments") or egress.segments_of(conn, p["ideas"]), policy, monthly_cap_usd)
+                         p.get("segments") or egress.segments_of(conn, p["ideas"]), monthly_cap_usd)
         except llm.Stop as e:
             stopped = str(e)[:200]
             break
@@ -513,27 +478,23 @@ def _draft_jev(conn, client, folder: Path, key: dict, scrubber, quotes_only: boo
         got[num] = {"answer": jev.answer(question, a.data["p"]), "why": "",
                     **{k: round(v, 3) for k, v in a.data.items()}}
         out_path.write_text(json.dumps(got, indent=2))
-    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 6), "policy": policy,
+    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 6),
             **({"failed": failed} if failed else {}), **({"stopped": stopped} if stopped else {})}
 
 
-def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=None, quotes_only: bool = False,
+def draft(conn, client, folder: Path, model: str, effort: str = "low", quotes_only: bool = False,
           probes: bool = False, monthly_cap_usd: float = 20.0) -> dict:
     """A model answers the sheet's question for every pair, blind to my marks, into
-    draft-<model>-<effort>[-<policy>].json (edge_audit.policy_tag), as it goes. Every request goes to the egress log;
-    with a scrubber (policy C), names said are pseudonymized first.
+    draft-<model>-<effort>-<policy>.json (edge_audit.policy_tag), as it goes. Every request goes to the egress log.
     A pair whose answer fails is logged and skipped, so a rerun asks again; the cap stops the draft.
     `quotes_only` leaves out Claude's summaries (into ...-quotes.json): a summary that says more than the quotes
     can manufacture the very relation asked about."""
-    from im import names
-
     key = json.loads((folder / "key.json").read_text())
     if model.startswith("jev"):
-        return _draft_jev(conn, client, folder, key, scrubber, quotes_only, probes, monthly_cap_usd)
+        return _draft_jev(conn, client, folder, key, quotes_only, probes, monthly_cap_usd)
     question = key["benchmark"]
     shown = edge_audit._pairs_as_shown((folder / "sheet.md").read_text())
-    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
-    out_path = folder / (f"draft-{model.replace('/', '_')}-{effort}{edge_audit.policy_tag(policy)}"
+    out_path = folder / (f"draft-{model.replace('/', '_')}-{effort}{edge_audit.policy_tag()}"
                          f"{'-quotes' if quotes_only else ''}.json")
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
     system = DRAFT_SYSTEM[question].replace(*QUOTES_ONLY) if quotes_only else DRAFT_SYSTEM[question]
@@ -544,14 +505,11 @@ def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         if num in got or num not in shown:
             continue
-        text, back = shown[num], {}
-        if scrubber:
-            (text,), back, _ = scrubber.scrub([text])
         try:
-            a = egress.ask(conn, client, model, effort, system, DRAFT_SCHEMA, text, max_tokens=4000,
+            a = egress.ask(conn, client, model, effort, system, DRAFT_SCHEMA, shown[num], max_tokens=4000,
                            # a summary sheet's item cites its own lines
                            segment_ids=p.get("segments") or egress.segments_of(conn, p["ideas"]),
-                           prompt_version=themes.version(system, DRAFT_SCHEMA, model, effort), policy=policy,
+                           prompt_version=themes.version(system, DRAFT_SCHEMA, model, effort),
                            monthly_cap_usd=monthly_cap_usd)
         except llm.Stop as e:
             stopped = str(e)[:200]
@@ -564,9 +522,8 @@ def draft(conn, client, folder: Path, model: str, effort: str = "low", scrubber=
             got[num] = {"answer": "unsure", "why": "", "refused": True}
         else:
             got[num] = a.data
-            got[num]["why"] = names.unscrub(got[num].get("why", ""), back)
         out_path.write_text(json.dumps(got, indent=2))
-    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4), "policy": policy,
+    return {"draft": str(out_path), "pairs": len(got), "cost_usd": round(cost, 4),
             **({"failed": failed} if failed else {}), **({"stopped": stopped} if stopped else {})}
 
 

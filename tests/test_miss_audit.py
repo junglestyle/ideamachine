@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from im import egress, extract, miss_audit, probe_audit, trial
+from im import extract, miss_audit, probe_audit, trial
 
 from helpers import run, table
 from test_carry import DATABASE
@@ -26,7 +26,7 @@ def test_a_misses_sheet_shows_the_references_solid_captures_the_candidate_missed
     replicate = (trial.version(opus, "medium", v3, 2), opus)
     sent = table(pipe, "SELECT count(*) FROM im.egress_log")
 
-    out = miss_audit.write(pipe, tmp_path, candidate, reference, replicate, egress.POLICY_VERSION)
+    out = miss_audit.write(pipe, tmp_path, candidate, reference, replicate)
     assert out["by_set"] == {"missed": 1, "found": 1}
     assert table(pipe, "SELECT count(*) FROM im.egress_log") == sent   # the sheet sends nothing
     sheet = (tmp_path / "sheet.md").read_text()
@@ -49,8 +49,7 @@ def test_a_misses_sheet_needs_the_references_second_read(pipe, cfg, stream, tmp_
     opus, sonnet = "claude-opus-5-5", "claude-sonnet-5-5"
     with pytest.raises(SystemExit, match="replicate"):
         miss_audit.write(pipe, tmp_path, (trial.version(sonnet, "medium", v3), sonnet),
-                         (trial.version(opus, "medium", v3), opus), (trial.version(opus, "medium", v3, 2), opus),
-                         egress.POLICY_VERSION)
+                         (trial.version(opus, "medium", v3), opus), (trial.version(opus, "medium", v3, 2), opus))
     assert not (tmp_path / "sheet.md").exists()
 
 
@@ -61,7 +60,7 @@ def test_a_both_ways_sheet_puts_what_only_one_model_caught_beside_what_both_did(
     trial.run(pipe, FakeClaude(both(DATABASE, "lockfile")), v3, model="claude-sonnet-5-5")
     opus, sonnet = "claude-opus-5-5", "claude-sonnet-5-5"
     out = miss_audit.write(pipe, tmp_path, (trial.version(sonnet, "medium", v3), sonnet),
-                           (trial.version(opus, "medium", v3), opus), None, egress.POLICY_VERSION)
+                           (trial.version(opus, "medium", v3), opus), None)
     assert out["by_set"] == {"candidate_only": 1, "reference_only": 1, "both": 1}
     key = json.loads((tmp_path / "key.json").read_text())
     assert {p["set"]: p["gist"] for p in key["pairs"].values()} == \

@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import os
 from pathlib import Path
 
 from im import config, db, fixtures, label, migrate, pipeline, projects, triage
@@ -127,9 +126,8 @@ def _run_stages(conn, cfg) -> dict:
 
 
 def _extract(conn, cfg) -> dict:
-    """Run extraction, or say why it couldn't run (no credentials, API down, no key to pseudonymize names with); the
-    run goes on either way. A stage stops itself, saying why, at the cap or when Claude can't answer or rejects the
-    credentials (llm.Stop)."""
+    """Run extraction, or say why it couldn't run (no credentials, API down); the run goes on either way. A stage
+    stops itself, saying why, at the cap or when Claude can't answer or rejects the credentials (llm.Stop)."""
     import anthropic
 
     from im import extract, llm
@@ -139,41 +137,25 @@ def _extract(conn, cfg) -> dict:
         return {"stopped": f"extract.prompt {x.prompt} is for `im trial` only; `im run` reads with "
                            f"{', '.join(extract.LIVE)}"}
     try:
-        scrubber = _extract_scrubber(conn, cfg, x.prompt)
-    except SystemExit as e:   # no key to pseudonymize names with
-        return {"stopped": str(e)}
-    try:
         client = llm.client_for(x.model, cfg.egress.zdr)
         return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
                                  extract.system_prompt(x.prompt, x.interests), x.max_tokens,
-                                 extract.schema_for(x.prompt), scrubber)
+                                 extract.schema_for(x.prompt))
     except (anthropic.AnthropicError, SystemExit) as e:  # e.g. no credentials configured at all
         return {"stopped": f"Claude unavailable: {e}"}
 
 
-def _extract_scrubber(conn, cfg, prompt: str):
-    """Policy C's scrubber for a prompt written for it, None for one that keeps policy B (extract.POLICY_B)."""
-    from im import extract, names
-
-    return None if prompt in extract.POLICY_B else names.for_trials(conn, cfg.egress)
-
-
 def _lattice(conn, cfg) -> dict:
-    """Match new captures into the lattice, or say why it couldn't run; the run goes on either way. Names said go out
-    pseudonymized (policy C)."""
+    """Match new captures into the lattice, or say why it couldn't run; the run goes on either way."""
     import anthropic
 
-    from im import lattice, llm, names
+    from im import lattice, llm
     from im.backends import SentenceEmbedder
 
     try:
-        scrubber = names.for_trials(conn, cfg.egress)
-    except SystemExit as e:   # no key to pseudonymize names with
-        return {"stopped": str(e)}
-    try:
         return lattice.match_stage(conn, llm.client_for(cfg.match.model, cfg.egress.zdr),
                                    SentenceEmbedder(cfg.lattice.embedding_model), cfg.extract.monthly_cap_usd,
-                                   cfg.lattice.max_items_per_run, cfg.match, scrubber)
+                                   cfg.lattice.max_items_per_run, cfg.match)
     except (anthropic.AnthropicError, SystemExit) as e:
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -197,15 +179,14 @@ def _themes(conn, cfg) -> dict:
 
 
 def _sensitivity(conn, cfg) -> dict:
-    """Tag ideas and themes for demo mode, or say why it couldn't; the run goes on either way. Jev isn't Anthropic, so
-    names said go out pseudonymized (policy C)."""
-    from im import jev, names, sensitivity
+    """Tag ideas and themes for demo mode, or say why it couldn't; the run goes on either way."""
+    from im import jev, sensitivity
 
     try:
-        client, scrubber = jev.Jev(), names.for_trials(conn, cfg.egress)
-    except SystemExit as e:   # no key for Jev, or none to pseudonymize names with
+        client = jev.Jev()
+    except SystemExit as e:   # no key for Jev
         return {"stopped": str(e)}
-    return sensitivity.tag_stage(conn, client, scrubber, cfg.extract.monthly_cap_usd)
+    return sensitivity.tag_stage(conn, client, cfg.extract.monthly_cap_usd)
 
 
 def _digest(conn, cfg, week=None, again=False) -> dict:
@@ -265,12 +246,11 @@ def cmd_pending(args) -> None:
         prompt = args.prompt or cfg.extract.prompt
         pv = extract.prompt_version(cfg.extract.model, cfg.extract.effort,
                                     extract.system_prompt(prompt, cfg.extract.interests), extract.schema_for(prompt))
-        scrubber = _extract_scrubber(conn, cfg, prompt)
-        todo = extract._pending(conn, cfg.extract.model, pv, scrubber)
+        todo = extract._pending(conn, cfg.extract.model, pv)
         done = {r[0] for r in conn.execute(
             """SELECT episode_id FROM im.extractions
                WHERE model = %s AND prompt_version = %s AND privacy_policy_version = %s""",
-            (cfg.extract.model, pv, scrubber.policy if scrubber else egress.POLICY_VERSION))}
+            (cfg.extract.model, pv, egress.POLICY_VERSION))}
         # What each one's latest read cost, a read shared by reuse counted once; an `im trial` of a new prompt
         # says how its cost compares (cost_vs_live).
         (last_read,) = conn.execute(
@@ -290,7 +270,7 @@ def cmd_pending(args) -> None:
 
 def cmd_trial(args) -> None:
     """Try a candidate extraction model or prompt on a fixed sample of episodes, and compare it with a reference."""
-    from im import egress, extract, jev, llm, names, trial
+    from im import extract, jev, llm, trial
 
     cfg = config.load()
     x = cfg.extract
@@ -300,27 +280,25 @@ def cmd_trial(args) -> None:
     ref_effort = ref_effort or x.effort
     cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
     with db.connect(db.pipeline_dsn()) as conn:
-        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
-        policy = scrubber.policy if scrubber else egress.POLICY_VERSION
         out = {}
         candidate = (trial.version(model, effort, system, args.replicate, schema), model)
         reference = (trial.version(ref_model, ref_effort, system, schema=schema), ref_model)
         if not args.report:
             client = llm.client_for(model, cfg.egress.zdr)
-            out["trial"] = trial.run(conn, client, system, model, effort, cap, args.limit, args.sample, scrubber,
+            out["trial"] = trial.run(conn, client, system, model, effort, cap, args.limit, args.sample,
                                      args.replicate, schema, args.max_tokens or x.max_tokens)
         same = None
         if args.same_point:
             judge = jev.Jev()
-            out["same_point"] = trial.same_point(conn, judge, candidate, reference, policy, scrubber, cap)
+            out["same_point"] = trial.same_point(conn, judge, candidate, reference, cap)
             same = jev.kept(conn, jev.question_set(judge, "match"))
-        out["report"] = trial.report(conn, candidate, reference, policy, same)
+        out["report"] = trial.report(conn, candidate, reference, same)
     _print(out)
 
 
 def cmd_gate(args) -> None:
     """Jev's checks on one trial read's captures (the capture gate, decision 0012), and what the gate would do."""
-    from im import egress, extract, gate, jev, names, trial
+    from im import extract, gate, jev, trial
 
     cfg = config.load()
     x = cfg.extract
@@ -328,13 +306,11 @@ def cmd_gate(args) -> None:
     model, effort = args.model or x.model, args.effort or x.effort
     cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
     with db.connect(db.pipeline_dsn()) as conn:
-        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
-        policy = scrubber.policy if scrubber else egress.POLICY_VERSION
         read = (trial.version(model, effort, system, args.replicate, schema), model)
         judge, out = jev.Jev(), {}
         if not args.report:
-            out["asked"] = gate.run(conn, judge, read, policy, scrubber, cap, args.limit)
-        out["summary"] = gate.summary(conn, judge, read, policy)
+            out["asked"] = gate.run(conn, judge, read, cap, args.limit)
+        out["summary"] = gate.summary(conn, judge, read)
     _print(out)
 
 
@@ -343,7 +319,7 @@ def cmd_audit_gate(args) -> None:
     disagreements, and the cuts it suggests."""
     from pathlib import Path
 
-    from im import egress, extract, gate_audit, jev, llm, names, trial
+    from im import extract, gate_audit, jev, llm, trial
 
     folder = Path(args.folder)
     if args.action == "review":
@@ -356,20 +332,18 @@ def cmd_audit_gate(args) -> None:
     x = cfg.extract
     cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
     with db.connect(db.pipeline_dsn()) as conn:
-        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
-        policy = scrubber.policy if scrubber else egress.POLICY_VERSION
         if args.action == "draft":
             if not args.model:
                 raise SystemExit("draft needs --model, the model drafting, e.g. openai/gpt-6.1-terra")
             client = llm.client_for(args.model, cfg.egress.zdr)
-            _print(gate_audit.draft(conn, folder, client, args.model, args.effort or "low", scrubber, cap))
+            _print(gate_audit.draft(conn, folder, client, args.model, args.effort or "low", cap))
             return
         if not args.prompt:
             raise SystemExit("sheet needs the trial's prompt, e.g. v5 --model openai/gpt-6.1-sol")
         system, schema = extract.system_prompt(args.prompt, x.interests), extract.schema_for(args.prompt)
         model, effort = args.model or x.model, args.effort or x.effort
         read = (trial.version(model, effort, system, args.replicate, schema), model)
-        _print(gate_audit.write(conn, folder, jev.Jev(), read, policy, args.seed, args.size))
+        _print(gate_audit.write(conn, folder, jev.Jev(), read, args.seed, args.size))
 
 
 def cmd_mishearings(args) -> None:
@@ -396,19 +370,6 @@ def cmd_tune(args) -> None:
         _print(weight.tune(conn, config.load().weight, weight.parse_overrides(args.knobs), args.top))
 
 
-def cmd_names(args) -> None:
-    """Policy C: find the names GLiNER sees in a set of episodes ahead of time, so trials and runs only look them up."""
-    from im import names, trial
-
-    if args.action == "job":
-        _print(names.job())
-        return
-    with db.connect(db.pipeline_dsn()) as conn:
-        episodes = [eid for (eid,) in conn.execute("SELECT episode_id FROM im.episodes WHERE current")] \
-            if args.all else trial.sample(conn, args.sample)
-        _print(names.warm(conn, names.Gliner(threads=os.cpu_count() or 2), episodes))   # alone: every core
-
-
 def cmd_audit_edges(args) -> None:
     """B4: a blind sheet of pairs of clusters for me to type, then my marks tallied."""
     from pathlib import Path
@@ -427,13 +388,12 @@ def cmd_audit_edges(args) -> None:
     args.folder = folders[0]
     with db.connect(db.pipeline_dsn()) as conn:
         if args.action == "draft":
-            from im import jev, llm, names
+            from im import jev, llm
 
             cfg = config.load()
-            scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
             client = jev.Jev(model=args.model) if args.model.startswith("jev") \
                 else llm.client_for(args.model, cfg.egress.zdr)
-            _print(edge_audit.draft(conn, client, Path(args.folder), args.model, args.effort, scrubber,
+            _print(edge_audit.draft(conn, client, Path(args.folder), args.model, args.effort,
                                     cfg.extract.monthly_cap_usd))
             return
         _print(edge_audit.write(conn, Path(args.folder), args.seed, args.size, [Path(f) for f in args.exclude]))
@@ -452,16 +412,15 @@ def cmd_audit_probe(args) -> None:
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
         if args.action == "draft":
-            from im import llm, names
+            from im import llm
 
-            scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
             if args.model.startswith("jev"):
                 from im import jev
 
                 client = jev.Jev(model=args.model)
             else:
                 client = llm.client_for(args.model, cfg.egress.zdr)
-            _print(probe_audit.draft(conn, client, folder, args.model, args.effort, scrubber, args.quotes_only,
+            _print(probe_audit.draft(conn, client, folder, args.model, args.effort, args.quotes_only,
                                      args.probes, cfg.extract.monthly_cap_usd))
             return
         if args.question == "summary":
@@ -473,9 +432,6 @@ def cmd_audit_probe(args) -> None:
         from im.backends import SentenceEmbedder
 
         embedder = SentenceEmbedder(cfg.lattice.embedding_model) if args.question == "analogy" else None
-        from im import names
-
-        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
         jev_client = None
         if args.question == "analogy" and args.only in (None, "jev"):
             from im import jev
@@ -483,7 +439,7 @@ def cmd_audit_probe(args) -> None:
             jev_client = jev.Jev()
         client = llm.client_for(probe_audit.FACET_MODEL, cfg.egress.zdr)   # it also asks PICK_MODEL through it
         _print(probe_audit.write(conn, client, embedder, args.question, folder, args.seed, args.only,
-                                 args.size, [Path(f) for f in args.exclude], jev_client, scrubber,
+                                 args.size, [Path(f) for f in args.exclude], jev_client,
                                  args.pool or probe_audit.JEV_POOL, cfg.extract.monthly_cap_usd))
 
 
@@ -491,12 +447,10 @@ def cmd_hard_set(args) -> None:
     """A deliberate hard set of episodes for checking an extraction prompt, each as extraction would send it."""
     from pathlib import Path
 
-    from im import hard_set, names
+    from im import hard_set
 
-    cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
-        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
-        _print(hard_set.write(conn, Path(args.folder), args.per_case, args.seed, scrubber, args.controls))
+        _print(hard_set.write(conn, Path(args.folder), args.per_case, args.seed, args.controls))
 
 
 def cmd_audit_misses(args) -> None:
@@ -504,7 +458,7 @@ def cmd_audit_misses(args) -> None:
     of the captures only one of them made and those both made; my marks."""
     from pathlib import Path
 
-    from im import egress, extract, miss_audit, names, probe_audit, trial
+    from im import extract, miss_audit, probe_audit, trial
 
     folder = Path(args.folder)
     if args.action == "score":
@@ -518,12 +472,11 @@ def cmd_audit_misses(args) -> None:
     effort = args.effort or x.effort
     ref_model, _, ref_effort = (args.against or f"{x.model}:{x.effort}").partition(":")
     ref_effort = ref_effort or x.effort
-    policy = names.policy_c() if args.policy == "C" else egress.POLICY_VERSION
     with db.connect(db.pipeline_dsn()) as conn:
         _print(miss_audit.write(conn, folder, (trial.version(args.model, effort, system, schema=schema), args.model),
                                 (trial.version(ref_model, ref_effort, system, schema=schema), ref_model),
                                 None if args.both_ways else
-                                (trial.version(ref_model, ref_effort, system, 2, schema), ref_model), policy,
+                                (trial.version(ref_model, ref_effort, system, 2, schema), ref_model),
                                 args.seed, args.size))
 
 
@@ -537,29 +490,26 @@ def cmd_bench_match(args) -> None:
     if args.action == "score":
         _print(match_bench.score(folder))
         return
-    from im import jev, names
+    from im import jev
 
     cfg = config.load()
     cap = cfg.extract.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
     with db.connect(db.pipeline_dsn()) as conn:
-        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
-        _print(match_bench.run(conn, jev.Jev(), folder, scrubber, args.limit, cap))
+        _print(match_bench.run(conn, jev.Jev(), folder, args.limit, cap))
 
 
 def cmd_analogy_spike(args) -> None:
     """Rank each `analogy:` pair's partner by structure and by topic (sends to Claude; writes into the folder)."""
     from pathlib import Path
 
-    from im import analogy_spike, llm, names
+    from im import analogy_spike, llm
     from im.backends import SentenceEmbedder
 
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
-        scrubber = names.for_trials(conn, cfg.egress) if args.policy == "C" else None
         out = analogy_spike.run(conn, llm.client_for(analogy_spike.MODEL, cfg.egress.zdr),
                                 SentenceEmbedder(cfg.lattice.embedding_model),
-                                Path(args.folder), args.others, monthly_cap_usd=cfg.extract.monthly_cap_usd,
-                                scrubber=scrubber)
+                                Path(args.folder), args.others, monthly_cap_usd=cfg.extract.monthly_cap_usd)
     _print({k: v for k, v in out.items() if k != "pairs_detail"} | {"pairs": [
         {k: r[k] for k in ("pair", "rank_by_structure", "rank_by_topic", "note", "structure_a", "structure_b")}
         for r in out["pairs_detail"]]})
@@ -580,7 +530,7 @@ def cmd_audit_dedupe(args) -> None:
 
 def cmd_import_chatgpt(args) -> None:
     """My messages to the ChatGPT Idea Machine, as the sheet marks them, read by extraction v5.3 a session at a time
-    ([extract]'s model and effort, policy C). Shows each session as it would go out and the plan; --write sends and
+    ([extract]'s model and effort). Shows each session as it would go out and the plan; --write sends and
     stores. A session already read is never sent again."""
     from im import archive_observations as ao
 
@@ -590,17 +540,15 @@ def cmd_import_chatgpt(args) -> None:
         if args.write:
             import anthropic
 
-            from im import names
-
             x = cfg.extract
-            _print(ao.import_sessions(conn, anthropic.Anthropic(), p, names.for_trials(conn, cfg.egress), x.model,
-                                      x.effort, x.monthly_cap_usd, x.max_tokens))
+            _print(ao.import_sessions(conn, anthropic.Anthropic(), p, x.model, x.effort, x.monthly_cap_usd,
+                                      x.max_tokens))
             return
         read = ao.already_read(conn, p)
     for k, session in enumerate(p["sessions"], 1):
         ref = ao.source_ref(p["conversation"], session)
         print(f"## Session {k}: {ref}{' (already read)' if ref in read else ''}\n")
-        print(ao.payload(session).text + "\n")   # as it goes out, except that names are pseudonymized then
+        print(ao.payload(session).text + "\n")   # as it goes out
     _print(ao.report(p, read))
 
 
@@ -831,8 +779,6 @@ def main(argv=None) -> None:
     tr.add_argument("--model", help="the candidate model: claude-sonnet-5-5, or through OpenRouter, e.g. "
                     "openai/gpt-6.1-sol (default: the configured one)")
     tr.add_argument("--against", help="the reference, model[:effort] (default: the configured model and effort)")
-    tr.add_argument("--policy", choices=["B", "C"], default="C",
-                    help="C (default) pseudonymizes names said, as every trial for decision 0008 does")
     tr.add_argument("--sample", type=int, default=150, help="how many episodes, the same for every model")
     tr.add_argument("--replicate", type=int, default=1,
                     help="a further independent read by the same model (2, 3...): the reference against its own "
@@ -855,7 +801,6 @@ def main(argv=None) -> None:
     ga.add_argument("--replicate", type=int, default=1, help="which of its reads (default the first)")
     ga.add_argument("--limit", type=int, help="ask about at most this many captures this time")
     ga.add_argument("--report", action="store_true", help="only summarize what Jev has answered; send nothing")
-    ga.add_argument("--policy", choices=["B", "C"], default="C", help="the trial's policy (default C)")
     ga.add_argument("--monthly-cap-usd", type=float, help="send nothing once the month's spend reaches this "
                     "(default: config)")
     ga.set_defaults(func=cmd_gate)
@@ -872,7 +817,6 @@ def main(argv=None) -> None:
     ag.add_argument("--replicate", type=int, default=1, help="sheet: which of the trial's reads (default the first)")
     ag.add_argument("--size", type=int, default=80, help="sheet: how many captures, half flagged by Jev")
     ag.add_argument("--seed", type=int, default=13, help="sheet: the sample and shuffle's seed")
-    ag.add_argument("--policy", choices=["B", "C"], default="C", help="the trial's policy, and the draft's (default C)")
     ag.add_argument("--monthly-cap-usd", type=float, help="draft: send nothing once the month's spend reaches this "
                     "(default: config)")
     ag.set_defaults(func=cmd_audit_gate)
@@ -891,12 +835,6 @@ def main(argv=None) -> None:
     ad.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
     ad.add_argument("--seed", type=int, default=5, help="the sample and shuffle's seed")
     ad.set_defaults(func=cmd_audit_dedupe)
-    nm = sub.add_parser("names", help="policy C: find names in episodes ahead of time (GLiNER, cached per segment)")
-    nm.add_argument("action", choices=["warm", "job"],
-                    help="warm: these episodes now; job: one chunk of the backlog, as corral runs it (install/gpu.sh)")
-    nm.add_argument("--sample", type=int, default=150, help="the trial sample's first N episodes (default 150)")
-    nm.add_argument("--all", action="store_true", help="every current episode instead")
-    nm.set_defaults(func=cmd_names)
     ae = sub.add_parser("audit-edges", help="B4: a blind sheet of pairs of clusters to type; tally my marks")
     ae.add_argument("action", choices=["sheet", "score", "draft", "review"],
                     help="draft: a model marks the same sheet blind (sends to it: Claude, or OpenRouter for a "
@@ -912,7 +850,6 @@ def main(argv=None) -> None:
     ae.add_argument("--model", default="claude-opus-5-5",
                     help="draft: the candidate model, e.g. openai/gpt-6.1-terra, or jev-1.14.0 (TypeSafe's Jev)")
     ae.add_argument("--effort", default="low", help="draft: the candidate's effort")
-    ae.add_argument("--policy", choices=["B", "C"], default="C", help="draft: C (default) pseudonymizes names said")
     ae.set_defaults(func=cmd_audit_edges)
     for name, question, what in (
             ("audit-analogies", "analogy", "a blind sheet of possible analogies between unrelated ideas, ranked by "
@@ -930,8 +867,6 @@ def main(argv=None) -> None:
         pa.add_argument("--model", default="claude-opus-5-5",
                         help="draft: the model answering, e.g. z-ai/glm-5.3, or jev-1.14.0 (TypeSafe's Jev)")
         pa.add_argument("--effort", default="low", help="draft: its effort")
-        pa.add_argument("--policy", choices=["B", "C"], default="C",
-                        help="draft and sheet (every request either makes): C (default) pseudonymizes names said")
         pa.add_argument("--quotes-only", action="store_true", help="draft: show the model what was said, no summaries")
         pa.add_argument("--probes", action="store_true",
                         help="draft, Jev: also ask the probe questions (jev.PROBES), scored beside the deciding ones")
@@ -955,7 +890,6 @@ def main(argv=None) -> None:
     am.add_argument("--both-ways", action="store_true",
                     help="sheet: captures only the candidate made, only the reference made, and both made, side by "
                          "side; needs no second read")
-    am.add_argument("--policy", choices=["B", "C"], default="C", help="sheet: the trials' policy (default C)")
     am.add_argument("--seed", type=int, default=13, help="sheet: the sample and shuffle's seed")
     am.add_argument("--size", type=int, help="sheet: how many misses (default: all), beside as many found; "
                     "--both-ways: how many from each set (default 20)")
@@ -967,21 +901,18 @@ def main(argv=None) -> None:
     hs.add_argument("--per-case", type=int, default=6, help="episodes per case (default 6)")
     hs.add_argument("--controls", type=int, default=0, help="also this many episodes from the trials' random sample")
     hs.add_argument("--seed", type=int, default=1, help="the shuffle's seed")
-    hs.add_argument("--policy", choices=["B", "C"], default="C", help="C (default) pseudonymizes names said too")
     hs.set_defaults(func=cmd_hard_set)
     bm = sub.add_parser("bench-match", help="B1: replay Opus's logged match decisions through Jev (sends to Jev), "
                         "then score its agreement with Opus")
     bm.add_argument("action", choices=["run", "score"])
     bm.add_argument("folder", help="where Jev's answers go (it quotes people: keep it in saved/), e.g. /saved/b1-1")
     bm.add_argument("--limit", type=int, help="run: only the first N decisions")
-    bm.add_argument("--policy", choices=["B", "C"], default="C", help="run: C (default) pseudonymizes names said")
     bm.add_argument("--monthly-cap-usd", type=float, help="run: send nothing once the month's spend reaches this "
                     "(default: config)")
     bm.set_defaults(func=cmd_bench_match)
     sp = sub.add_parser("analogy-spike", help="can structure find my analogy pairs where topic can't? (sends to Claude)")
     sp.add_argument("folder", help="a marked B4 sheet's folder, e.g. /saved/b4-1")
     sp.add_argument("--others", type=int, default=300, help="other clusters to rank the partners among")
-    sp.add_argument("--policy", choices=["B", "C"], default="C", help="C (default) pseudonymizes names said")
     sp.set_defaults(func=cmd_analogy_spike)
     ic = sub.add_parser("import-chatgpt", help="my messages to the ChatGPT Idea Machine, as a curation sheet marks "
                         "them, read by extraction v5.3 into archive captures (sends to Claude with --write)")

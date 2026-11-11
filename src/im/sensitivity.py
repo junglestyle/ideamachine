@@ -6,9 +6,8 @@ archive's notes and my note, my corrections winning, and up to three of its quot
 was said) and each theme (name and description). A shown idea is any presentation's: in pub.ideas or on a card,
 which also shows a cluster whose every capture I discarded. A tag holds at CUT or above, and Jev's probabilities are
 kept beside the tags, so the cut can be set later from my own marks. The tags describe; pub.sensitivity counts
-anything with a tag as sensitive, and my own marks (idea_sensitive, theme_sensitive) win there, either way. Names
-said are pseudonymized before anything goes out (policy C, 0008: Jev isn't Anthropic). An idea or theme is asked
-about again when its text changes, at most MAX_PER_RUN a run.
+anything with a tag as sensitive, and my own marks (idea_sensitive, theme_sensitive) win there, either way. An idea
+or theme is asked about again when its text changes, at most MAX_PER_RUN a run.
 """
 
 import hashlib
@@ -53,27 +52,17 @@ def _todo(conn, tv: str) -> list[tuple]:
     return out
 
 
-def _pseudonymized(item: dict, scrubber) -> dict:
-    """The item with names said pseudonymized in every text, consistently across them."""
-    if scrubber is None:
-        return item
-    texts = [t for v in item.values() for t in (v if isinstance(v, list) else [v])]
-    it = iter(scrubber.scrub(texts)[0])
-    return {k: [next(it) for _ in v] if isinstance(v, list) else next(it) for k, v in item.items()}
-
-
-def tag_stage(conn, client: jev.Jev, scrubber, monthly_cap_usd: float = 20.0, limit: int = MAX_PER_RUN) -> dict:
+def tag_stage(conn, client: jev.Jev, monthly_cap_usd: float = 20.0, limit: int = MAX_PER_RUN) -> dict:
     """Tag what's new or changed, one request each. One that failed is asked again on a later run."""
     tv = tagger_version(client)
     todo = _todo(conn, tv)
-    policy = scrubber.policy if scrubber else egress.POLICY_VERSION
     stats = {"tagger_version": tv, "pending": len(todo), "tagged": 0, "sensitive": 0, "failed": 0, "stopped": None}
     for kind, id_, item, h in todo[:limit]:
-        body = client.body("sensitivity", {"item": _pseudonymized(item, scrubber)})
+        body = client.body("sensitivity", {"item": item})
         try:
             a = egress.send(conn, lambda body=body: client.complete(body), model=client.model,
                             payload=json.dumps(body), segment_ids=egress.segments_of(conn, [id_]) if kind == "idea"
-                            else [], prompt_version=f"sensitivity:{tv}", policy=policy,
+                            else [], prompt_version=f"sensitivity:{tv}",
                             monthly_cap_usd=monthly_cap_usd, read=lambda r: jev.read("sensitivity", r))
         except llm.Stop as e:
             stats["stopped"] = str(e)[:200]
