@@ -1,6 +1,6 @@
 # 0012: Rebuild from the stream with extraction v5, in parallel, then cut over
 
-_2026-11-08. Status: accepted, not built yet. Amends [0010](0010-connections-kinds-lenses.md) (who writes `evolves`)
+_2026-11-08. Status: accepted, not built yet; amended 2026-11-10 (the extractor and the gate, below). Amends [0010](0010-connections-kinds-lenses.md) (who writes `evolves`)
 and [0011](0011-observations-are-mine.md) (relayed and held thoughts); settles the prompt review before the
 re-extraction; my decision. The prompt texts were reviewed by two reviewers and three adversarial teardowns, merged,
 and read by me; they go into the code as extraction v5 and matcher v2._
@@ -70,3 +70,21 @@ decides anything.
 - Live stages that send what was said pseudonymize names said (0008's policy C) before the rebuild reads anything.
 - The monthly spending cap rises for the trial and the rebuild; the rebuild uses prompt caching and the Batch API.
 - B4's and the tension sheets' marks stay as they are; new sheets draw from the rebuilt graph.
+
+## Amendment (2026-11-10): Opus on v5.3; the gate after the rebuild
+
+_My decision, on the trials of 2026-11-10 (the private evaluations repo has the reports)._
+
+**The rebuild extracts with Opus (medium effort) on extraction v5.3.** v5.3 is v5 with the goldens' decisions
+written in: a joke's, story's or example's point stated at the scope it was told; judgments about a person counting,
+apart from venting about one event; explaining the fault in front of me, or the next steps of reworking something,
+not counting; a personal reaction kept personal; back-references spelled out. On the 150-episode sample, Opus read
+every episode, every quote was word for word, and v5.3 made 6% more captures than v5, mostly the kinds it was meant
+to add. No cheaper model held up: fourteen were tried on v5.3. Those that came close to Opus (Gemini 4 Carbon, Qwen
+3.8 Max Prime) cost 2.3–2.5× as much per episode, since Opus's prompt caching makes it cheaper than its list price
+suggests (about $0.024 an episode). The cheap ones (Sol, Terra and others) capture comment, status and teasing, and
+split single thoughts, which the gate can't repair.
+
+**The gate runs after the rebuild, not in it.** It was there so a cheaper extractor could do the bulk of the work;
+with Opus extracting, its checks are a cleanup pass over the rebuilt captures, run once B7 has set its cuts. Its
+answers are kept per capture, so it can run at any time. The code checks still run on every capture as it's read.
