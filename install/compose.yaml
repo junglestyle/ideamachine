@@ -47,12 +47,10 @@ services:
     environment:
       IM_STREAM_DIR: /data/stream
       IM_CONFIG: /config/im.toml   # e.g. extract.prompt and extract.interests; made by install/nas.sh
-      IM_VOCAB_PATH: /vocab/vocab.json   # my vocabulary, for Hearsay to read (src/im/vocab.py)
       TZ: America/New_York   # payloads carry local times: keep them as they were on eeyore (im pending)
     volumes:
       - ${HEARSAY_STREAM:?no install/.env; run install/nas.sh}:/data/stream:ro
       - /mnt/fast/ideamachine/config/im:/config:ro
-      - /mnt/fast/ideamachine/vocab:/vocab
     depends_on:
       db:
         condition: service_healthy
