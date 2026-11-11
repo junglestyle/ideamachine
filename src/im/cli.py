@@ -575,18 +575,30 @@ def cmd_audit_dedupe(args) -> None:
         _print(dedupe_audit.write(conn, Path(args.folder), args.seed))
 
 
-def cmd_seed_observations(args) -> None:
-    """What I said into the ChatGPT Idea Machine, as observations of its archive ideas. Shows the plan; --write adds."""
-    from pathlib import Path
-
+def cmd_import_chatgpt(args) -> None:
+    """My messages to the ChatGPT Idea Machine, as the sheet marks them, read by extraction v5.3 a session at a time
+    ([extract]'s model and effort, policy C). Shows each session as it would go out and the plan; --write sends and
+    stores. A session already read is never sent again."""
     from im import archive_observations as ao
 
+    cfg = config.load()
+    p = ao.plan(Path(args.export).read_text(), Path(args.sheet).read_text(), args.tz)
     with db.connect(db.pipeline_dsn()) as conn:
-        p = ao.plan(conn, Path(args.path).read_text(), args.name, set(args.not_me or []), args.tz)
-        out = ao.report(p)
         if args.write:
-            out["written"] = ao.write(conn, p)
-    _print(out)
+            import anthropic
+
+            from im import names
+
+            x = cfg.extract
+            _print(ao.import_sessions(conn, anthropic.Anthropic(), p, names.for_trials(conn, cfg.egress), x.model,
+                                      x.effort, x.monthly_cap_usd, x.max_tokens))
+            return
+        read = ao.already_read(conn, p)
+    for k, session in enumerate(p["sessions"], 1):
+        ref = ao.source_ref(p["conversation"], session)
+        print(f"## Session {k}: {ref}{' (already read)' if ref in read else ''}\n")
+        print(ao.payload(session).text + "\n")   # as it goes out, except that names are pseudonymized then
+    _print(ao.report(p, read))
 
 
 def cmd_web(args) -> None:
@@ -975,15 +987,14 @@ def main(argv=None) -> None:
     sp.add_argument("--others", type=int, default=300, help="other clusters to rank the partners among")
     sp.add_argument("--policy", choices=["B", "C"], default="C", help="C (default) pseudonymizes names said")
     sp.set_defaults(func=cmd_analogy_spike)
-    so = sub.add_parser("seed-observations",
-                        help="what I said into the ChatGPT Idea Machine, from its export, as archive observations")
-    so.add_argument("path", help="the conversation's export (Markdown), e.g. /saved/chatgpt-idea-machine.md")
-    so.add_argument("--name", default="chatgpt", help="the archive's prefix, as im seed was given (default chatgpt)")
-    so.add_argument("--not-me", type=int, action="append", metavar="N",
-                    help="archive idea N was someone else's (e.g. a point I passed on); repeat for more")
-    so.add_argument("--tz", default="America/New_York", help="the time zone the export's times are in")
-    so.add_argument("--write", action="store_true", help="add them (without it, only show what would be added)")
-    so.set_defaults(func=cmd_seed_observations)
+    ic = sub.add_parser("import-chatgpt", help="my messages to the ChatGPT Idea Machine, as a curation sheet marks "
+                        "them, read by extraction v5.3 into archive captures (sends to Claude with --write)")
+    ic.add_argument("export", help="the conversation's export (Markdown), e.g. /saved/chatgpt-idea-machine.md")
+    ic.add_argument("sheet", help="the curation sheet (keep, drop or edit each message), e.g. "
+                    "/saved/chatgpt-curate-sheet.md")
+    ic.add_argument("--tz", default="America/New_York", help="the time zone the export's times are in")
+    ic.add_argument("--write", action="store_true", help="send and store (without it, only show what would be sent)")
+    ic.set_defaults(func=cmd_import_chatgpt)
     sd = sub.add_parser("seed", help="import an idea archive into the lattice (its clusters become pinned themes)")
     sd.add_argument("path", help="the archive, e.g. ~/.local/share/ideamachine/seeds/chatgpt-archive.md")
     sd.add_argument("--name", default="chatgpt", help="prefix for its references, e.g. chatgpt#17")

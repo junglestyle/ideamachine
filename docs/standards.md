@@ -94,7 +94,7 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
 - Privacy: the NAS layout (`/mnt/fast/ideamachine/...`) is committed, and nothing here overrides the org rule for it, as
   hearsay's and lattice's standards do.
 - Privacy: the owner's time zone, `America/New_York`, is the default for reading a ChatGPT export's times
-  (`im seed-observations --tz`, and `tz` in `archive_observations.parse` and `plan`).
+  (`im import-chatgpt --tz`, and `tz` in `archive_observations.parse` and `plan`).
 - Secrets: `install/nas.sh` prints Lattice's login token (`LATTICE_TOKEN`) at the end of every run (line 325).
 - Docs: V2's roadmap is `docs/ROADMAP-v2.md`, not `docs/ROADMAP.md`, because code comments cite V1's
   [ROADMAP.md](ROADMAP.md) by section. V1's spec stays in its §1–3; V2's is [SPEC.md](SPEC.md).

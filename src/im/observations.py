@@ -11,8 +11,9 @@ new observation.
 Every capture, not any one: Claude sometimes stitches two passages into one quote with "...", and that quote
 matches each passage, so matching any one capture chained two points into one observation (B5, 2026-11-01).
 
-Not every observation is speech (migration 036). An idea I add gets one, of what I typed, and
-`im seed-observations` adds what I said into the ChatGPT Idea Machine. Those belong to their idea directly.
+Not every observation is speech (migration 036). An idea I add gets one, of what I typed, belonging to the idea
+directly. A capture of what I typed into the ChatGPT Idea Machine (`im import-chatgpt`) comes with its own archive
+observation (migration 055).
 """
 
 from im import citations
