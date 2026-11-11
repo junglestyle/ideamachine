@@ -127,8 +127,6 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
   branches on or parses from outside: item kinds (`extract.KINDS`), digest point kinds (`digest.KINDS`), match
   decisions (`lattice.py` lines 35 and 258), routes (`router.py` lines 30 and 52), verdicts (`feedback.ITEM_KINDS`,
   `cli.py` line 369), speaker kinds (`importer.py` line 86) and sensitivity categories (`sensitivity.CATEGORIES`).
-- Python testing: `test_the_real_archive_parses` (`tests/test_lattice.py` line 114) reads the real archive from
-  `~/.local/share/ideamachine/seeds`, not a committed synthetic fixture.
 - Python testing: 14 of the 21 test files are named for a module (`test_extract.py`, `test_lattice.py`,
   `test_triage.py`...), not a behavior.
 - Python dependencies: `laya==0.3.23` is pinned exactly without a comment naming the break.

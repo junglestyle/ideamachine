@@ -608,13 +608,6 @@ def cmd_web(args) -> None:
     web.serve(args.host, args.port, args.demo)
 
 
-def cmd_seed(args) -> None:
-    from im import lattice
-
-    with db.connect(db.pipeline_dsn()) as conn:
-        _print(lattice.seed_archive(conn, Path(args.path), args.name))
-
-
 def cmd_lattice(args) -> None:
     from im import lattice
 
@@ -995,10 +988,6 @@ def main(argv=None) -> None:
     ic.add_argument("--tz", default="America/New_York", help="the time zone the export's times are in")
     ic.add_argument("--write", action="store_true", help="send and store (without it, only show what would be sent)")
     ic.set_defaults(func=cmd_import_chatgpt)
-    sd = sub.add_parser("seed", help="import an idea archive into the lattice (its clusters become pinned themes)")
-    sd.add_argument("path", help="the archive, e.g. ~/.local/share/ideamachine/seeds/chatgpt-archive.md")
-    sd.add_argument("--name", default="chatgpt", help="prefix for its references, e.g. chatgpt#17")
-    sd.set_defaults(func=cmd_seed)
     sub.add_parser("lattice", help="counts: ideas, evidence, connections, unmatched items").set_defaults(
         func=cmd_lattice)
     th = sub.add_parser("themes", help="list themes; pin, unpin, rename or reject one")

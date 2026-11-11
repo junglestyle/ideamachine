@@ -1,8 +1,7 @@
-"""The idea lattice: seeding, matching captures into ideas, the pub contract, and forgetting."""
+"""The idea lattice: matching captures into ideas, the pub contract, and forgetting."""
 
 import json
 import re
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -18,28 +17,34 @@ from test_extract import FakeClaude
 from test_pipeline import LORA
 from test_triage import HashEmbedder
 
-ARCHIVE = """Current idea archive:
+# The ChatGPT archive's ideas as the live database holds them, seeded from ChatGPT's summary before the archive was
+# read by extraction: (title, statement, notes), then its two clusters as (letter, name, description, members).
+ARCHIVE = [("A solitary unsatisfying grape.", "“A solitary unsatisfying grape.”",
+            "Possible associations: disproportionate disappointment."),
+           ("Signal may not be true, but it is…", "“Signal may not be true, but it is always correct.”",
+            "Theme: truth versus correctness. Connects to #1."),
+           ("The coffee order is the real meeting.", "“The coffee order is the real meeting.”",
+            "Theme: office rituals.")]
+ARCHIVE_THEMES = [("A", "Models and signals", "Core recurring concepts: signal versus truth.", [2, 3]),
+                  ("B", "Jokes", "Compact formulations.", [1])]
 
-1. “A solitary unsatisfying grape.”
-   Possible associations: disproportionate disappointment.
 
-2. “Signal may not be true, but it is always correct.”
-   Theme: truth versus correctness. Connects to #1.
-
-3. “The coffee order is the real meeting.”
-   Theme: office rituals.
-
-Important emerging clusters:
-
-A. Models and signals:
-#2, #3.
-Core recurring concepts: signal versus truth.
-
-B. Jokes:
-#1.
-Compact formulations.
-"""
-REAL_SEED = Path.home() / ".local/share/ideamachine/seeds/chatgpt-archive.md"
+def seed(conn) -> None:
+    """The archive's three ideas (origin archive, kept as canonical), its cross-reference from #2 to #1 as a
+    `chatgpt-archive` connection, and its clusters as pinned themes."""
+    ids = {n: conn.execute("""INSERT INTO im.ideas (title, statement, origin, archive_ref, notes)
+                              VALUES (%s, %s, 'archive', %s, %s) RETURNING idea_id""",
+                           (title, statement, f"chatgpt#{n}", notes)).fetchone()[0]
+           for n, (title, statement, notes) in enumerate(ARCHIVE, 1)}
+    conn.execute("INSERT INTO im.connections (a, b, method) VALUES (%s, %s, 'chatgpt-archive')",
+                 sorted((ids[1], ids[2])))
+    for letter, name, description, members in ARCHIVE_THEMES:
+        (theme,) = conn.execute("""INSERT INTO im.themes (name, description, origin, archive_ref, pinned)
+                                   VALUES (%s, %s, 'archive', %s, true) RETURNING theme_id""",
+                                (name, description, f"chatgpt:{letter}")).fetchone()
+        for n in members:
+            conn.execute("INSERT INTO im.idea_themes (idea_id, theme_id, origin) VALUES (%s, %s, 'archive')",
+                         (ids[n], theme))
 
 
 class FakeMatcher:
@@ -81,10 +86,8 @@ def items_for(text):
 
 
 @pytest.fixture
-def seeded(pipe, tmp_path):
-    path = tmp_path / "archive.md"
-    path.write_text(ARCHIVE)
-    lattice.seed_archive(pipe, path)
+def seeded(pipe):
+    seed(pipe)
     return pipe
 
 
@@ -108,25 +111,6 @@ def legacy_evolves(conn):
                     SELECT b.idea_id, s.idea_id, 'evolves', 'match-1:legacy' FROM im.ideas b, im.ideas s
                     WHERE b.title = 'Broken builds as signal' AND s.statement LIKE '%%always correct%%'""")
     citations.cite(conn)
-
-
-def test_parse_and_seed(seeded, tmp_path):
-    entries, clusters = lattice.parse_archive(ARCHIVE)
-    assert [e["n"] for e in entries] == [1, 2, 3] and entries[1]["notes"].startswith("Theme: truth")
-    assert [(c["letter"], c["members"]) for c in clusters] == [("A", [2, 3]), ("B", [1])]
-    again = lattice.seed_archive(seeded, tmp_path / "archive.md")
-    assert again["added"] == 0
-    assert table(seeded, "SELECT count(*) FROM pub.ideas") == [(3,)]
-    assert table(seeded, "SELECT count(*) FROM pub.connections WHERE method = 'chatgpt-archive'") == [(1,)]
-    assert table(seeded, "SELECT name, pinned, n_ideas FROM pub.themes ORDER BY name") == \
-        [("Jokes", True, 1), ("Models and signals", True, 2)]
-
-
-@pytest.mark.skipif(not REAL_SEED.exists(), reason="the real archive isn't on this machine")
-def test_the_real_archive_parses():
-    entries, clusters = lattice.parse_archive(REAL_SEED.read_text())
-    assert len(entries) == 36 and [e["n"] for e in entries] == list(range(1, 37))
-    assert [c["letter"] for c in clusters] == list("ABCDE") and len(clusters[0]["members"]) == 13
 
 
 def test_matching_joins_the_same_point_and_writes_no_lineage(seeded, cfg, stream):
