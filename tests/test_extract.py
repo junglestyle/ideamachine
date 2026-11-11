@@ -250,6 +250,7 @@ def test_a_capture_on_a_replaced_episode_isnt_offered_for_review(pipe, cfg, stre
     ("me: Note to self, buy batteries", None, ("review", ["note_to_self"])),
     ("Alice: note to self, she said", [], ("auto_file", [])),
     ("me: hm", ["idea", "joke", "idea"], ("review", ["claude:idea", "claude:joke"])),
+    ("me: hm", [None], ("review", ["claude"])),   # a v5 capture: no kind, and no confidence to fall short of
 ])
 def test_router_rules(state, items, expect):
     from im.triage import EpisodeState
