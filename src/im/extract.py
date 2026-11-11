@@ -242,6 +242,9 @@ SYSTEM_V5_3 = resources.files("im.prompts").joinpath("extract_v5_3.txt").read_te
 PROMPTS = {"v1": SYSTEM, "v2": SYSTEM_V2, "v3": SYSTEM_V3, "v4": SYSTEM_V4, "v5": SYSTEM_V5, "v5.1": SYSTEM_V5_1,
            "v5.2": SYSTEM_V5_2, "v5.3": SYSTEM_V5_3}
 LIVE = ("v1", "v2", "v3", "v5.3")   # what `im run` may read with; v4 and v5 to v5.2 are for `im trial` only
+# The prompts that capture only my speech (decision 0011): an episode where I don't speak (`others_only`) can't give
+# them a capture, so it isn't sent. v1 to v4 capture everyone's, and still read it.
+ONLY_MINE = ("v5", "v5.1", "v5.2", "v5.3")
 
 
 def system_prompt(name: str = "v1", interests: str = "") -> str:
@@ -344,13 +347,15 @@ def prompt_version(model: str, effort: str, system: str = SYSTEM, schema: dict =
     return hashlib.sha256(json.dumps([system, schema, model, effort], sort_keys=True).encode()).hexdigest()[:16]
 
 
-def _pending(conn, model: str, pv: str) -> list:
-    """Current episodes not yet read under this model/prompt/policy, or whose payload changed. Newest first."""
+def _pending(conn, model: str, pv: str, only_mine: bool = False) -> list:
+    """Current episodes not yet read under this model/prompt/policy, or whose payload changed. Newest first. With
+    `only_mine`, not an episode where I don't speak."""
     rows = conn.execute(
         """SELECT e.episode_id, x.input_hash FROM im.episodes e
            LEFT JOIN im.extractions x ON x.episode_id = e.episode_id AND x.model = %s
                 AND x.prompt_version = %s AND x.privacy_policy_version = %s
-           WHERE e.current ORDER BY e.started_at DESC""", (model, pv, egress.POLICY_VERSION)).fetchall()
+           WHERE e.current AND NOT (%s AND e.kind = 'others_only')
+           ORDER BY e.started_at DESC""", (model, pv, egress.POLICY_VERSION, only_mine)).fetchall()
     out = []
     for eid, done_hash in rows:
         p = egress.build(conn, eid)
@@ -500,11 +505,11 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
 
 def run_stage(conn, client, model: str = ExtractConfig.model, effort: str = ExtractConfig.effort,
               monthly_cap_usd: float = 20.0, limit: int | None = None, system: str = SYSTEM,
-              max_tokens: int | None = None, schema: dict = SCHEMA) -> dict:
+              max_tokens: int | None = None, schema: dict = SCHEMA, only_mine: bool = False) -> dict:
     """Read every episode not yet read under this model, prompt and schema (schema_for the prompt), and keep what
-    it captures in im.items."""
+    it captures in im.items. With `only_mine` (a prompt in ONLY_MINE), not an episode where I don't speak."""
     pv = prompt_version(model, effort, system, schema)
-    todo = _pending(conn, model, pv)
+    todo = _pending(conn, model, pv, only_mine)
     stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "reused": 0, "items": 0,
              "refused": 0, "failed": 0, "cost_usd": 0.0, "stopped": None}
     for p in todo[:limit] if limit else todo:

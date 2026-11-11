@@ -208,7 +208,8 @@ def test_router_v2_routes_on_items_taps_and_notes_and_respects_discards(pipe, cf
     stream.write(stream.dir)
     run(pipe, cfg, stream)
     first = router.run_stage(pipe)
-    assert first["review"] == 1 and first["waiting_for_claude"] == 8
+    # One episode is only other people talking: routed at once, since a prompt reading only my speech never reads it.
+    assert first["review"] == 1 and first["waiting_for_claude"] == 7 and first["auto_file"] == 1
     extract.run_stage(pipe, FakeClaude(coffee_item))
     stats = router.run_stage(pipe)
     assert stats["review"] == 2 and stats["auto_file"] == 7 and stats["waiting_for_claude"] == 0
@@ -268,7 +269,7 @@ def test_im_run_goes_on_without_claude(pipe, cfg, stream, monkeypatch, capsys):
     cli.main(["run"])
     out = json.loads(capsys.readouterr().out)
     assert out["extract"]["stopped"].startswith("Claude")
-    assert out["route"]["waiting_for_claude"] == 9
+    assert out["route"]["waiting_for_claude"] == 8   # the ninth is only other people talking: routed without Claude
 
 
 def test_pending_reports_what_would_be_resent(pipe, cfg, stream, monkeypatch, capsys):
@@ -404,7 +405,10 @@ def test_v5_3_reads_under_policy_b_with_names_said_as_said(pipe, cfg, stream, mo
 
     v53 = FakeClaude(respond)
     monkeypatch.setattr(anthropic, "Anthropic", lambda: v53)
-    assert cli._extract(pipe, replace(cfg, extract=replace(cfg.extract, prompt="v5.3")))["read"] == 9
+    episodes = table(pipe, "SELECT count(*) FILTER (WHERE kind <> 'others_only') FROM im.episodes WHERE current")[0][0]
+    # Only my speech is captured, so an episode where I don't speak isn't sent, and isn't left waiting for Claude.
+    assert cli._extract(pipe, replace(cfg, extract=replace(cfg.extract, prompt="v5.3")))["read"] == episodes < 9
+    assert router.run_stage(pipe)["waiting_for_claude"] == 0
     assert "broke again, Alice?" in json.dumps([c["messages"] for c in v53.calls])   # the name said, as said
     assert table(pipe, "SELECT quote, gist, privacy_policy_version FROM im.items") == \
         [("Did you see the build broke again, Alice?", "I asked Alice whether the build broke again.",
