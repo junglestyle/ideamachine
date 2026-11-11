@@ -32,10 +32,13 @@ def route(state: EpisodeState, items: list[str | None] | None) -> tuple[str, lis
 
 def run_stage(conn) -> dict:
     """Route every current episode Claude has read (episodes with a tap or a note to self are routed even
-    before that). Rewrites a route only when it changed."""
+    before that), and every one where I don't speak, which a prompt capturing only my speech never reads
+    (extract.ONLY_MINE). Rewrites a route only when it changed."""
     ids = [r[0] for r in conn.execute("SELECT episode_id FROM im.episodes WHERE current")]
-    read = {r[0] for r in conn.execute("SELECT DISTINCT episode_id FROM im.extractions WHERE episode_id = ANY(%s)",
-                                       (ids,))}
+    read = {r[0] for r in conn.execute(
+        """SELECT episode_id FROM im.extractions WHERE episode_id = ANY(%(ids)s)
+           UNION SELECT episode_id FROM im.episodes WHERE episode_id = ANY(%(ids)s) AND kind = 'others_only'""",
+        {"ids": ids})}
     kinds: dict = {}
     for eid, kind in conn.execute(
             """SELECT i.episode_id, i.kind FROM im.items i

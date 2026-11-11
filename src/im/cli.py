@@ -140,7 +140,7 @@ def _extract(conn, cfg) -> dict:
         client = llm.client_for(x.model, cfg.egress.zdr)
         return extract.run_stage(conn, client, x.model, x.effort, x.monthly_cap_usd, x.max_episodes_per_run,
                                  extract.system_prompt(x.prompt, x.interests), x.max_tokens,
-                                 extract.schema_for(x.prompt))
+                                 extract.schema_for(x.prompt), only_mine=x.prompt in extract.ONLY_MINE)
     except (anthropic.AnthropicError, SystemExit) as e:  # e.g. no credentials configured at all
         return {"stopped": f"Claude unavailable: {e}"}
 
@@ -246,7 +246,7 @@ def cmd_pending(args) -> None:
         prompt = args.prompt or cfg.extract.prompt
         pv = extract.prompt_version(cfg.extract.model, cfg.extract.effort,
                                     extract.system_prompt(prompt, cfg.extract.interests), extract.schema_for(prompt))
-        todo = extract._pending(conn, cfg.extract.model, pv)
+        todo = extract._pending(conn, cfg.extract.model, pv, prompt in extract.ONLY_MINE)
         done = {r[0] for r in conn.execute(
             """SELECT episode_id FROM im.extractions
                WHERE model = %s AND prompt_version = %s AND privacy_policy_version = %s""",
