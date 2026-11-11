@@ -6,9 +6,9 @@ import uuid
 import psycopg
 import pytest
 
-from im import digest, lattice
+from im import digest, lattice, observations
 
-from helpers import table
+from helpers import assert_invariants, table
 from test_digest import WEEK, FakeDigester
 from test_lattice import FakeMatcher, HashEmbedder
 from test_review import as_lattice
@@ -69,3 +69,15 @@ def test_the_run_embeds_places_and_digests_it(seeded_lattice, admin):
     digest.digest_stage(pipe, claude, week=WEEK)
     text = claude.calls[0]["messages"][0]["content"]
     assert "Added by me this week (1 ideas):" in text and "Coffee runs the meeting" in text
+
+
+def test_an_idea_i_add_gets_what_i_typed(pipe, admin):
+    idea = uuid.uuid4()
+    payload = {"title": "Calm is a signal", "statement": "Others read your calm more than your words."}
+    add(admin, idea, payload)
+    add(admin, idea, payload)   # a resend: still one
+    assert observations.assign_stage(pipe)["typed"] == 1
+    assert observations.assign_stage(pipe)["typed"] == 0
+    assert table(pipe, "SELECT quote, said_by, source FROM im.observations WHERE idea_id = %s", idea) == [
+        ("Others read your calm more than your words.", "me", "typed")]
+    assert_invariants(pipe)

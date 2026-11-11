@@ -174,26 +174,32 @@ M2 gives edges the columns they cite with. Typing the edges waits for Jev in M4.
 
 ## Observations that aren't speech
 
-_2026-11-01, migration 036._ The archive's ideas and the ones I add were said too: into the ChatGPT Idea Machine,
-or typed. They get observations of their own, so they recur, weigh and cite like captures do.
+_2026-11-01, migration 036; the archive read by extraction, migration 055._ What I typed into the ChatGPT Idea
+Machine and the ideas I add were said too. They get observations of their own, so they recur, weigh and cite like
+captures do.
 
-- `im.observations` gains a `source`: `speech`, `archive` or `typed`. One that isn't speech has no segments and no
-  capture: it belongs to its idea directly, and holds its own quote, time, speaker and conversation. Forgetting
-  works on segments, so it never reaches them.
-- **Archive:** `im seed-observations <export>` reads the ChatGPT conversation's export (ChatGPT Exporter's
-  Markdown). Each message goes to the idea ChatGPT's answer numbered it under ("**Idea #14, refined:**"), which the
-  archive keeps as `chatgpt#14`; the archive's own quotes are ChatGPT's cleaned-up copies, and it has no times. A
-  message with no numbered answer isn't an idea. Without `--write` it only shows the plan, lowest match with the
-  archive's text first, so a wrong number stands out. `--not-me 18`: #18 was my brother's point.
-- **Typed:** each idea I add gets one observation of what I typed, at the time, from its first `idea_add` event.
+- `im.observations` gains a `source`: `speech`, `archive` or `typed`. One that isn't speech has no segments, and
+  holds its own quote, time, speaker and conversation. Forgetting works on segments, so it never reaches them.
+- **Archive:** `im import-chatgpt <export> <sheet>` reads the ChatGPT conversation's export (ChatGPT Exporter's
+  Markdown) and a curation sheet that marks each of my messages `keep`, `drop` (an instruction to ChatGPT) or
+  `edit` (with the text to read instead). Only my messages are read: never ChatGPT's replies, numbering, groupings
+  or cross-references. The kept ones go to extraction v5.3 under policy C, one session at a time (a gap of 6 hours
+  starts the next), one line per message with the times on the context line. Each capture is an archive capture: an
+  item with no episode, and its own archive observation, with the time of the message its quote starts in and
+  whether I edited it (`edited`). The matcher places it among my speech in the order I said things; it's an
+  ordinary candidate, never kept automatically. Without `--write` it shows each session as it would go out, and the
+  plan; a session already read (`im.archive_reads`) is never sent again. The archive observations written onto the
+  seeded archive ideas before 055 belong to them directly.
+- **Typed:** each idea I add gets one observation of what I typed, at the time, from its first `idea_add` event. It
+  belongs to its idea directly.
 - **Recurrence** counts them like speech, by conversation and `recurrence_minutes`: two messages to ChatGPT minutes
   apart are one recurrence, weeks apart two. The neutral view's cards show them as quotes.
 
-On the NAS, after the export is in `saved/`:
+On the NAS, after the export and the marked sheet are in `saved/`:
 
 ```sh
-im seed-observations /saved/chatgpt-idea-machine.md --not-me 18           # look it over
-im seed-observations /saved/chatgpt-idea-machine.md --not-me 18 --write   # then add them
+im import-chatgpt /saved/chatgpt-idea-machine.md /saved/chatgpt-curate-sheet.md           # look it over
+im import-chatgpt /saved/chatgpt-idea-machine.md /saved/chatgpt-curate-sheet.md --write   # then read and store
 ```
 
 ## Migration, validation and rollback
