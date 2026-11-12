@@ -83,7 +83,7 @@ Every stage that asks a chat model takes its model and effort from the file:
 | `[match]` | the lattice's matcher | `claude-opus-5-5` | `low` |
 | `[themes]` | describing, filing and proposing themes | `claude-opus-5-5` | `low` |
 | `[digest]` | the weekly digest | `claude-opus-5-5` | `low` |
-| `[connect]` | the connection judge (`im connect`, on demand; not part of `im run` yet) | `openai/gpt-6.1-terra` | `low` |
+| `[connect]` | the connection judge (each `im run`, and `im connect`; also `max_pairs_per_run`) | `openai/gpt-6.1-terra` | `low` |
 
 Both go into the stage's version. Changing extraction's re-reads every episode, so try it first with `im trial`.
 Changing the themes' asks again about every idea that fits no theme, and changing the connection judge's asks again
@@ -93,14 +93,16 @@ The matcher and the digest use a new one from then on; what they've already done
 The sensitivity tags have no section: Jev (`jev.MODEL`) answers one yes or no per tag, and every idea and theme is
 tagged again when the questions or the cut (`sensitivity.CUT`) change.
 
-`im connect` judges pairs of clusters (SPEC §5). It nominates every two cards at cosine ≥ 0.65 where one is among the
-other's 10 nearest, leaving out pairs I linked or unlinked. Jev screens each, and Terra (`[connect]`) judges the
-pairs Jev rates at 0.39 or above with B4's prompt. Every verdict is kept in `im.connection_verdicts`, so a pair is
-asked again only when its text as shown or the judge's version (its prompt, model, effort, or the screen's
-question or cut) changes, never-asked pairs first. A connection replaces the pair's embedding stand-in; `none`,
-`unsure`, a refusal or a screened pair removes it, and the stand-ins rebuilt each run leave it out. It spends
-under the same monthly cap as `im run` (`extract.monthly_cap_usd`) and prints what it found and what Jev and
-Terra cost.
+`im run` and `im connect` judge pairs of clusters (SPEC §5). The judge nominates every two cards at cosine ≥ 0.65
+where one is among the other's 10 nearest, leaving out pairs I linked or unlinked. Jev screens each, and Terra
+(`[connect]`) judges the pairs Jev rates at 0.39 or above with B4's prompt. Every verdict is kept in
+`im.connection_verdicts`, so a pair is asked again only when its text as shown or the judge's version (its prompt,
+model, effort, or the screen's question or cut) changes, never-asked pairs first. A connection replaces the pair's
+embedding stand-in; `none`, `unsure`, a refusal or a screened pair removes it, and the stand-ins rebuilt each run
+leave it out. It spends under the same monthly cap as the rest of `im run` (`extract.monthly_cap_usd`) and reports
+what it found and what Jev and Terra cost. `im run` asks about at most `[connect] max_pairs_per_run` pairs (default
+500, about $0.60 when that many are due; 0 only counts them), so a backlog is worked through over runs; `im connect
+--limit N` asks about N now.
 
 Each section also takes `max_tokens`, a request's output budget, reasoning included (OpenRouter counts it there).
 It isn't part of any version, so raising it changes nothing already done: a request that ran out is simply asked
@@ -169,6 +171,9 @@ Then, outside that transaction:
 - **Digest.** Claude writes the last completed week's digest (Monday to Monday) once every episode of that week
   has been read and its captures matched; until then the run leaves it, with `"waiting": true` in its stats, and a
   later run writes it.
+- **Connections.** Last of the paid stages, the connection judge (above) asks about the pairs that are due, at most
+  `[connect] max_pairs_per_run` a run, and its connections replace their stand-ins; its stats are under `connect`. A
+  run with nothing due sends nothing.
 - **Observations and weight** ([M2 design](design/m2-observations-candidates-ideas.md)). Each new capture joins
   the observation it re-captures, or starts one. Each cluster is weighed (`[weight]` in `im.toml`), and up to 10
   candidates a week, the most recently said first, are proposed to me to keep as canonical or pinned. `im tune knob=value ...` previews a change to
@@ -177,10 +182,10 @@ Then, outside that transaction:
   captured something I haven't discarded; the rest is auto-filed (`src/im/router.py`; v1 used the local LLM's flags instead, see
   [decisions/0003-router-v1.md](decisions/0003-router-v1.md)).
 
-Every stage that asks a model (extraction, matching, themes, sensitivity, the digest) stops, saying
-why in its stats, when the month's spend reaches `extract.monthly_cap_usd`, when the API can't answer now, or when
-no request would get through (the credentials or the account's credit rejected, a model id that doesn't exist); the
-stages after it still run. A request whose reply fails (an error response, no answer, one cut off or not in the
+Every stage that asks a model (extraction, matching, themes, sensitivity, the digest, the connection judge) stops,
+saying why in its stats, when the month's spend reaches `extract.monthly_cap_usd`, when the API can't answer now, or
+when no request would get through (the credentials or the account's credit rejected, a model id that doesn't exist);
+the stages after it still run. A request whose reply fails (an error response, no answer, one cut off or not in the
 schema) is logged in `im.egress_log` with what it cost, counted in the stage's
 `failed`, and asked again on the next run; the stage goes on to its next item. A refused filing, scoring or
 tagging batch is skipped the same way and asked again, rather than recorded or stopping the batches after it; a

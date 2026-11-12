@@ -348,8 +348,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   (`im connect`, `im.connect`; SPEC §5). Embeddings nominate the pairs: every two cards at cosine ≥ 0.65 where one is
   among the other's 10 nearest (`connect.FLOOR`, `connect.K`). Pairs I linked or unlinked are never asked. Jev
   screens each pair, then Terra types the rest with B4's prompt, which it passed. Its method is `connect-1:…`, from
-  Terra's prompt version, model and effort and the screen's question, model and cut. **Status:** on demand only; not
-  part of `im run` yet.
+  Terra's prompt version, model and effort and the screen's question, model and cut. **Status:** each `im run` asks
+  about at most `[connect] max_pairs_per_run` due pairs (default 500), and `im connect` asks on demand.
 - **Connection verdict.** What the connection judge decided about a pair, one per pair (`im.connection_verdicts`,
   059), with the pair's text hash and the judge's method, so a pair is asked again only when either changes. Terra's
   label (`supports`, `elaborates`, `tension`, `related`, `same`, `none` or `unsure`), `refused` when it refused, or
@@ -514,7 +514,7 @@ Each role decides one thing. The model behind it can change, so models are liste
 |---|---|---|
 | Extractor | the captures in an episode | `claude-opus-5-5`, effort `medium` (`config.ExtractConfig`) |
 | Matcher | `same_point` against each candidate, so `new` or `same_as` | `[match]`, default `claude-opus-5-5` (`config.ModelConfig`); Jev planned (ROADMAP-v2 M4) |
-| Connection judge | whether a pair is connected | `[connect]`, default Terra, effort `low` (`config.ModelConfig`), chosen on B4 (SPEC §5), behind Jev's screen (B8). **Status:** on demand (`im connect`); stand-ins hold the pairs not judged yet |
+| Connection judge | whether a pair is connected | `[connect]`, default Terra, effort `low` (`config.ConnectConfig`), chosen on B4 (SPEC §5), behind Jev's screen (B8). **Status:** each `im run`, at most `max_pairs_per_run` pairs, and `im connect`; stand-ins hold the pairs not judged yet |
 | Connection-kind judge | the connection kinds on a connection | the connection judge's label, one kind at most |
 | Tension judge | whether a pair is in tension, as a proposal | Jev, `pulls4` |
 | Embedder | embeddings for neighbors, positions, lens search | `BAAI/bge-small-en-v1.5`, local |
