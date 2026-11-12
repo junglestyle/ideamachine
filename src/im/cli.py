@@ -293,30 +293,33 @@ def cmd_trial(args) -> None:
     _print(out)
 
 
-def cmd_gate(args) -> None:
-    """Jev's checks on one trial read's captures (the capture gate, decision 0012), and what the gate would do."""
-    from im import extract, gate, jev, trial
+def _live_read(x) -> tuple[str, str]:
+    """The read `im run` makes: (prompt_version, model) under the configured live prompt, model and effort."""
+    from im import extract
 
-    cfg = config.load()
-    x = cfg.extract
-    system, schema = extract.PROMPTS[args.prompt], extract.SCHEMA_V5
-    model, effort = args.model or x.model, args.effort or x.effort
+    if x.prompt not in extract.LIVE:
+        raise SystemExit(f"extract.prompt {x.prompt} isn't live; `im run` reads with {', '.join(extract.LIVE)}")
+    return extract.prompt_version(x.model, x.effort, extract.PROMPTS[x.prompt]), x.model
+
+
+def cmd_gate(args) -> None:
+    """Jev's checks on every live capture (the capture gate, decision 0012), and what the gate would do."""
+    from im import gate, jev
+
+    x = config.load().extract
     cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
     with db.connect(db.pipeline_dsn()) as conn:
-        read = (trial.version(model, effort, system, args.replicate, schema), model)
-        judge, out = jev.Jev(), {}
-        if not args.report:
-            out["asked"] = gate.run(conn, judge, read, cap, args.limit)
-        out["summary"] = gate.summary(conn, judge, read)
+        read, judge = _live_read(x), jev.Jev()
+        out = {"asked": gate.run(conn, judge, read, cap, args.limit), "summary": gate.summary(conn, judge, read)}
     _print(out)
 
 
 def cmd_audit_gate(args) -> None:
-    """The gate's labeling sheet: drawn from a trial read Jev answered about, drafted by models, my review of their
+    """The gate's labeling sheet: drawn from live captures Jev answered about, drafted by models, my review of their
     disagreements, and the cuts it suggests."""
     from pathlib import Path
 
-    from im import extract, gate_audit, jev, llm, trial
+    from im import gate_audit, jev, llm
 
     folder = Path(args.folder)
     if args.action == "review":
@@ -335,11 +338,7 @@ def cmd_audit_gate(args) -> None:
             client = llm.client_for(args.model, cfg.egress.zdr)
             _print(gate_audit.draft(conn, folder, client, args.model, args.effort or "low", cap))
             return
-        if not args.prompt:
-            raise SystemExit("sheet needs the trial's prompt, e.g. v5 --model openai/gpt-6.1-sol")
-        system, schema = extract.PROMPTS[args.prompt], extract.SCHEMA_V5
-        model, effort = args.model or x.model, args.effort or x.effort
-        read = (trial.version(model, effort, system, args.replicate, schema), model)
+        read = _live_read(x)
         _print(gate_audit.write(conn, folder, jev.Jev(), read, args.seed, args.size))
 
 
@@ -800,28 +799,21 @@ def main(argv=None) -> None:
                     help="also count as found a capture the other model quoted from different lines, where Jev says "
                          "they make the same point (sends those pairs to Jev, even with --report; answers are kept)")
     tr.set_defaults(func=cmd_trial)
-    ga = sub.add_parser("gate", help="Jev's checks on a trial's captures: does the gist go past its lines, is the "
-                        "point mine, is it mocked? (sends to Jev; answers are kept)")
-    ga.add_argument("prompt", help="the trial's prompt, e.g. v5")
-    ga.add_argument("--model", help="the trial's model, as it named it (default: the configured one)")
-    ga.add_argument("--effort", help="its effort in the trial (default: the configured one)")
-    ga.add_argument("--replicate", type=int, default=1, help="which of its reads (default the first)")
-    ga.add_argument("--limit", type=int, help="ask about at most this many captures this time")
-    ga.add_argument("--report", action="store_true", help="only summarize what Jev has answered; send nothing")
+    ga = sub.add_parser("gate", help="Jev's checks on every live capture: does the gist go past its lines, is the "
+                        "point mine, is it mocked? Then how often each fires (sends to Jev; answers are kept; "
+                        "archive captures are left out)")
+    ga.add_argument("--limit", type=int, help="ask about at most this many captures this time (0: send nothing, "
+                    "say how many are due)")
     ga.add_argument("--monthly-cap-usd", type=float, help="send nothing once the month's spend reaches this "
                     "(default: config)")
     ga.set_defaults(func=cmd_gate)
-    ag = sub.add_parser("audit-gate", help="set the gate's cuts: a sheet of captures Jev answered about, drafted by "
-                        "two models; I review only where they disagree (sheet and review send nothing; draft sends "
-                        "to the model)")
+    ag = sub.add_parser("audit-gate", help="set the gate's cuts: a sheet of live captures Jev answered about, drafted "
+                        "by two models; I review only where they disagree (sheet and review send nothing; draft "
+                        "sends to the model)")
     ag.add_argument("action", choices=["sheet", "draft", "review", "score"])
     ag.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
-    ag.add_argument("prompt", nargs="?", help="sheet: the trial's prompt, e.g. v5")
-    ag.add_argument("--model", help="sheet: the trial's model, as it named it (default: the configured one); "
-                    "draft: the model drafting, e.g. openai/gpt-6.1-terra")
-    ag.add_argument("--effort", help="sheet: the trial's effort (default: the configured one); draft: the drafting "
-                    "model's (default low)")
-    ag.add_argument("--replicate", type=int, default=1, help="sheet: which of the trial's reads (default the first)")
+    ag.add_argument("--model", help="draft: the model drafting, e.g. openai/gpt-6.1-terra")
+    ag.add_argument("--effort", help="draft: the drafting model's effort (default low)")
     ag.add_argument("--size", type=int, default=80, help="sheet: how many captures, half flagged by Jev")
     ag.add_argument("--seed", type=int, default=13, help="sheet: the sample and shuffle's seed")
     ag.add_argument("--monthly-cap-usd", type=float, help="draft: send nothing once the month's spend reaches this "

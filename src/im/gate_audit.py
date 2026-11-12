@@ -1,7 +1,7 @@
 """Setting the capture gate's cuts from marked captures (decision 0012): models draft the marks, I review where they
 disagree.
 
-The sheet holds captures from one trial read that Jev has answered about (im.gate), half of them ones Jev gives 0.5 or
+The sheet holds live captures (gate.captures) that Jev has answered about (im.gate), half of them ones Jev gives 0.5 or
 more on some deciding check and half the rest, so both sides of every cut are on it. Each gets two marks:
 
 - gist: `ok`; `past` when it goes past what its lines say (adds, misstates, overstates or completes them); or
@@ -15,7 +15,7 @@ ranks the marks (AUC) and suggests each decision's cut: for a repair, the highes
 gists marked past or unclear (a repair costs a request); for a drop, the lowest at which 90% of what it drops is
 marked drop (a drop loses a capture). A sheet made before a check was asked scores on the checks its answers have.
 
-The sheet sends nothing; a draft sends each capture, as the trial's payload had it.
+The sheet sends nothing; a draft sends each capture, as its episode's payload had it.
 """
 
 import json
@@ -23,7 +23,7 @@ import random
 import re
 from pathlib import Path
 
-from im import egress, gate, jev, llm, themes, trial
+from im import egress, gate, jev, llm, themes
 
 SIZE = 80
 FLAGGED_AT = 0.5
@@ -83,7 +83,7 @@ def _capture(c: dict) -> dict:
 
 
 def write(conn, out: Path, client, read: tuple[str, str], seed: int = 13, size: int = SIZE) -> dict:
-    """The sheet and its key: `size` captures of `read` (prompt_version, model) Jev has answered about (`client`'s
+    """The sheet and its key: `size` live captures under `read` (prompt_version, model) Jev has answered about (`client`'s
     question set), half flagged at FLAGGED_AT on a deciding check, half not."""
     out.mkdir(parents=True, exist_ok=True)
     sheet, key = out / "sheet.md", out / "key.json"
@@ -91,16 +91,16 @@ def write(conn, out: Path, client, read: tuple[str, str], seed: int = 13, size: 
         raise SystemExit(f"{out} already has a sheet; score it, or pick another folder")
     kept = jev.kept(conn, jev.question_set(client, "gate"))
     caps = {"flagged": [], "not_flagged": []}
-    for eid, (sha, items, _) in sorted(trial._reads(conn, *read).items(), key=lambda kv: str(kv[0])):
+    for eid, (sha, items) in sorted(gate.captures(conn, read)[0].items(), key=lambda kv: str(kv[0])):
         for it in items:
             if (a := kept.get(gate.key(sha, it))) is None:
                 continue
             flagged = max(a[q] for q in gate.GIST + gate.DROP) >= FLAGGED_AT
             caps["flagged" if flagged else "not_flagged"].append(
-                {"episode": str(eid), "payload_sha256": sha, "quote": it["quote"], "gist": it["gist"],
+                {"episode": str(eid), "item_id": it["item_id"], "payload_sha256": sha, "quote": it["quote"], "gist": it["gist"],
                  "segments": it["source_segment_ids"], "answers": a})
     if not any(caps.values()):
-        raise SystemExit(f"Jev hasn't answered about {read[1]}'s captures yet: im gate <prompt> --model {read[1]}")
+        raise SystemExit("Jev hasn't answered about the live captures yet: im gate")
     rng = random.Random(seed)
     picked = [c | {"set": s} for s, cs in caps.items() for c in rng.sample(cs, min(size // 2, len(cs)))]
     rng.shuffle(picked)
@@ -121,7 +121,7 @@ def write(conn, out: Path, client, read: tuple[str, str], seed: int = 13, size: 
 
 def draft(conn, folder: Path, client, model: str, effort: str, monthly_cap_usd: float) -> dict:
     """A chat model (`client`, llm.client_for) marks every item, blind to mine and the others', into
-    draft-<model>.json as it goes. An item whose episode's transcript changed since the trial is skipped."""
+    draft-<model>.json as it goes. An item whose episode's transcript changed since it was read is skipped."""
     k = json.loads((folder / "key.json").read_text())
     path = folder / f"draft-{model.replace('/', '_')}.json"
     got = json.loads(path.read_text()) if path.exists() else {}
