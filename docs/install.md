@@ -27,6 +27,9 @@ uv run im mishearings list   # the transcription's mishearings, proposed by v5 c
 uv run im audit-edges sheet saved/b4-4 --size 75 --seed 7 --exclude saved/b4-1 saved/b4-2 saved/b4-3   # B4: a fresh sheet with no pair I've marked before
 uv run im audit-edges draft saved/b4-3 --model jev-1.14.0   # B4: Jev answers a sheet; score shows connection at every cut
 uv run im audit-edges review saved/b4-1 saved/b4-2   # B4: pairs where a chat model's draft disagrees with my mark, with its case; a pair I left unmarked takes the models' mark where they agree (--all lists those too, to spot-check); answer in review.md, run again to apply
+uv run im audit-eligibility sheet saved/eligibility-1   # capture eligibility (docs/design/eligibility-audit.md): 100 live captures at random, with their lines, under the frozen rubric; sends nothing (the archive's captures are left out and counted)
+uv run im audit-eligibility draft saved/eligibility-1 --model openai/gpt-6.1-terra   # a model labels every item eligible, ineligible or uncertain, blind to other drafts; then --model google/gemini-4-carbon; no Anthropic model (Opus wrote the captures)
+uv run im audit-eligibility review saved/eligibility-1   # review.md: the items the drafts split on and 20 they agree on, shuffled, no labels; mark them, run again to read the marks back; then `score` (model agreement, my validation, the ineligible rate)
 uv run im bench-match run saved/b1-1 --limit 20   # B1: Opus's logged match decisions, replayed through Jev; `score` compares
 uv run im audit-tension draft saved/tension-2 --model jev-1.14.0   # Jev drafts a probe sheet (via OpenRouter); --probes asks more
                                   # (OpenRouter models need OPENROUTER_API_KEY)

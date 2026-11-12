@@ -373,6 +373,32 @@ def cmd_audit_edges(args) -> None:
         _print(edge_audit.write(conn, Path(args.folder), args.seed, args.size, [Path(f) for f in args.exclude]))
 
 
+def cmd_audit_eligibility(args) -> None:
+    """Capture eligibility: a random sample of live captures, labeled by two models under a frozen rubric; the items
+    they split on, and some they agree on, marked by me blind; then their agreement and the ineligible rate."""
+    from pathlib import Path
+
+    from im import eligibility_audit, llm
+
+    folder = Path(args.folder)
+    if args.action == "review":
+        _print(eligibility_audit.review(folder))
+        return
+    if args.action == "score":
+        _print(eligibility_audit.score(folder))
+        return
+    cfg = config.load()
+    with db.connect(db.pipeline_dsn()) as conn:
+        if args.action == "draft":
+            if not args.model:
+                raise SystemExit("draft needs --model, the model labeling, e.g. openai/gpt-6.1-terra")
+            cap = cfg.extract.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
+            _print(eligibility_audit.draft(conn, llm.client_for(args.model, cfg.egress.zdr), folder, args.model,
+                                           args.effort, cap))
+            return
+        _print(eligibility_audit.write(conn, folder, eligibility_audit.live_read(cfg.extract), args.seed, args.size))
+
+
 def cmd_audit_probe(args) -> None:
     """Analogy or tension: a blind sheet asking one question of pairs proposed several ways, then my marks tallied."""
     from pathlib import Path
@@ -826,6 +852,21 @@ def main(argv=None) -> None:
                     help="draft: the candidate model, e.g. openai/gpt-6.1-terra, or jev-1.14.0 (TypeSafe's Jev)")
     ae.add_argument("--effort", default="low", help="draft: the candidate's effort")
     ae.set_defaults(func=cmd_audit_edges)
+    ael = sub.add_parser("audit-eligibility", help="capture eligibility: a random sample of live captures, labeled "
+                         "by two models under a frozen rubric; I mark where they split, and some where they agree, "
+                         "blind (sheet, review and score send nothing; draft sends to the model)")
+    ael.add_argument("action", choices=["sheet", "draft", "review", "score"],
+                     help="sheet: draw the sample; draft: a model labels every item; review: write review.md for "
+                          "my marks, or read them back; score: agreement, validation and the ineligible rate")
+    ael.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
+    ael.add_argument("--model", help="draft: the model labeling, not Anthropic's, e.g. openai/gpt-6.1-terra")
+    ael.add_argument("--effort", default="low", help="draft: the model's effort")
+    ael.add_argument("--size", type=int, default=100, help="sheet: how many captures")
+    ael.add_argument("--seed", type=int, default=10, help="sheet: the sample's seed (review draws its agreed items "
+                     "from it too)")
+    ael.add_argument("--monthly-cap-usd", type=float, help="draft: send nothing once the month's spend reaches this "
+                     "(default: config)")
+    ael.set_defaults(func=cmd_audit_eligibility)
     for name, question, what in (
             ("audit-analogies", "analogy", "a blind sheet of possible analogies between unrelated ideas, ranked by "
                                            "Jev beside random pairs (sends to Jev; --only facets to Claude); score "

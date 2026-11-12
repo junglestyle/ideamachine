@@ -446,7 +446,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 
 - **Card eligibility.** A cluster is shown in the neutral view if its provenance is `mine`, or if it has a capture on
   an active episode or of the archive (033:58, 055, 057), unless it was merged away (060). That's what "every
-  cluster that passed the gates" means (033:1-3).
+  cluster that passed the gates" means (033:1-3). _Not_ capture eligibility, which is measured, not shown.
 - **Neutral view, card.** The neutral view is a list of every eligible cluster, with what's known about each and no
   score ([0007]; 033:1-3; `web.py`). A card is one cluster as that view shows it: a row of `pub.cards` (033:32), with
   title, statement, maturity, kept status, my note, observations by owner-attribution class, conversations, first
@@ -574,7 +574,8 @@ Each role decides one thing. The model behind it can change, so models are liste
     captures I mark different (or unsure); a false split is a near-miss pair I mark same ([M2 design]:225-227);
   - **B6, local title preference**: blind pairs of titles, local against Claude's.
 - **Evaluation sheet, mark.** An evaluation sheet is a set of examples for me to judge by hand, with the systems that
-  made them hidden. A mark is one recorded judgment (`edge_audit`, `dedupe_audit`, `probe_audit`, `summary_audit`).
+  made them hidden. A mark is one recorded judgment (`edge_audit`, `dedupe_audit`, `probe_audit`, `summary_audit`,
+  `eligibility_audit`).
 - **B4 labels.** The marks the connection-agreement sheet allows (`edge_audit.LABELS`, `HEADER`):
   - `supports`, `elaborates`, `tension`: connected, with that connection kind;
   - `related`: an untyped connection;
@@ -585,6 +586,11 @@ Each role decides one thing. The model behind it can change, so models are liste
   same words"), and `different` means they aren't (`dedupe_audit`).
 - **Novelty marks.** Discovery sheets (analogy, tension) mark a pair `new` (it holds, and I hadn't connected it),
   `known` (it holds, and I had it) or `no` ([0009] amendment, `probe_audit.MARKS`).
+- **Capture eligibility.** Whether a capture deserves to be a card, one of my thoughts worth keeping: `eligible`,
+  `ineligible` (logistics, small talk, narration without a point, transcription noise, someone else's point I only go
+  along with, a reaction with no content) or `uncertain` when the capture and its lines can't settle it. Decided by
+  a frozen rubric, versioned by its hash (`eligibility_audit.RUBRIC`, [eligibility audit]). **Status:** measured
+  only (`im audit-eligibility`); nothing reads it. _Not_ card eligibility, which is whether a cluster is shown.
 - **`im tune`.** Previews a change to the weight knobs, at no cost ([M2 design] §Weight).
 
 ## Telling them apart
@@ -970,3 +976,4 @@ These terms are in use, but no doc or file defines them:
 [M2 design]: design/m2-observations-candidates-ideas.md
 [M6 notes]: design/m6-emanation.md
 [connections storage]: design/connections-storage.md
+[eligibility audit]: design/eligibility-audit.md
