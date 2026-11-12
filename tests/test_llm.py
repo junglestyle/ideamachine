@@ -50,6 +50,10 @@ def test_under_zero_data_retention_claude_goes_through_openrouter_to_endpoints_t
     assert body["model"] == "anthropic/claude-opus-5.5" and body["provider"]["zdr"] is True
     # Its system prompt is cached, as through Anthropic; without the mark, Claude caches nothing.
     assert body["messages"][0]["content"] == [{"type": "text", "text": "system", "cache_control": {"type": "ephemeral"}}]
+    # At its list price: the regional endpoints listed 10% above it are left out.
+    assert body["provider"]["max_price"] == {"prompt": 4.0, "completion": 20.0}
+    llm.complete(client, "z-ai/glm-5.3", "low", "system", SCHEMA, "text")
+    assert "max_price" not in sent[-1]["provider"]   # no list price of ours for other models
 
 
 def test_an_answer_that_isnt_json_is_asked_for_again_and_both_are_paid_for():
@@ -112,16 +116,37 @@ def test_a_dated_model_id_is_priced_as_its_model_and_an_unknown_one_never_as_fre
     assert llm.cost("claude-mystery-9", usage) == max(p[0] for p in llm.PRICES.values())
 
 
-@pytest.mark.parametrize("code, raised", [(429, llm.Unavailable), (503, llm.Unavailable), (402, llm.Stop),
-                                          (400, RuntimeError)])
-def test_a_rate_limit_or_server_error_is_worth_retrying_and_other_http_errors_arent(monkeypatch, code, raised):
+@pytest.mark.parametrize("code, raised, tries", [(429, llm.Unavailable, 4), (503, llm.Unavailable, 4),
+                                                 (402, llm.Stop, 1), (400, RuntimeError, 1)])
+def test_a_rate_limit_or_server_error_is_retried_and_other_http_errors_arent(monkeypatch, code, raised, tries):
+    sent, waited = [], []
+
     def fail(req, timeout):
+        sent.append(req)
         raise urllib.error.HTTPError(req.full_url, code, "no", {}, io.BytesIO(b"detail"))
     monkeypatch.setattr(urllib.request, "urlopen", fail)
+    monkeypatch.setattr(llm.time, "sleep", waited.append)
     with pytest.raises(raised):
         llm.complete(llm.OpenRouter(key="k"), "z-ai/glm-5.3", "low", "s", SCHEMA, "t")
+    assert len(sent) == tries and waited == list(llm.RETRY_DELAYS)[:tries - 1]
     with pytest.raises(raised):
         jev.Jev(key="k", route="typesafe").complete({"questions": {}})
+
+
+def test_a_hiccup_that_clears_is_retried_and_answered(monkeypatch):
+    replies = [urllib.error.URLError("handshake timed out"),
+               io.BytesIO(json.dumps({"error": {"code": 503, "message": "provider down"}}).encode()),
+               io.BytesIO(json.dumps(answer('{"items": []}')).encode())]
+
+    def flaky(req, timeout):
+        r = replies.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+    monkeypatch.setattr(urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    r = llm.complete(llm.OpenRouter(key="k"), "z-ai/glm-5.3", "low", "s", SCHEMA, "t")
+    assert r.text == '{"items": []}' and not replies
 
 
 @pytest.mark.parametrize("second, stops", [({"error": {"code": 503, "message": "down"}}, True),

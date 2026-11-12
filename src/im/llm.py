@@ -9,6 +9,7 @@ through `egress.ask`. OpenRouter reports what each request cost, so its models n
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -49,6 +50,23 @@ def _later(status: int | None) -> bool:
 def _account(status: int | None) -> bool:
     """An HTTP status every request would get alike: the key rejected, not allowed, or out of credit."""
     return status in (401, 402, 403)
+
+
+# Seconds to wait before each retry of a request that failed for now (no connection, a timeout, a rate limit, a server
+# error), before giving up until a later run. A request that timed out may have been answered and billed all the same:
+# at these prices a second charge beats a stage that stops at the first hiccup of a long run.
+RETRY_DELAYS = (2, 8, 30)
+
+
+def _with_retries(send):
+    """`send()`, again after each of RETRY_DELAYS while it raises Unavailable; the last Unavailable is raised."""
+    for delay in (*RETRY_DELAYS, None):
+        try:
+            return send()
+        except Unavailable:
+            if delay is None:
+                raise
+            time.sleep(delay)
 
 
 @dataclass(frozen=True)
@@ -114,7 +132,10 @@ def complete(client, model: str, effort: str, system: str, schema: dict, text: s
     credentials, the account's credit, a model id that doesn't exist, a budget Claude would need streamed). An
     exception raised after an earlier attempt was paid for carries that cost as `cost_usd`, for the egress log."""
     if via_openrouter(model) or isinstance(client, OpenRouter):
-        return client.complete(openrouter_id(model), effort, system, schema, text, max_tokens or MAX_TOKENS)
+        # Claude under zero data retention: at its list price, which leaves out the regional endpoints listed 10%
+        # above it.
+        return client.complete(openrouter_id(model), effort, system, schema, text, max_tokens or MAX_TOKENS,
+                               max_price=price(model))
     max_tokens = max_tokens or CLAUDE_MAX_TOKENS
     if max_tokens > CLAUDE_CEILING:
         raise Stop(f"max_tokens {max_tokens} is over {CLAUDE_CEILING}, past which Claude needs a streamed request: "
@@ -146,23 +167,38 @@ def complete(client, model: str, effort: str, system: str, schema: dict, text: s
                  r.usage.output_tokens, cost(served, r.usage))
 
 
-def post_json(url: str, key: str, body: dict, what: str, timeout: int, headers: dict | None = None) -> dict:
-    """POST a JSON body and read the JSON answer. A rate limit, a server error or no connection is Unavailable; a
+def post_json(url: str, key: str, body: dict, what: str, timeout: int, headers: dict | None = None,
+              transient=lambda answer: None) -> dict:
+    """POST a JSON body and read the JSON answer, retried (RETRY_DELAYS) while it fails for now: a rate limit, a server
+    error or no connection, or an answer `transient(answer)` names an error worth retrying. Then that's Unavailable; a
     rejected key or no credit is Stop; any other HTTP error is a RuntimeError."""
     req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={
         "Authorization": f"Bearer {key}", "Content-Type": "application/json", **(headers or {})})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:300]
-        if _later(e.code):
-            raise Unavailable(f"{what}, HTTP {e.code}: {detail}") from None
-        if _account(e.code):
-            raise Stop(f"{what}, HTTP {e.code}: {detail}") from None
-        raise RuntimeError(f"{what}, HTTP {e.code}: {detail}") from None
-    except (urllib.error.URLError, TimeoutError) as e:
-        raise Unavailable(f"{what}: {e}") from None
+
+    def once() -> dict:
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                answer = json.load(r)
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="replace")[:300]
+            if _later(e.code):
+                raise Unavailable(f"{what}, HTTP {e.code}: {detail}") from None
+            if _account(e.code):
+                raise Stop(f"{what}, HTTP {e.code}: {detail}") from None
+            raise RuntimeError(f"{what}, HTTP {e.code}: {detail}") from None
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise Unavailable(f"{what}: {e}") from None
+        if why := transient(answer):
+            raise Unavailable(f"{what}: {why}")
+        return answer
+    return _with_retries(once)
+
+
+def _transient_error(answer: dict) -> str | None:
+    """An error OpenRouter reported in an answer's body (a provider's rate limit or outage) worth retrying, or None."""
+    error = answer.get("error") if "choices" not in answer else None
+    code = (error or {}).get("code")
+    return f"error {code}: {str(error.get('message'))[:300]}" if isinstance(code, int) and _later(code) else None
 
 
 NO_SCHEMA: set[str] = set()   # models found, in this process, to take no JSON schema: asked with it in the prompt
@@ -181,21 +217,25 @@ class OpenRouter:
         self.post = post or self._post
 
     def _post(self, body: dict) -> dict:
-        return post_json(OPENROUTER_URL, self.key, body, "OpenRouter", 600, {"X-Title": "Idea Machine"})
+        return post_json(OPENROUTER_URL, self.key, body, "OpenRouter", 600, {"X-Title": "Idea Machine"},
+                         transient=_transient_error)
 
-    def complete(self, model, effort, system, schema, text, max_tokens) -> Reply:
+    def complete(self, model, effort, system, schema, text, max_tokens, max_price=None) -> Reply:
+        """`max_price`: ($/M in, $/M out) above which no endpoint is used."""
         if model not in NO_SCHEMA:
             try:
-                return self._complete(model, effort, system, schema, text, max_tokens, in_prompt=False)
+                return self._complete(model, effort, system, schema, text, max_tokens, False, max_price)
             except RuntimeError as e:
                 if "data policy" in str(e):
                     raise RuntimeError(f"{model}: no provider that keeps nothing sent ({e})") from None
+                if max_price and "No endpoints found" in str(e):   # not a model that takes no schema
+                    raise RuntimeError(f"{model}: no endpoint at its list price {max_price} ({e})") from None
                 if "No endpoints found" not in str(e):
                     raise
                 NO_SCHEMA.add(model)
-        return self._complete(model, effort, system, schema, text, max_tokens, in_prompt=True)
+        return self._complete(model, effort, system, schema, text, max_tokens, True, max_price)
 
-    def _complete(self, model, effort, system, schema, text, max_tokens, in_prompt: bool) -> Reply:
+    def _complete(self, model, effort, system, schema, text, max_tokens, in_prompt: bool, max_price=None) -> Reply:
         """The answer, or after a second answer that isn't JSON either, that one as it came (both paid for): the
         caller logs it, and it fails there."""
         if in_prompt:
@@ -210,7 +250,9 @@ class OpenRouter:
                 "reasoning": {"effort": effort}, "usage": {"include": True},
                 # Only providers that honor the schema, and none that keep or train on what's sent.
                 "provider": {"require_parameters": not in_prompt, "data_collection": "deny",
-                             **({"zdr": True} if self.zdr else {})}}
+                             **({"zdr": True} if self.zdr else {}),
+                             **({"max_price": {"prompt": max_price[0], "completion": max_price[1]}}
+                                if max_price else {})}}
         if not in_prompt:
             body["response_format"] = {"type": "json_schema",
                                        "json_schema": {"name": "answer", "strict": True, "schema": schema}}
