@@ -9,6 +9,7 @@ through `egress.ask`. OpenRouter reports what each request cost, so its models n
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -49,6 +50,23 @@ def _later(status: int | None) -> bool:
 def _account(status: int | None) -> bool:
     """An HTTP status every request would get alike: the key rejected, not allowed, or out of credit."""
     return status in (401, 402, 403)
+
+
+# Seconds to wait before each retry of a request that failed for now (no connection, a timeout, a rate limit, a server
+# error), before giving up until a later run. A request that timed out may have been answered and billed all the same:
+# at these prices a second charge beats a stage that stops at the first hiccup of a long run.
+RETRY_DELAYS = (2, 8, 30)
+
+
+def _with_retries(send):
+    """`send()`, again after each of RETRY_DELAYS while it raises Unavailable; the last Unavailable is raised."""
+    for delay in (*RETRY_DELAYS, None):
+        try:
+            return send()
+        except Unavailable:
+            if delay is None:
+                raise
+            time.sleep(delay)
 
 
 @dataclass(frozen=True)
@@ -146,23 +164,38 @@ def complete(client, model: str, effort: str, system: str, schema: dict, text: s
                  r.usage.output_tokens, cost(served, r.usage))
 
 
-def post_json(url: str, key: str, body: dict, what: str, timeout: int, headers: dict | None = None) -> dict:
-    """POST a JSON body and read the JSON answer. A rate limit, a server error or no connection is Unavailable; a
+def post_json(url: str, key: str, body: dict, what: str, timeout: int, headers: dict | None = None,
+              transient=lambda answer: None) -> dict:
+    """POST a JSON body and read the JSON answer, retried (RETRY_DELAYS) while it fails for now: a rate limit, a server
+    error or no connection, or an answer `transient(answer)` names an error worth retrying. Then that's Unavailable; a
     rejected key or no credit is Stop; any other HTTP error is a RuntimeError."""
     req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={
         "Authorization": f"Bearer {key}", "Content-Type": "application/json", **(headers or {})})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:300]
-        if _later(e.code):
-            raise Unavailable(f"{what}, HTTP {e.code}: {detail}") from None
-        if _account(e.code):
-            raise Stop(f"{what}, HTTP {e.code}: {detail}") from None
-        raise RuntimeError(f"{what}, HTTP {e.code}: {detail}") from None
-    except (urllib.error.URLError, TimeoutError) as e:
-        raise Unavailable(f"{what}: {e}") from None
+
+    def once() -> dict:
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                answer = json.load(r)
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="replace")[:300]
+            if _later(e.code):
+                raise Unavailable(f"{what}, HTTP {e.code}: {detail}") from None
+            if _account(e.code):
+                raise Stop(f"{what}, HTTP {e.code}: {detail}") from None
+            raise RuntimeError(f"{what}, HTTP {e.code}: {detail}") from None
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise Unavailable(f"{what}: {e}") from None
+        if why := transient(answer):
+            raise Unavailable(f"{what}: {why}")
+        return answer
+    return _with_retries(once)
+
+
+def _transient_error(answer: dict) -> str | None:
+    """An error OpenRouter reported in an answer's body (a provider's rate limit or outage) worth retrying, or None."""
+    error = answer.get("error") if "choices" not in answer else None
+    code = (error or {}).get("code")
+    return f"error {code}: {str(error.get('message'))[:300]}" if isinstance(code, int) and _later(code) else None
 
 
 NO_SCHEMA: set[str] = set()   # models found, in this process, to take no JSON schema: asked with it in the prompt
@@ -181,7 +214,8 @@ class OpenRouter:
         self.post = post or self._post
 
     def _post(self, body: dict) -> dict:
-        return post_json(OPENROUTER_URL, self.key, body, "OpenRouter", 600, {"X-Title": "Idea Machine"})
+        return post_json(OPENROUTER_URL, self.key, body, "OpenRouter", 600, {"X-Title": "Idea Machine"},
+                         transient=_transient_error)
 
     def complete(self, model, effort, system, schema, text, max_tokens) -> Reply:
         if model not in NO_SCHEMA:
