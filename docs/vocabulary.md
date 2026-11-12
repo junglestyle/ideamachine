@@ -1,6 +1,6 @@
 # Vocabulary
 
-_As of 2026-11-11. What each term in Idea Machine is, where it's stored, and what it isn't. Definitions say what a
+_As of 2026-11-12. What each term in Idea Machine is, where it's stored, and what it isn't. Definitions say what a
 thing is. Where it matters, they keep three things apart: the thing, how it's stored, and how it came about. Status
 (what's built, what's planned) goes in a trailing **Status** note, and history is left to the decisions. Words that
 mean two things, or two words that mean one, are listed at the end, each with the one meaning to use._
@@ -228,10 +228,12 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   (relayed or my own): whether it makes the same point as each (`same_point`), the nearest that does being joined
   (`same_as`), else `new` (`lattice.match_stage`; `item_matches.decision`, 008:30, which adds `skipped`). Matcher v1
   could also decide `evolves`; v2 writes no lineage (decision 0012). When a capture makes the same point as two or
-  more clusters, they're logged for my review as a possible duplicate (`im.merge_review`, 049).
-- **Match provenance.** What placed a capture in its cluster (`judged_by`, 008:21). It's either the matcher's version
-  (`match-1:…` or `match-2:…`) or `carried:observation` (`lattice.CARRIED`). The second records that the capture
-  followed its observation into the cluster, without a matcher judgment.
+  more clusters, they're logged for my review as a possible duplicate (`im.merge_review`, 049); a merge that makes
+  them one resolves the row (`merge_id`, 060).
+- **Match provenance.** What placed a capture in its cluster (`judged_by`, 008:21). It's the matcher's version
+  (`match-1:…` or `match-2:…`), `carried:observation` (`lattice.CARRIED`), or `merge` (`merge.MERGED`). The second
+  records that the capture followed its observation into the cluster, without a matcher judgment; the third that it
+  moved there when I merged its cluster into this one.
 - **Recurrence.** An independent occurrence of a cluster's point by me. I count once for each distinct conversation
   (or source context) my `me` observations are in, and again within one conversation whenever an observation comes at
   least `recurrence_minutes` (30) after the last one counted. The first occurrence counts, so a cluster I said once
@@ -291,8 +293,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   database (`im.ideas.notes`, 008:12). In the live database `notes` holds only the note I typed adding an idea (023).
 - **Correction.** An `idea_correct` event that replaces a cluster's title or statement (011).
 - **Feedback event.** A recorded action or judgment of mine (`pub.feedback_events`, 008:88-98). `source` says where I
-  made it: `cli` or `emanation`, and `lattice` or `mcp` for Lattice's, until 2026-11-11. Where events disagree, my
-  latest is the one with the highest `event_id`; `at` bounds time windows and orders nothing (SPEC.md:90-92, 043).
+  made it: `cli` or `emanation`, `merge` for what a merge carried to the cluster kept (`merge.MERGED`), and `lattice`
+  or `mcp` for Lattice's, until 2026-11-11. Where events disagree, my latest is the one with the highest `event_id`;
+  `at` bounds time windows and orders nothing (SPEC.md:90-92, 043).
   The feedback event kinds, from the CHECK at 031:7-11:
   - on clusters: `idea_keep` (payload `as`: `canonical` or `pinned`), `idea_unkeep`, `idea_dismiss`, `idea_add`,
     `star`, `unstar`, `link`, `unlink`, `idea_note`, `idea_correct`, `idea_sensitive`;
@@ -317,9 +320,20 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   novelty, compression and outside value, combined into a score (017, 025). [0007] threw them out as labels, and
   [0012] retired the scoring stage and dropped its table and views (053). Past `idea_compare` events stay in the
   ledger.
-- **Merging and rejecting clusters.** **Not yet specified.** SPEC.md:104 and the [M2 design]:138 say merge and reject
-  "stay", but no state, column or event exists for either on a cluster, and ROADMAP-v2.md:21 says ideas can't be
-  merged yet. Themes can be merged and rejected (024).
+- **Merge.** My decision that two clusters make one point: `im merge KEEP OTHER` merges OTHER into KEEP (`im.merge`).
+  OTHER's captures (as `same_as`, judged by `merge`), its typed observations and the match decisions that named it
+  move to KEEP, and its connections and lineage are re-pointed to KEEP, unless KEEP already has a connection or a
+  verdict on that pair, or it's an embedding stand-in or between the two. My links and unlinks on OTHER count for
+  KEEP (`im.my_link_events`, 060), every connection verdict on OTHER is dropped, and how I kept OTHER, or my mark that
+  it's sensitive, carries to KEEP when KEEP had neither. KEEP's title, statement and note stay. OTHER is then
+  **merged away**: it has no text (`im.idea_text`), isn't kept (`im.idea_kept`), and has no embedding, so it's on no
+  card and no capture can join it; its row and my events on it stay. _Not_ to merge themes, and _not_ B5's merged
+  observations.
+- **Merge record.** What a merge did, one row per cluster merged away (`im.idea_merges`, 060): which cluster went into
+  which, when, the captures moved with their membership as it was, the match decisions and typed observations moved,
+  OTHER's title, statement and my note as shown, and the events the merge carried, so a merge could be undone.
+  Forgetting the speech either cluster was made from deletes it, with the cluster merged away
+  (`pipeline._purge_tombstoned`). **Status:** no unmerge is built. Rejecting a cluster isn't specified.
 
 ## Graph
 
@@ -354,7 +368,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   059), with the pair's text hash and the judge's method, so a pair is asked again only when either changes. Terra's
   label (`supports`, `elaborates`, `tension`, `related`, `same`, `none` or `unsure`), `refused` when it refused, or
   `screened`. The first five are connections; `none`, `unsure`, `refused` and `screened` are not. A `same` is also
-  logged in `im.merge_review` as `judged_same`, for my review; nothing is merged.
+  logged in `im.merge_review` as `judged_same`, for my review; nothing is merged unless I merge it (`im merge`).
 - **Screened.** A connection verdict that Jev's screen gave without asking Terra: its `belongs`
   (`jev.QUESTIONS["edge"]`) is below `connect.SCREEN_CUT`, 0.39 (B8). A screened pair isn't connected.
 - **Connection kind.** An optional annotation on a connection that says how the two relate. A connection may carry
@@ -424,8 +438,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 ## Views and lenses
 
 - **Card eligibility.** A cluster is shown in the neutral view if its provenance is `mine`, or if it has a capture on
-  an active episode or of the archive (033:58, 055, 057). That's what "every cluster that passed the gates"
-  means (033:1-3).
+  an active episode or of the archive (033:58, 055, 057), unless it was merged away (060). That's what "every
+  cluster that passed the gates" means (033:1-3).
 - **Neutral view, card.** The neutral view is a list of every eligible cluster, with what's known about each and no
   score ([0007]; 033:1-3; `web.py`). A card is one cluster as that view shows it: a row of `pub.cards` (033:32), with
   title, statement, maturity, kept status, my note, observations by owner-attribution class, conversations, first
@@ -752,15 +766,15 @@ is "pin". "Star" is the sky glyph, and also the legacy event name for a pin.
 
 ### merge, reject, same
 
-- SPEC.md:89 and 104 and the [M2 design]:138 list merging and rejecting clusters. Nothing implements either
-  (031:7-11), and ROADMAP-v2.md:21 says ideas can't be merged yet.
+- To merge one cluster into another (`im merge`, 060): see Merge above. SPEC.md:104 and the [M2 design]:138 also list
+  rejecting clusters, which nothing implements.
 - To merge or reject a theme (024).
 - To group captures into an observation; B5 counts these "merged observations" (`dedupe_audit`).
 - The matcher's `same_as`, a same-point match (008:30).
 - B4's `same`: the same idea said twice. B5's `same`: the same capture.
 
-**Use:** merge themes, reject a theme, group captures into an observation, and a same-point match. B4's `same` and
-B5's `same` are two different marks. Merging and rejecting clusters is not yet specified.
+**Use:** merge clusters, merge themes, reject a theme, group captures into an observation, and a same-point match.
+B4's `same` and B5's `same` are two different marks. Rejecting clusters is not yet specified.
 
 ### me, mine
 
@@ -911,7 +925,7 @@ These terms are in use, but no doc or file defines them:
 - What a lens definition holds beyond its seed, and what a graph version is ([0010]:45-49; [0006]:61-62).
 - What makes a set of clusters a graph neighborhood that triggers a synthesis ([0010]:33-36).
 - The boundaries between capture kinds other than `question` and `technique`. Capture tags.
-- Merging and rejecting clusters (SPEC §2-3, [M2 design]:138).
+- Rejecting clusters (SPEC §2-3, [M2 design]:138).
 - The full set of speaker basis values (Hearsay's contract).
 
 ## Stale definitions

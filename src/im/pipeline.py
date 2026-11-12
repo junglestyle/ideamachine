@@ -42,10 +42,15 @@ def _purge_tombstoned(conn) -> tuple[set[str], int]:
     # latest one trained without it (or `im train` makes a new one).
     conn.execute("DELETE FROM im.classifiers WHERE label_ids && %s::bigint[]", (labels,))
     # An idea created from forgotten speech goes, with its feedback events (they cascade), found by the speech it
-    # holds even once its capture is gone (migration 041). Ideas that merely had forgotten evidence keep their other
-    # evidence; that evidence row goes with its item.
-    conn.execute("""DELETE FROM im.ideas d WHERE EXISTS (
-                      SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(d.segment_ids))""")
+    # holds even once its capture is gone (migration 041), and so does every cluster merged into it (060), whose
+    # captures had moved there. Ideas that merely had forgotten evidence keep their other evidence; that evidence row
+    # goes with its item.
+    conn.execute("""WITH RECURSIVE gone (idea_id) AS (
+                      SELECT d.idea_id FROM im.ideas d WHERE EXISTS (
+                        SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(d.segment_ids))
+                      UNION
+                      SELECT m.other_id FROM im.idea_merges m JOIN gone g ON g.idea_id = m.keep_id)
+                    DELETE FROM im.ideas d USING gone g WHERE d.idea_id = g.idea_id""")
     # The feedback events on a capture of forgotten speech, whether or not the capture is still there.
     conn.execute("""DELETE FROM pub.feedback_events f WHERE EXISTS (
                       SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(f.item_segment_ids))""")

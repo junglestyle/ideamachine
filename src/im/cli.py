@@ -601,6 +601,17 @@ def cmd_connect(args) -> None:
         _print(connect.stage(conn, judge, screen, cfg.extract.monthly_cap_usd, args.limit, cfg.connect))
 
 
+def cmd_merge(args) -> None:
+    """Merge cluster OTHER into KEEP (im.merge): KEEP's title and statement stay; OTHER's go into the record."""
+    from im import merge
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        try:
+            _print(merge.merge(conn, args.keep, args.other))
+        except ValueError as e:
+            raise SystemExit(f"im merge: {e}") from None
+
+
 def cmd_ideas(args) -> None:
     from im import extract
 
@@ -950,6 +961,11 @@ def main(argv=None) -> None:
     cn.add_argument("--limit", type=int, help="ask about at most this many pairs this time (0: send nothing, only "
                     "count what's nominated and due)")
     cn.set_defaults(func=cmd_connect)
+    mg = sub.add_parser("merge", help="merge cluster OTHER into KEEP: its captures, observations and connections move "
+                        "to KEEP, whose title and statement stay; OTHER is no card or matcher candidate from then on")
+    mg.add_argument("keep", help="the cluster to keep (its id)")
+    mg.add_argument("other", help="the cluster merged into it (its id)")
+    mg.set_defaults(func=cmd_merge)
     th = sub.add_parser("themes", help="list themes; pin, unpin, rename or reject one")
     th.add_argument("action", nargs="?", default="list", choices=["list", "pin", "unpin", "rename", "reject"])
     th.add_argument("theme", nargs="?", help="theme name (or its start), or id prefix")

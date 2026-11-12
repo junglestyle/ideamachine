@@ -86,7 +86,8 @@ storing the index's `open` flag per conversation, which the format already carri
   `decide_item`, `keep_rest`, `compare_pair`, `record_comparison`, `rate_digest_point`) asked me for verdicts and
   ratings that nothing reads.
 - All human input stays feedback events: stars, links, notes, theme edits, and V2's keep (canonical or pinned) /
-  unkeep / dismiss / merge / reject. Old verdict and comparison events stay in the ledger; nothing reads them.
+  unkeep / dismiss / reject. Old verdict and comparison events stay in the ledger; nothing reads them. A merge is the
+  exception: `im merge` writes its own record (`im.idea_merges`, migration 060), which says what moved.
 - Where events disagree (a star and an unstar, a link and an unlink, two corrections, two marks), my latest is the
   one that arrived last, the highest `event_id`, in every view. `at` is when an event was made: it bounds windows,
   such as the digest's week, and doesn't order them.
@@ -101,7 +102,7 @@ Proposed shapes. Each is settled in its milestone's design doc, and every new ta
 | Segment identity | `uuid5(conversation, start, end, text)`; speaker fields become annotations. Old ids link forward through `im.source_supersessions` (method `rekey`) | M1 |
 | Observation | `im.observations` + `items.observation_id`: one thing derived from one stretch of speech. Items group by segment descent plus `quote_score >= 0.4`. Speaker read at query time | M2 |
 | Recurrence | Distinct conversations, or one conversation at least N (30) minutes apart. Never distinct items | M2 |
-| Cluster | Today's `im.ideas` row, ids kept. Maturity `observation`, `candidate` or `idea`; an idea is kept as `canonical` or `pinned`; `merged`, `rejected` stay | M2 |
+| Cluster | Today's `im.ideas` row, ids kept. Maturity `observation`, `candidate` or `idea`; an idea is kept as `canonical` or `pinned`. Two clusters that make one point are merged by me (`im merge KEEP OTHER`): OTHER's captures, observations and connections move to KEEP, and OTHER stays only as a row and its record (`im.idea_merges`, 060), no card and no matcher candidate. `rejected` stays | M2 |
 | Weight | `im.weights`: cluster, formula version, weight, the signals it read, when | M2 |
 | Proposals | `im.proposals`: cluster, weight, formula version, when, outcome (canonical, pinned, dismissed) | M2 |
 | Edges | One connection per pair (`cited_observation_ids`, `confidence`, `method` with the model version, so a rerun can be diffed); kinds (`supports`, `tension`, `elaborates`, `sympathy`, more later) are optional rows on a connection, with their own direction and method; lineage (`evolves`, `synthesizes`) is kept apart from both ([0010](decisions/0010-connections-kinds-lenses.md); built in migration 045, [design](design/connections-storage.md)) | M2, M4 |
@@ -131,7 +132,7 @@ sent to Terra (`im connect`, `im.connect`).
   `im.connection_verdicts`, so a pair is asked again only when its text or the judge's method changes, and an
   embedding stand-in never comes back. The model also suggests a kind, written on the connection and never deciding
   whether it exists ([0009](decisions/0009-edges-connection-graded-kind-suggested.md)). `same` is an edge, and goes
-  to my merge review; nothing is merged.
+  to my merge review; nothing is merged unless I merge it (`im merge`).
 - Tension (two ideas pulling against each other, contradiction included) and analogy (the same structure in
   different subjects) are passes of their own over pairs, each with its own model.
 - Every edge records `method` and model version, so it can be rerun and diffed.
