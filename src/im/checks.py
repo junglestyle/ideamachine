@@ -48,7 +48,22 @@ WHERE EXISTS (SELECT 1 FROM unnest(l.cited_observation_ids) c
    OR (cardinality(l.cited_observation_ids) = 0 AND EXISTS (SELECT 1 FROM origin WHERE origin.idea_id IN (l.a, l.b)))
 """
 
-CHECKS = {"orphans": ORPHANS, "stale": STALE, "tombstoned": TOMBSTONED, "uncited": UNCITED}
+# A cluster merged away (migration 060) holds nothing a cluster has: no capture, match decision, typed observation,
+# edge, connection verdict or embedding, and it's on no card and in no pub.ideas.
+MERGED = """
+WITH gone AS (SELECT other_id AS idea_id FROM im.idea_merges)
+SELECT g.idea_id, 'capture' FROM gone g JOIN im.idea_evidence e USING (idea_id)
+UNION ALL SELECT g.idea_id, 'match' FROM gone g JOIN im.item_matches m USING (idea_id)
+UNION ALL SELECT g.idea_id, 'observation' FROM gone g JOIN im.observations o USING (idea_id)
+UNION ALL SELECT g.idea_id, 'connection' FROM gone g JOIN im.connections c ON g.idea_id IN (c.a, c.b)
+UNION ALL SELECT g.idea_id, 'lineage' FROM gone g JOIN im.lineage l ON g.idea_id IN (l.from_id, l.to_id)
+UNION ALL SELECT g.idea_id, 'verdict' FROM gone g JOIN im.connection_verdicts v ON g.idea_id IN (v.a, v.b)
+UNION ALL SELECT g.idea_id, 'embedding' FROM gone g JOIN im.idea_embeddings e USING (idea_id)
+UNION ALL SELECT g.idea_id, 'card' FROM gone g JOIN pub.cards c USING (idea_id)
+UNION ALL SELECT g.idea_id, 'pub.ideas' FROM gone g JOIN pub.ideas d USING (idea_id)
+"""
+
+CHECKS = {"orphans": ORPHANS, "stale": STALE, "tombstoned": TOMBSTONED, "uncited": UNCITED, "merged": MERGED}
 
 
 def run_checks(conn) -> dict[str, list]:

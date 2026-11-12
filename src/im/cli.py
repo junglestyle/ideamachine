@@ -552,6 +552,30 @@ def cmd_connect(args) -> None:
         _print(connect.stage(conn, judge, screen, cfg.extract.monthly_cap_usd, args.limit, cfg.connect))
 
 
+def cmd_merge(args) -> None:
+    """Merge cluster OTHER into KEEP (im.merge): KEEP's title and statement stay; OTHER's go into the record. With
+    --distinct, only mark the two as distinct points, which the merge screen then leaves out."""
+    from im import merge
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        try:
+            _print((merge.distinct if args.distinct else merge.merge)(conn, args.keep, args.other))
+        except ValueError as e:
+            raise SystemExit(f"im merge: {e}") from None
+
+
+def cmd_merges(args) -> None:
+    """The merge screen (im.merge.screen): asks Jev about the pairs due, at most --limit (0: none, needing no key),
+    then prints the likeliest duplicates first. Writes nothing but Jev's answers; never merges."""
+    from im import jev, merge
+
+    cfg = config.load()
+    with db.connect(db.pipeline_dsn()) as conn:
+        rows, stats = merge.screen(conn, jev.Jev() if args.limit != 0 else None, args.limit,
+                                   cfg.extract.monthly_cap_usd)
+        print(merge.listing(rows, stats, args.top))
+
+
 def cmd_ideas(args) -> None:
     from im import extract
 
@@ -881,6 +905,19 @@ def main(argv=None) -> None:
     cn.add_argument("--limit", type=int, help="ask about at most this many pairs this time (0: send nothing, only "
                     "count what's nominated and due)")
     cn.set_defaults(func=cmd_connect)
+    mg = sub.add_parser("merge", help="merge cluster OTHER into KEEP: its captures, observations and connections move "
+                        "to KEEP, whose title and statement stay; OTHER is no card or matcher candidate from then on")
+    mg.add_argument("keep", help="the cluster to keep (its id)")
+    mg.add_argument("other", help="the cluster merged into it (its id)")
+    mg.add_argument("--distinct", action="store_true", help="don't merge: mark the two as distinct points, so "
+                    "`im merges` stops listing them")
+    mg.set_defaults(func=cmd_merge)
+    ms = sub.add_parser("merges", help="the merge screen: pairs of clusters that may be one point, likeliest first by "
+                        "Jev's same_v2 (sends to Jev for pairs not asked about their current text; writes nothing "
+                        "else and never merges)")
+    ms.add_argument("--top", type=int, default=20, help="how many pairs to print (default 20)")
+    ms.add_argument("--limit", type=int, help="ask Jev about at most this many pairs this time (0: send nothing)")
+    ms.set_defaults(func=cmd_merges)
     th = sub.add_parser("themes", help="list themes; pin, unpin, rename or reject one")
     th.add_argument("action", nargs="?", default="list", choices=["list", "pin", "unpin", "rename", "reject"])
     th.add_argument("theme", nargs="?", help="theme name (or its start), or id prefix")

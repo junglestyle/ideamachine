@@ -72,7 +72,8 @@ def assign_stage(conn) -> dict:
 
 def _typed(conn) -> int:
     """An idea I added gets one observation: what I typed (or approved), when, from its first idea_add event.
-    A correction later changes the idea's text, not what I said."""
+    A correction later changes the idea's text, not what I said. An idea merged away gets none: its observation moved
+    to the cluster it was merged into (im.merge)."""
     return conn.execute("""
         INSERT INTO im.observations (segment_ids, first_seen, source, idea_id, quote, said_at, said_by, conversation,
                                      source_ref)
@@ -81,4 +82,5 @@ def _typed(conn) -> int:
         FROM pub.feedback_events f JOIN im.ideas d ON d.idea_id = f.idea_id AND d.origin = 'mine'
         WHERE f.kind = 'idea_add'
           AND NOT EXISTS (SELECT 1 FROM im.observations o WHERE o.idea_id = f.idea_id AND o.source = 'typed')
+          AND NOT EXISTS (SELECT 1 FROM im.idea_merges m WHERE m.other_id = f.idea_id)
         ORDER BY f.idea_id, f.event_id""").rowcount

@@ -11,7 +11,7 @@ Every verdict is kept (im.connection_verdicts, migration 059), so a pair is aske
 or the judge's method changes. A connection (supports, elaborates, tension, related or same) replaces whatever stood
 in for the pair, with its kind (supports, elaborates or tension) as a suggestion; any other verdict (none, unsure, a
 refusal, screened) removes the pair's stand-in and any earlier judgment's connection, and lattice.relate doesn't
-write the pair again. `same` is also logged for my review (im.merge_review, `judged_same`), never merged.
+write the pair again. `same` is also logged for my review (im.merge_review, `judged_same`), never merged by itself.
 """
 
 import hashlib

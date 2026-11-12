@@ -34,6 +34,10 @@ uv run im import-chatgpt saved/chatgpt-idea-machine.md saved/chatgpt-curate-shee
 uv run im lattice                 # lattice counts: ideas, evidence, connections
 uv run im connect --limit 0      # the connection judge: how many pairs are nominated and due, sending nothing
 uv run im connect --limit 100    # Jev screens up to 100 due pairs, Terra judges those that pass; without --limit, every due pair
+uv run im merges --limit 0       # the merge screen: likely duplicate clusters, likeliest first by what Jev already answered, sending nothing
+uv run im merges --top 50        # Jev asks same_v2 about every pair not answered for its current text, then the top 50
+uv run im merge KEEP OTHER        # merge cluster OTHER into KEEP (full ids): its captures, observations and connections move; KEEP's title and statement stay
+uv run im merge --distinct A B    # mark two clusters as distinct points: im merges stops listing them
 uv run im themes                  # themes; im themes pin|unpin|reject <name>, im themes rename <name> <new name>
 uv run im load-fixtures --scenario edited   # the same stream after every kind of correction and a forget
 uv run im run
@@ -101,6 +105,23 @@ leave it out. It spends under the same monthly cap as the rest of `im run` (`ext
 what it found and what Jev and Terra cost. `im run` asks about at most `[connect] max_pairs_per_run` pairs (default
 500, about $0.60 when that many are due; 0 only counts them), so a backlog is worked through over runs; `im connect
 --limit N` asks about N now.
+
+`im merge KEEP OTHER` merges two clusters that make one point, sending nothing. OTHER's captures, typed observations
+and match decisions move to KEEP, its connections and lineage are re-pointed (KEEP's own stand, one between the two
+goes, and the embedding stand-ins are rebuilt next run), and its connection verdicts are dropped, so the judge asks
+about KEEP's new neighbors on its own. My links on OTHER count for KEEP, and how I kept OTHER carries over if KEEP
+wasn't kept. KEEP's title, statement and note stay; OTHER's, as shown, are printed and kept in `im.idea_merges`, which
+records what moved. OTHER is no card and no matcher candidate from then on, and a `merge_review` row whose clusters
+are now one is resolved. It refuses the same id twice, an unknown id, and a cluster already merged away.
+
+`im merges` is the merge screen (B9m). Its pairs are the open `merge_review` rows (`duplicate`, `judged_same`) and
+the pairs the connection judge nominates (one definition of near), both still cards, leaving out pairs I unlinked
+or marked distinct (`im merge --distinct`). Jev (`jev.MODEL`) answers the matcher's `same_v2` ("is `a` another way of
+saying `b`?") on each cluster's title and statement, and the list is ordered by it, likeliest first; pairs not asked
+yet come last. Answers are kept in `im.jev_answers` under a hash of both texts, so a pair is asked again only when
+either changes; `--limit N` asks about at most N pairs (review rows first, then the nearest), `--limit 0` none,
+needing no key, and it spends under the monthly cap (`extract.monthly_cap_usd`). It writes nothing but Jev's answers
+and never merges: `im merge KEEP OTHER` does, by hand.
 
 Each section also takes `max_tokens`, a request's output budget, reasoning included (OpenRouter counts it there).
 It isn't part of any version, so raising it changes nothing already done: a request that ran out is simply asked
