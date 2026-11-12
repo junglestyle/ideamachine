@@ -20,11 +20,12 @@ def idea(conn, word: str):
     return got
 
 
-def merge(conn, monkeypatch, capsys, keep, other) -> dict:
+def merge(conn, monkeypatch, capsys, *args) -> dict:
+    """`im merge` with these arguments: what it printed."""
     from im import cli
 
     monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: conn.info.dsn + " password=" + conn.info.password)
-    cli.main(["merge", str(keep), str(other)])
+    cli.main(["merge", *map(str, args)])
     return json.loads(capsys.readouterr().out)
 
 

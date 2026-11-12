@@ -318,11 +318,8 @@ class Jev:
         return llm.post_json(self.url, self.key, body, f"Jev via {self.route}", 120)
 
     def body(self, question: str, state: dict, probes: bool = False) -> dict:
-        qs = {}
         asked = QUESTIONS[question] | (PROBES.get(question, {}) if probes else {})
-        for name, (instructions, criteria) in asked.items():
-            qs[name] = {"type": "noul", "instructions": instructions, **({"criteria": criteria} if criteria else {})}
-        return {"model": self.sent_as, "state": state, "questions": qs}
+        return {"model": self.sent_as, "state": state, "questions": _nouls(asked)}
 
     def complete(self, body: dict) -> llm.Reply:
         """Send a body (egress.send logs it): Jev's answer as it came, as JSON, and what it cost (output is free)."""
@@ -331,6 +328,11 @@ class Jev:
         tokens_in = usage.get("input_tokens") or 0
         return llm.Reply(json.dumps(r), "end_turn", r.get("model") or self.model, r.get("id"), tokens_in,
                          usage.get("output_tokens") or 0, round(tokens_in * PRICE_IN, 8))
+
+
+def _nouls(asked: dict) -> dict:
+    return {name: {"type": "noul", "instructions": instructions, **({"criteria": criteria} if criteria else {})}
+            for name, (instructions, criteria) in asked.items()}
 
 
 def read(question: str, r: dict, probes: bool = False) -> dict[str, float]:
@@ -342,12 +344,14 @@ def read(question: str, r: dict, probes: bool = False) -> dict[str, float]:
     return got | combos | {"p": combine(question, deciding)}
 
 
-def question_set(client: Jev, question: str) -> str:
+def question_set(client: Jev | None, question: str) -> str:
     """The version of `question`'s deciding questions as this client asks them: their wording and the model. What
-    a request is logged under, and its kept answers filed under."""
+    a request is logged under, and its kept answers filed under. No client: as Jev at MODEL asks them, so kept
+    answers can be read without a key."""
     from im import themes
 
-    return themes.version(json.dumps(client.body(question, {})["questions"], sort_keys=True), {}, client.model, "")
+    return themes.version(json.dumps(_nouls(QUESTIONS[question]), sort_keys=True), {},
+                          client.model if client else MODEL, "")
 
 
 def kept(conn, qs: str) -> dict[str, dict[str, float]]:

@@ -296,9 +296,9 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   made it: `cli` or `emanation`, `merge` for what a merge carried to the cluster kept (`merge.MERGED`), and `lattice`
   or `mcp` for Lattice's, until 2026-11-11. Where events disagree, my latest is the one with the highest `event_id`;
   `at` bounds time windows and orders nothing (SPEC.md:90-92, 043).
-  The feedback event kinds, from the CHECK at 031:7-11:
+  The feedback event kinds, from the CHECK at 031:7-11 and 061:5-9:
   - on clusters: `idea_keep` (payload `as`: `canonical` or `pinned`), `idea_unkeep`, `idea_dismiss`, `idea_add`,
-    `star`, `unstar`, `link`, `unlink`, `idea_note`, `idea_correct`, `idea_sensitive`;
+    `star`, `unstar`, `link`, `unlink`, `idea_note`, `idea_correct`, `idea_sensitive`, `idea_distinct`;
   - on themes: `pin_theme`, `unpin_theme`, `rename_theme`, `reject_theme`, `merge_theme`, `split_theme`,
     `file_idea`, `unfile_idea`, `theme_sensitive`;
   - legacy, still in the ledger but read by nothing that orders or gates ([0007]): `keep` and `discard` (nothing
@@ -334,6 +334,13 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   OTHER's title, statement and my note as shown, and the events the merge carried, so a merge could be undone.
   Forgetting the speech either cluster was made from deletes it, with the cluster merged away
   (`pipeline._purge_tombstoned`). **Status:** no unmerge is built. Rejecting a cluster isn't specified.
+- **Merge screen.** The list of pairs of clusters that may be one point, for me to merge or mark distinct (`im merges`,
+  `merge.screen`; B9m). Its pairs are the open merge review rows (`duplicate`, `judged_same`) and the connection
+  judge's nominated pairs, both clusters cards, less the pairs I unlinked or marked distinct. It's ordered by Jev's
+  `same_v2` on the two clusters' titles and statements (`merge.SAME`), each answer kept under a hash of both texts.
+  It writes nothing else and never merges.
+- **Distinct mark.** My mark that two clusters make distinct points, so the merge screen stops listing them
+  (`idea_distinct`, 061; `im merge --distinct A B`). It says nothing about whether they're connected.
 
 ## Graph
 

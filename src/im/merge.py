@@ -9,7 +9,7 @@ merge could be undone.
 - Connections and lineage: OTHER's are re-pointed to KEEP, except an embedding stand-in (lattice.relate rebuilds
   KEEP's), one between the two (it disappears), and one where KEEP already has a connection or a judge's verdict
   (KEEP's stands). A kind's direction follows its pair. My links and unlinks on OTHER count for KEEP
-  (im.my_link_events). Every connection verdict on OTHER goes: the connection judge nominates KEEP's new neighbours
+  (im.my_link_events). Every connection verdict on OTHER goes: the connection judge nominates KEEP's new neighbors
   on its own.
 - Merge review: a row whose clusters are now all one is resolved by this merge (`merge_id`).
 - How I kept OTHER, or my mark that it's sensitive, carries to KEEP as a feedback event (source MERGED) when KEEP had
@@ -20,14 +20,24 @@ merge could be undone.
 
 From then on OTHER has no text (im.idea_text) and isn't kept (im.idea_kept): it's no card, no matcher candidate and
 not embedded, so no capture can join it.
+
+The merge screen (`im merges`, B9m) lists the pairs that may be one point, likeliest first: the open merge review rows
+(`duplicate`, `judged_same`) and the near pairs the connection judge nominates (connect.nominate), both clusters
+cards, leaving out pairs I unlinked or marked distinct (`idea_distinct`, 061; `im merge --distinct`). Jev's
+`same_v2` (jev.QUESTIONS["match"]) on each cluster's title and statement, as the connection judge shows them, orders
+it; the group's combined `p` isn't used, since it counts `develops` too. An answer is kept (im.jev_answers) under a
+hash of both texts, so a pair is asked again only when either changes. The screen writes nothing else, and never
+merges.
 """
 
+import hashlib
 import json
 import uuid
 
-from im import citations
+from im import citations, connect, egress, jev, llm
 
 MERGED = "merge"
+SAME = "same_v2"   # the answer that orders the merge screen
 
 
 def _id(conn, ref: str):
@@ -147,3 +157,106 @@ def merge(conn, keep_ref: str, other_ref: str) -> dict:
             "observations": len(observations), "connections_moved": connections, "lineage_moved": lineage,
             "verdicts_dropped": verdicts, "reviews_resolved": resolved, "marks_carried": len(events),
             "merged_away_text": {"title": title, "statement": statement, "my_note": note}}
+
+
+def distinct(conn, a_ref: str, b_ref: str) -> dict:
+    """My mark that two clusters make distinct points (an `idea_distinct` event): the merge screen stops listing them.
+    Raises ValueError, as merge does."""
+    a, b = _id(conn, a_ref), _id(conn, b_ref)
+    if a == b:
+        raise ValueError("a cluster can't be distinct from itself")
+    conn.execute("""INSERT INTO pub.feedback_events (kind, idea_id, other_idea_id, source)
+                    VALUES ('idea_distinct', %s, %s, 'cli')""", (a, b))
+    return {"distinct": [str(a), str(b)]}
+
+
+# --- The merge screen ------------------------------------------------------------------------------------------------
+
+def _side(title: str, statement: str) -> str:
+    return f"{title}. {statement}"   # the summary, as the connection judge shows a side (connect.side_data)
+
+
+def _apart(conn) -> set:
+    """(a, b), a < b, for the pairs I unlinked or marked distinct, a cluster merged away counting as the one it's part
+    of now."""
+    return set(conn.execute(
+        """SELECT a, b FROM im.my_link_events WHERE kind = 'unlink'
+           UNION
+           SELECT least(x.a, x.b), greatest(x.a, x.b) FROM pub.feedback_events f
+           LEFT JOIN im.merged_into ma ON ma.idea_id = f.idea_id
+           LEFT JOIN im.merged_into mb ON mb.idea_id = f.other_idea_id
+           CROSS JOIN LATERAL (VALUES (coalesce(ma.into_id, f.idea_id), coalesce(mb.into_id, f.other_idea_id))) x(a, b)
+           WHERE f.kind = 'idea_distinct' AND x.a <> x.b""").fetchall())
+
+
+def pairs(conn) -> dict[tuple, dict]:
+    """The pairs of cards that may be one point: (a, b), a < b -> {"cosine": the near pair's (None if only in review),
+    "review": the kinds of its open merge review rows}."""
+    out = {p: {"cosine": c, "review": set()} for p, c in connect.nominate(conn).items()}
+    for kind, ids in conn.execute(
+            """SELECT r.kind, ARRAY(SELECT DISTINCT coalesce(m.into_id, u) FROM unnest(r.idea_ids) u
+                                    LEFT JOIN im.merged_into m ON m.idea_id = u
+                                    WHERE coalesce(m.into_id, u) IN (SELECT idea_id FROM pub.cards) ORDER BY 1)
+               FROM im.merge_review r WHERE r.merge_id IS NULL AND r.kind IN ('duplicate', 'judged_same')"""):
+        for n, a in enumerate(ids):
+            for b in ids[n + 1:]:
+                out.setdefault((a, b), {"cosine": None, "review": set()})["review"].add(kind)
+    apart = _apart(conn)
+    return {p: v for p, v in out.items() if p not in apart}
+
+
+def screen(conn, client: "jev.Jev | None", limit: int | None = None,
+           monthly_cap_usd: float = 20.0) -> tuple[list[dict], dict]:
+    """Every pair, the likeliest duplicate first by Jev's SAME, then those not asked yet; and what asking cost. Asks
+    Jev about at most `limit` pairs with no answer for their texts (None: all; none without a client), review rows
+    first, then the nearest. The cap stops the asking, not the listing."""
+    found = pairs(conn)
+    shown = {i: (t, s) for i, t, s in conn.execute(
+        "SELECT idea_id, title, statement FROM im.idea_text WHERE idea_id = ANY(%s)",
+        (list({i for p in found for i in p}),))}
+    kept = jev.kept(conn, jev.question_set(client, "match"))
+    rows = []
+    for (a, b), v in found.items():
+        key = hashlib.sha256(json.dumps([_side(*shown[a]), _side(*shown[b])]).encode()).hexdigest()
+        rows.append({"a": a, "b": b, "shown": (shown[a], shown[b]), "key": key, "answer": kept.get(key), **v})
+    due = sorted((r for r in rows if r["answer"] is None),
+                 key=lambda r: (not r["review"], -(r["cosine"] or 0), str(r["a"]), str(r["b"])))
+    stats = {"pairs": len(rows), "due": len(due), "asked": 0, "failed": 0, "cost_usd": 0.0, "stopped": None}
+    for r in due[:limit] if client else []:
+        def state(r=r):
+            return {side: {"summary": _side(*text)} for side, text in zip("ab", r["shown"], strict=True)}
+
+        try:
+            got, cost, sent = jev.ask(conn, client, "match", r["key"], state,
+                                      segment_ids=egress.segments_of(conn, [r["a"], r["b"]]),
+                                      monthly_cap_usd=monthly_cap_usd)
+        except llm.Stop as e:
+            stats["stopped"] = str(e)[:200]
+            break
+        stats["asked"] += sent
+        stats["failed"] += got is None
+        stats["cost_usd"] += cost
+        r["answer"] = got
+    stats["cost_usd"] = round(stats["cost_usd"], 6)
+    rows.sort(key=lambda r: (r["answer"] is None, -(r["answer"] or {}).get(SAME, 0), not r["review"],
+                             -(r["cosine"] or 0), str(r["a"]), str(r["b"])))
+    return rows, stats
+
+
+def listing(rows: list[dict], stats: dict, top: int) -> str:
+    """The first `top` pairs as `im merges` prints them, and what's left."""
+    out = []
+    for r in rows[:top]:
+        same = f"{r['answer'][SAME]:.2f}" if r["answer"] else "not asked"
+        near = f"cosine {r['cosine']:.2f}" if r["cosine"] is not None else "not near"
+        review = f"merge review: {', '.join(sorted(r['review']))}" if r["review"] else "not in merge review"
+        out.append(f"{SAME} {same}   {near}   {review}")
+        for idea, (title, statement) in zip((r["a"], r["b"]), r["shown"], strict=True):
+            out += [f"  {idea}  {title}", f"  {'':36}  {statement}"]
+        out.append("")
+    unasked = sum(r["answer"] is None for r in rows)
+    out.append(f"{min(top, len(rows))} of {stats['pairs']} pairs shown; {unasked} not asked yet. Asked now: "
+               f"{stats['asked']} (${stats['cost_usd']}), {stats['failed']} failed"
+               + (f"; stopped: {stats['stopped']}" if stats["stopped"] else "") + ".")
+    out.append("Merge one: im merge KEEP OTHER. Mark two distinct: im merge --distinct A B.")
+    return "\n".join(out)
