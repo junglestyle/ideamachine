@@ -6,7 +6,7 @@ import re
 from dataclasses import replace
 from types import SimpleNamespace
 
-from im import egress, extract, fixtures, gate, gate_audit, jev
+from im import egress, extract, fixtures, gate, gate_audit, jev, mishearings
 
 from helpers import run
 from test_archive_captures import archive_capture
@@ -45,6 +45,8 @@ def test_the_gate_keeps_repairs_or_drops_each_capture_from_what_jev_says_of_it(p
     turns[0] = replace(turns[0], text="Did you see the build broke again, Bob?")
     stream.write(stream.dir)
     run(pipe, cfg, stream)
+    # A hint goes out with the transcript, so what was sent hashes otherwise than the read (egress.Payload.sha256).
+    mishearings.decide(pipe, "build", "built", "confirmed")
 
     def respond(text):
         rows = {int(r[1:].split("]")[0]): r.split(": ", 1) for r in text.splitlines() if r.startswith("[")}

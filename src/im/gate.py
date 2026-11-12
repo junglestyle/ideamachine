@@ -57,14 +57,17 @@ def verdict(answers: dict[str, float], cuts: dict[str, float] = CUTS) -> dict:
 
 def captures(conn, read: tuple[str, str]) -> tuple[dict, int]:
     """The live captures under `read` (prompt_version, model) and the policy requests go out under now: episode_id ->
-    (the payload sha they were read from, their captures) on current episodes; and how many captures of the archive
-    there are under it, which have no transcript lines to check a gist against and are left out."""
+    (the payload sha the episode's current read was of, their captures) on current episodes; and how many captures of
+    the archive there are under it, which have no transcript lines to check a gist against and are left out. The sha is
+    the read's (im.extractions), as egress.Payload.sha256 counts it: without the mishearing hints, which the egress
+    log's hash of what was sent includes."""
     pv, model = read
     out: dict = {}
     for eid, sha, item_id, quote, gist, segs in conn.execute(
-            """SELECT i.episode_id, g.payload_sha256, i.item_id, i.quote, i.gist, i.source_segment_ids
+            """SELECT i.episode_id, x.input_hash, i.item_id, i.quote, i.gist, i.source_segment_ids
                FROM im.items i JOIN im.episodes e ON e.episode_id = i.episode_id AND e.current
-               JOIN im.egress_log g ON g.egress_id = i.egress_id
+               JOIN im.extractions x ON x.episode_id = i.episode_id AND x.model = i.model
+                 AND x.prompt_version = i.prompt_version AND x.privacy_policy_version = i.privacy_policy_version
                WHERE i.prompt_version = %s AND i.model = %s AND i.privacy_policy_version = %s
                ORDER BY i.episode_id, i.item_id""", (pv, model, egress.POLICY_VERSION)):
         out.setdefault(eid, (sha, []))[1].append({"item_id": str(item_id), "quote": quote, "gist": gist,
