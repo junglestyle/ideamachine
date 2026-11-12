@@ -7,7 +7,7 @@ config change is a version change and re-derives episodes.
 import os
 import sys
 import tomllib
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, fields
 
 HEURISTIC = "heuristic-3"  # 3: episode identity covers how its speakers would be pseudonymized
 
@@ -63,6 +63,14 @@ class ModelConfig:
 
 
 @dataclass(frozen=True)
+class ConnectConfig(ModelConfig):
+    """[connect]: the connection judge's model and effort, and the most pairs `im run` asks about (None: every due
+    pair; 0: only count them). The rest wait for the next run; the limit isn't in the version."""
+    model: str = "openai/gpt-6.1-terra"   # Terra passed B4
+    max_pairs_per_run: int | None = 500   # about $0.60 a run while that many are due (the backfill's prices)
+
+
+@dataclass(frozen=True)
 class LatticeConfig:
     enabled: bool = True
     embedding_model: str = "BAAI/bge-small-en-v1.5"   # local, CPU
@@ -111,7 +119,7 @@ class Config:
     match: ModelConfig = ModelConfig()          # the lattice's matcher
     themes: ModelConfig = ModelConfig()
     digest: ModelConfig = ModelConfig()
-    connect: ModelConfig = ModelConfig(model="openai/gpt-6.1-terra")   # the connection judge: Terra passed B4
+    connect: ConnectConfig = ConnectConfig()   # the connection judge
     weight: WeightConfig = WeightConfig()
     egress: EgressConfig = EgressConfig()
 
@@ -135,7 +143,7 @@ def load() -> Config:
         print(f"[extract] {', '.join(retired)}: retired with prompts v1 to v4 (decision 0012); delete it from {path}",
               file=sys.stderr)
     models = {k: ModelConfig(**data.get(k, {})) for k in ("match", "themes", "digest")}
-    models["connect"] = replace(Config.connect, **data.get("connect", {}))
+    models["connect"] = ConnectConfig(**data.get("connect", {}))
     return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
                   extract=ExtractConfig(**extract), lattice=LatticeConfig(**data.get("lattice", {})),
                   weight=WeightConfig(**data.get("weight", {})), egress=EgressConfig(**egress), **models)

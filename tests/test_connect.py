@@ -2,12 +2,13 @@
 replacing the stand-ins."""
 
 import json
+from dataclasses import replace
 
 import numpy as np
 import pytest
 
 from im import config, connect, edge_audit, jev, lattice, llm, themes
-from im.config import Config, ModelConfig
+from im.config import Config, ConnectConfig
 
 from helpers import assert_invariants, run, table
 from test_lattice import JUDGED
@@ -90,13 +91,13 @@ def test_b4s_prompt_is_the_judges_and_its_version_is_unchanged():
 
 
 def test_the_judge_is_terra_at_low_effort_unless_configured(tmp_path, monkeypatch):
-    assert Config().connect == ModelConfig(TERRA, "low")
+    assert Config().connect == ConnectConfig(TERRA, "low", None, 500)
     path = tmp_path / "im.toml"
     path.write_text("[match]\neffort = \"medium\"\n")
     monkeypatch.setenv("IM_CONFIG", str(path))
-    assert config.load().connect == ModelConfig(TERRA, "low")
-    path.write_text("[connect]\nmax_tokens = 8000\n")
-    assert config.load().connect == ModelConfig(TERRA, "low", 8000)
+    assert config.load().connect == ConnectConfig(TERRA, "low")
+    path.write_text("[connect]\nmax_tokens = 8000\nmax_pairs_per_run = 50\n")
+    assert config.load().connect == ConnectConfig(TERRA, "low", 8000, 50)
 
 
 def test_pairs_are_nominated_at_the_floor_among_either_sides_nearest(monkeypatch):
@@ -119,6 +120,27 @@ def test_im_connect_limit_zero_needs_no_key_sends_nothing_and_counts_what_is_due
     assert verdicts(nearby) == {}
     with pytest.raises(SystemExit, match="can't run"):   # without --limit 0, the keys are needed
         cli.main(["connect", "--limit", "1"])
+
+
+def test_im_run_asks_at_most_its_limit_a_run_until_nothing_is_due(nearby, cfg, monkeypatch):
+    from im import cli
+
+    n = every_pair(nearby)
+    limited = (lambda k: replace(cfg, connect=replace(cfg.connect, max_pairs_per_run=k)))
+    counted = cli._connect(nearby, limited(0))   # 0: counts, needing no key, and sends nothing
+    assert (counted["due"], counted["asked"], counted["stopped"]) == (n, 0, None) and verdicts(nearby) == {}
+    assert cli._connect(nearby, cfg)["stopped"].startswith("the connection judge can't run")   # no key
+    jev_client, jev_sent = screen()
+    terra_client, terra_sent = terra()
+    monkeypatch.setattr(llm, "client_for", lambda model, zdr: terra_client)
+    monkeypatch.setattr(jev, "Jev", lambda: jev_client)
+    for run_ in range(2):   # each run takes the next two
+        out = cli._connect(nearby, limited(2))
+        assert (out["due"], out["asked"]) == (n - 2 * run_, 2) and len(verdicts(nearby)) == 2 * (run_ + 1)
+    rest = cli._connect(nearby, cfg)   # within the default limit
+    assert rest["asked"] == n - 4 > 0 and len(verdicts(nearby)) == len(terra_sent) == n
+    idle = cli._connect(nearby, cfg)
+    assert idle["due"] == idle["asked"] == 0 and len(jev_sent) == len(terra_sent) == n   # nothing due, nothing sent
 
 
 def test_a_pair_jev_screens_out_never_reaches_terra_and_loses_its_stand_in_for_good(nearby):

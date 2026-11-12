@@ -113,6 +113,9 @@ def _run_stages(conn, cfg) -> dict:
             stats["themes"] = _themes(conn, cfg)
             stats["sensitivity"] = _sensitivity(conn, cfg)
             stats["digest"] = _digest(conn, cfg)
+            # After matching, whose relate rebuilds the stand-ins the judge replaces; last of the paid stages, so a
+            # backlog of pairs spends what the month's cap leaves.
+            stats["connect"] = _connect(conn, cfg)
         from im import weight
 
         stats["weight"] = weight.stage(conn, cfg.weight)   # after matching: weight reads the clusters
@@ -185,6 +188,30 @@ def _sensitivity(conn, cfg) -> dict:
     except SystemExit as e:   # no key for Jev
         return {"stopped": str(e)}
     return sensitivity.tag_stage(conn, client, cfg.extract.monthly_cap_usd)
+
+
+def _connect(conn, cfg) -> dict:
+    """Judge the pairs due, at most [connect] max_pairs_per_run, or say why it couldn't; the run goes on either way."""
+    from im import connect
+
+    c = cfg.connect
+    try:
+        judge, screen = _judges(cfg) if c.max_pairs_per_run != 0 else (None, None)
+    except SystemExit as e:
+        return {"stopped": str(e)}
+    return connect.stage(conn, judge, screen, cfg.extract.monthly_cap_usd, c.max_pairs_per_run, c)
+
+
+def _judges(cfg):
+    """The connection judge's clients, Terra's ([connect]) and Jev's, or SystemExit saying which key is missing."""
+    import anthropic
+
+    from im import jev, llm
+
+    try:
+        return llm.client_for(cfg.connect.model, cfg.egress.zdr), jev.Jev()
+    except (anthropic.AnthropicError, SystemExit) as e:   # no key for OpenRouter, Jev or Claude
+        raise SystemExit(f"the connection judge can't run: {e}") from None
 
 
 def _digest(conn, cfg, week=None, again=False) -> dict:
@@ -565,19 +592,13 @@ def cmd_lattice(args) -> None:
 
 def cmd_connect(args) -> None:
     """The connection judge, on demand: Jev screens the nominated pairs not judged yet, Terra judges the rest, and
-    their verdicts become connections, or remove the pair's stand-in. --limit 0 only counts."""
-    import anthropic
-
-    from im import connect, jev, llm
+    their verdicts become connections, or remove the pair's stand-in. --limit 0 only counts. `im run` does the same,
+    at most [connect] max_pairs_per_run a run."""
+    from im import connect
 
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
-        judge = screen = None
-        if args.limit != 0:
-            try:
-                judge, screen = llm.client_for(cfg.connect.model, cfg.egress.zdr), jev.Jev()
-            except (anthropic.AnthropicError, SystemExit) as e:   # no key for OpenRouter, Jev or Claude
-                raise SystemExit(f"the connection judge can't run: {e}") from None
+        judge, screen = _judges(cfg) if args.limit != 0 else (None, None)
         _print(connect.stage(conn, judge, screen, cfg.extract.monthly_cap_usd, args.limit, cfg.connect))
 
 
@@ -933,7 +954,7 @@ def main(argv=None) -> None:
         func=cmd_lattice)
     cn = sub.add_parser("connect", help="the connection judge: Jev screens pairs of nearby clusters, Terra judges "
                         "the rest, and its connections replace the embedding stand-ins (sends to Jev and Terra; "
-                        "not part of `im run` yet)")
+                        "`im run` does this too, at most [connect] max_pairs_per_run pairs a run)")
     cn.add_argument("--limit", type=int, help="ask about at most this many pairs this time (0: send nothing, only "
                     "count what's nominated and due)")
     cn.set_defaults(func=cmd_connect)
