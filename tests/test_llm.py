@@ -50,6 +50,10 @@ def test_under_zero_data_retention_claude_goes_through_openrouter_to_endpoints_t
     assert body["model"] == "anthropic/claude-opus-5.5" and body["provider"]["zdr"] is True
     # Its system prompt is cached, as through Anthropic; without the mark, Claude caches nothing.
     assert body["messages"][0]["content"] == [{"type": "text", "text": "system", "cache_control": {"type": "ephemeral"}}]
+    # At its list price: the regional endpoints listed 10% above it are left out.
+    assert body["provider"]["max_price"] == {"prompt": 4.0, "completion": 20.0}
+    llm.complete(client, "z-ai/glm-5.3", "low", "system", SCHEMA, "text")
+    assert "max_price" not in sent[-1]["provider"]   # no list price of ours for other models
 
 
 def test_an_answer_that_isnt_json_is_asked_for_again_and_both_are_paid_for():

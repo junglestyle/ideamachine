@@ -132,7 +132,10 @@ def complete(client, model: str, effort: str, system: str, schema: dict, text: s
     credentials, the account's credit, a model id that doesn't exist, a budget Claude would need streamed). An
     exception raised after an earlier attempt was paid for carries that cost as `cost_usd`, for the egress log."""
     if via_openrouter(model) or isinstance(client, OpenRouter):
-        return client.complete(openrouter_id(model), effort, system, schema, text, max_tokens or MAX_TOKENS)
+        # Claude under zero data retention: at its list price, which leaves out the regional endpoints listed 10%
+        # above it.
+        return client.complete(openrouter_id(model), effort, system, schema, text, max_tokens or MAX_TOKENS,
+                               max_price=price(model))
     max_tokens = max_tokens or CLAUDE_MAX_TOKENS
     if max_tokens > CLAUDE_CEILING:
         raise Stop(f"max_tokens {max_tokens} is over {CLAUDE_CEILING}, past which Claude needs a streamed request: "
@@ -217,19 +220,22 @@ class OpenRouter:
         return post_json(OPENROUTER_URL, self.key, body, "OpenRouter", 600, {"X-Title": "Idea Machine"},
                          transient=_transient_error)
 
-    def complete(self, model, effort, system, schema, text, max_tokens) -> Reply:
+    def complete(self, model, effort, system, schema, text, max_tokens, max_price=None) -> Reply:
+        """`max_price`: ($/M in, $/M out) above which no endpoint is used."""
         if model not in NO_SCHEMA:
             try:
-                return self._complete(model, effort, system, schema, text, max_tokens, in_prompt=False)
+                return self._complete(model, effort, system, schema, text, max_tokens, False, max_price)
             except RuntimeError as e:
                 if "data policy" in str(e):
                     raise RuntimeError(f"{model}: no provider that keeps nothing sent ({e})") from None
+                if max_price and "No endpoints found" in str(e):   # not a model that takes no schema
+                    raise RuntimeError(f"{model}: no endpoint at its list price {max_price} ({e})") from None
                 if "No endpoints found" not in str(e):
                     raise
                 NO_SCHEMA.add(model)
-        return self._complete(model, effort, system, schema, text, max_tokens, in_prompt=True)
+        return self._complete(model, effort, system, schema, text, max_tokens, True, max_price)
 
-    def _complete(self, model, effort, system, schema, text, max_tokens, in_prompt: bool) -> Reply:
+    def _complete(self, model, effort, system, schema, text, max_tokens, in_prompt: bool, max_price=None) -> Reply:
         """The answer, or after a second answer that isn't JSON either, that one as it came (both paid for): the
         caller logs it, and it fails there."""
         if in_prompt:
@@ -244,7 +250,9 @@ class OpenRouter:
                 "reasoning": {"effort": effort}, "usage": {"include": True},
                 # Only providers that honor the schema, and none that keep or train on what's sent.
                 "provider": {"require_parameters": not in_prompt, "data_collection": "deny",
-                             **({"zdr": True} if self.zdr else {})}}
+                             **({"zdr": True} if self.zdr else {}),
+                             **({"max_price": {"prompt": max_price[0], "completion": max_price[1]}}
+                                if max_price else {})}}
         if not in_prompt:
             body["response_format"] = {"type": "json_schema",
                                        "json_schema": {"name": "answer", "strict": True, "schema": schema}}
