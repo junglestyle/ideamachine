@@ -1,6 +1,7 @@
 # 0012: Rebuild from the stream with extraction v5, in parallel, then cut over
 
-_2026-11-08. Status: accepted; built and cut over 2026-11-11; amended 2026-11-10 (the extractor and the gate, below).
+_2026-11-08. Status: accepted; built and cut over 2026-11-11; amended 2026-11-10 (the extractor and the gate, below)
+and 2026-11-12 (the gate closed, below).
 Amends [0010](0010-connections-kinds-lenses.md) (who writes `evolves`)
 and [0011](0011-observations-are-mine.md) (relayed and held thoughts); settles the prompt review before the
 re-extraction; my decision. The prompt texts were reviewed by two reviewers and three adversarial teardowns, merged,
@@ -90,3 +91,16 @@ split single thoughts, which the gate can't repair.
 **The gate runs after the rebuild, not in it.** It was there so a cheaper extractor could do the bulk of the work;
 with Opus extracting, its checks are a cleanup pass over the rebuilt captures, run once B7 has set its cuts. Its
 answers are kept per capture, so it can run at any time. The code checks still run on every capture as it's read.
+
+## Amendment (2026-11-12): the gate measured and closed
+
+_My decision, on the gate's measurement (im-evals `reports/2026-11-12-gate.md`)._
+
+**The gate is closed, and v5.3 on Opus runs ungated.** One Jev pass over all 1,046 v5.3 speech captures ($0.066)
+would keep 706, repair 338 and drop 2 at the 0.7 cut. Of 40 flagged captures read against every cited line, 1 had a
+real problem, 6 a small defensible inference and 33 were false alarms: tidied filler read as overstatement, the
+reading's mishearing fixes read as misstatements, references named from cited lines as v5.3 is told to. Both drops
+were wrong; the gists already state my real stance. The flags would cost more review than they fix, and the gate's
+first purpose, letting a cheaper extractor do the bulk of the work, ended when Opus was chosen. `im gate`,
+`im audit-gate` and Jev's gate questions are retired; the code checks still run on every capture as it's read, and
+Jev's cached answers are left in `jev_answers`.

@@ -99,46 +99,6 @@ QUESTIONS = {
                      "false": "No real connection, or only a shared subject or broad area (relationships, emotions, "
                               "work)"}),
     },
-    # The capture gate (im.gate, decision 0012): one capture, the transcript around it (`context`, lines as `[n]
-    # speaker: text`, `me` being me), the lines it cites, its quote and its gist. The gist checks are the summary
-    # sheet's two, the two ways v5's review found gists going past the lines, and `unresolved`, a gist pointing at
-    # what the transcript names without naming it (v5's trials: "that kind of overview", Astra's review, in all three
-    # prompts); `not_mine` and `mocked` drop a capture, `two_points` only flags one. Each is decided at its own cut
-    # (gate.CUTS), so `p` means nothing here.
-    "gate": {
-        "adds": ("Does `gist` state something that `lines` don't say?",
-                 {"true": "It adds an inference, conclusion, motive or outcome that isn't in the lines",
-                  "false": "Everything it says is in the lines, perhaps more briefly"}),
-        "misstates": ("Does `gist` contradict or misstate what `lines` say?",
-                      {"true": "It says something the lines contradict, gets who did or said what wrong, reverses a "
-                               "negation, or changes what a claim is about",
-                       "false": "Nothing in it contradicts or changes what the lines say (whether it adds anything, "
-                                "or says it more strongly, is asked separately)"}),
-        "overstates": ("Does `gist` say it more strongly, more broadly or more certainly than `lines` do?",
-                       {"true": "It drops a hedge, a doubt or a qualifier, or turns one case into a rule",
-                        "false": "It's as strong, as broad and as sure as the lines"}),
-        "completes": ("Does `gist` finish a thought that `lines` leave unfinished?",
-                      {"true": "It says where a sentence that trails off was going",
-                       "false": "The lines finish the thought, or the gist stops where they stop"}),
-        "unresolved": ("Does `gist` point at something without saying what it is, when `context` says?",
-                       {"true": "It speaks of \"it\", \"that kind of …\", \"this approach\", \"my approach\" or a "
-                                "person or thing that `context` names, without naming it",
-                        "false": "It names what it points at, or `context` doesn't say what that is"}),
-        "not_mine": ("In `context`, is the point of `gist` someone else's, which `me` only agrees with, answers or "
-                     "repeats back?",
-                     {"true": "Someone else makes the point, and me only goes along with it",
-                      "false": "me makes the point, or passes on someone's view as worth telling"}),
-        "mocked": ("In `context`, is `me` mocking or rejecting the point of `gist`?",
-                   {"true": "me voices it to mock, parody or reject it, deadpan included: asked straight, me wouldn't "
-                            "stand behind it, and the context shows me doesn't hold it",
-                    "false": "me means it, as a claim, a joke with a point, an exaggeration or a provocation, or "
-                             "passes on someone's view without rejecting it"}),
-        "two_points": ("Does `gist` make two separate points, each of which could stand on its own?",
-                       {"true": "It joins two claims a reader could accept or reject separately, each meaningful "
-                                "without the other; \"X but Y\" counts when Y is a claim of its own",
-                        "false": "One claim, perhaps with the reason, example or qualification that only supports "
-                                 "it; \"X but Y\" counts when Y only limits X"}),
-    },
     # Sensitivity tags (im.sensitivity, decision 0012): an idea or a theme (`item`: its text, and for an idea what was
     # said), one yes or no per tag, each decided at sensitivity.CUT. They describe; a view decides what to hide.
     "sensitivity": {
