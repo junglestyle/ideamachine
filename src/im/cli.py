@@ -320,55 +320,6 @@ def cmd_trial(args) -> None:
     _print(out)
 
 
-def _live_read(x) -> tuple[str, str]:
-    """The read `im run` makes: (prompt_version, model) under the configured live prompt, model and effort."""
-    from im import extract
-
-    if x.prompt not in extract.LIVE:
-        raise SystemExit(f"extract.prompt {x.prompt} isn't live; `im run` reads with {', '.join(extract.LIVE)}")
-    return extract.prompt_version(x.model, x.effort, extract.PROMPTS[x.prompt]), x.model
-
-
-def cmd_gate(args) -> None:
-    """Jev's checks on every live capture (the capture gate, decision 0012), and what the gate would do."""
-    from im import gate, jev
-
-    x = config.load().extract
-    cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
-    with db.connect(db.pipeline_dsn()) as conn:
-        read, judge = _live_read(x), jev.Jev()
-        out = {"asked": gate.run(conn, judge, read, cap, args.limit), "summary": gate.summary(conn, judge, read)}
-    _print(out)
-
-
-def cmd_audit_gate(args) -> None:
-    """The gate's labeling sheet: drawn from live captures Jev answered about, drafted by models, my review of their
-    disagreements, and the cuts it suggests."""
-    from pathlib import Path
-
-    from im import gate_audit, jev, llm
-
-    folder = Path(args.folder)
-    if args.action == "review":
-        _print(gate_audit.review(folder))
-        return
-    if args.action == "score":
-        _print(gate_audit.score(folder))
-        return
-    cfg = config.load()
-    x = cfg.extract
-    cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
-    with db.connect(db.pipeline_dsn()) as conn:
-        if args.action == "draft":
-            if not args.model:
-                raise SystemExit("draft needs --model, the model drafting, e.g. openai/gpt-6.1-terra")
-            client = llm.client_for(args.model, cfg.egress.zdr)
-            _print(gate_audit.draft(conn, folder, client, args.model, args.effort or "low", cap))
-            return
-        read = _live_read(x)
-        _print(gate_audit.write(conn, folder, jev.Jev(), read, args.seed, args.size))
-
-
 def cmd_mishearings(args) -> None:
     """The transcription's mishearings: list them, or confirm, add or reject a pair."""
     from im import mishearings
@@ -820,26 +771,6 @@ def main(argv=None) -> None:
                     help="also count as found a capture the other model quoted from different lines, where Jev says "
                          "they make the same point (sends those pairs to Jev, even with --report; answers are kept)")
     tr.set_defaults(func=cmd_trial)
-    ga = sub.add_parser("gate", help="Jev's checks on every live capture: does the gist go past its lines, is the "
-                        "point mine, is it mocked? Then how often each fires (sends to Jev; answers are kept; "
-                        "archive captures are left out)")
-    ga.add_argument("--limit", type=int, help="ask about at most this many captures this time (0: send nothing, "
-                    "say how many are due)")
-    ga.add_argument("--monthly-cap-usd", type=float, help="send nothing once the month's spend reaches this "
-                    "(default: config)")
-    ga.set_defaults(func=cmd_gate)
-    ag = sub.add_parser("audit-gate", help="set the gate's cuts: a sheet of live captures Jev answered about, drafted "
-                        "by two models; I review only where they disagree (sheet and review send nothing; draft "
-                        "sends to the model)")
-    ag.add_argument("action", choices=["sheet", "draft", "review", "score"])
-    ag.add_argument("folder", help="where sheet.md and key.json go (it quotes people: keep it in saved/)")
-    ag.add_argument("--model", help="draft: the model drafting, e.g. openai/gpt-6.1-terra")
-    ag.add_argument("--effort", help="draft: the drafting model's effort (default low)")
-    ag.add_argument("--size", type=int, default=80, help="sheet: how many captures, half flagged by Jev")
-    ag.add_argument("--seed", type=int, default=13, help="sheet: the sample and shuffle's seed")
-    ag.add_argument("--monthly-cap-usd", type=float, help="draft: send nothing once the month's spend reaches this "
-                    "(default: config)")
-    ag.set_defaults(func=cmd_audit_gate)
     mh = sub.add_parser("mishearings", help="the transcription's mishearings, as hints for later reads: list them, "
                         "or confirm (or add) or reject a pair")
     mh.add_argument("action", choices=["list", "confirm", "reject"])
