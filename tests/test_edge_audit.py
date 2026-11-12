@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from im import edge_audit, egress, jev, observations
+from im import connect, edge_audit, egress, jev, observations
 
 from helpers import table
 from test_lattice import lat_setup, legacy_evolves
@@ -244,7 +244,7 @@ def test_jev_drafts_a_sheet_from_each_side_as_shown_and_connection_is_scored_at_
     assert out["pairs"] == 6 and len(sent) == 6
     assert all(set(b["questions"]) == set(jev.QUESTIONS["edge"]) | set(jev.PROBES["edge"]) for b in sent)
     for b, (_, p) in zip(sent, sorted(key.items(), key=lambda kv: int(kv[0])), strict=True):
-        assert b["state"]["a"] == edge_audit.side_data(lattice_with_clusters, p["sides"][0])   # A as the sheet shows
+        assert b["state"]["a"] == connect.side_data(lattice_with_clusters, p["sides"][0])   # A as the sheet shows
     draft = json.loads(Path(out["draft"]).read_text())
     assert all(d["label"] == edge_audit.jev_label(d) for d in draft.values())
 

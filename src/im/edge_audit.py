@@ -36,7 +36,7 @@ from pathlib import Path
 
 import numpy as np
 
-from im import jev
+from im import connect, jev
 
 SIZE = 50
 NEAR_K = 5
@@ -146,32 +146,6 @@ def _spread(pairs: list[dict], n: int) -> list[dict]:
     return [pairs[round(k * (len(pairs) - 1) / max(n - 1, 1))] for k in range(n)]
 
 
-def side_data(conn, idea_id: str) -> dict:
-    """A cluster as shown: up to two things said, mine first, with who and when; Claude's summary; my note."""
-    title, statement, note = conn.execute(
-        "SELECT title, statement, my_note FROM im.idea_text WHERE idea_id = %s", (idea_id,)).fetchone()
-    quotes = conn.execute(
-        """SELECT quote, said_on, me FROM (
-             SELECT DISTINCT ON (i.observation_id) i.quote, e.started_at::date AS said_on, s.speaker = 'me' AS me
-             FROM im.idea_evidence ev JOIN im.items i USING (item_id)
-             JOIN im.episodes e ON e.episode_id = i.episode_id AND e.current
-             JOIN im.observation_speaker s USING (observation_id)
-             WHERE ev.idea_id = %(id)s ORDER BY i.observation_id, i.created_at) o
-           UNION ALL
-           SELECT quote, said_at::date, said_by = 'me' FROM im.observations WHERE idea_id = %(id)s
-           ORDER BY me DESC, said_on, quote LIMIT 2""", {"id": idea_id}).fetchall()
-    return {"said": [{"by": "me" if me else "someone", "on": str(on), "words": q} for q, on, me in quotes],
-            "summary": f"{title}. {statement}", **({"my_note": note} if note else {})}
-
-
-def _side(conn, idea_id: str) -> list[str]:
-    """A cluster on the sheet: up to two things said, mine first, with when; then Claude's summary, and my note."""
-    d = side_data(conn, idea_id)
-    lines = [f"> \"{q['words']}\" ({q['by']}, {q['on']})" for q in d["said"]]
-    lines += [f"   Claude's summary: {d['summary']}"] + ([f"   My note: {d['my_note']}"] if "my_note" in d else [])
-    return lines
-
-
 def build(conn, seed: int = 4, size: int = SIZE, exclude: set | None = None) -> tuple[str, dict]:
     """The sheet's text and its key. `exclude` leaves out pairs already on earlier sheets: marking one again is wasted,
     since pooled sheets count a pair once."""
@@ -202,8 +176,7 @@ def build(conn, seed: int = 4, size: int = SIZE, exclude: set | None = None) -> 
     for n, p in enumerate(picked, 1):
         lines += [f"## {n}", ""]
         for side, idea in zip("AB", p["sides"]):
-            first, *rest = _side(conn, idea) or ["(nothing said on record)"]
-            lines += [f"{side}. {first.strip()}", *[f"   {x}" if x.startswith(">") else x for x in rest], ""]
+            lines += [*connect.shown(connect.side_data(conn, idea), side), ""]
         lines += ["mark: ", "note: ", ""]
     key = {"benchmark": "B4", "seed": seed, "size": size, "near_k": NEAR_K, "wide_k": WIDE_K,
            "excluded": len(exclude or ()),
@@ -340,39 +313,10 @@ def pooled(folders: list[Path]) -> dict:
 
 
 # --- A model's marks on the same sheet (B4's agreement test) ---------------------------------------------------------
+#
+# The prompt Terra passed with is the connection judge's (connect.SYSTEM and SCHEMA): a draft by Terra at low effort
+# is logged under the judge's prompt version.
 
-DRAFT_SYSTEM = """You type the relationship between two clusters from my idea lattice, captured from my \
-conversations. Each side shows what was said, then a summary of it; judge by what was said, since the summary can \
-be wrong. "me" is me, "someone" anyone else. Choose one label:
-- supports: one is a reason to believe the other: evidence or an argument for it. Test: if A is true, is B more \
-believable, while still saying the same thing? A case that only illustrates it is elaborates.
-- elaborates: one fills in the other: a specific case or example of it, a description of how it works, an \
-application, a generalization, or something built on it. Test: does one fill in or carry forward the other?
-- tension: they pull against each other: a contradiction, a change of mind, a trade-off, or two pulls that would \
-have to be balanced. Test: does holding one make the other harder to hold as stated?
-- related: they belong together, in the same tight neighbourhood of ideas, but none of the above says how. Test: is \
-there more between them than their subject?
-- none: no real connection. Being about the same subject, or the same broad area (relationships, emotions, work), \
-isn't a connection.
-- same: the same idea said twice.
-- unsure.
-A later version of an idea is elaborates if it refines it, tension if it reverses it, and same if it only says it \
-again.
-For supports and elaborates, give the direction: "A>B" if A supports or elaborates B, "B>A" the other way, or "both" if \
-it runs both ways or you can't say; otherwise "none".
-Separately, say whether the two are analogous: about different subjects, but with the same underlying structure \
-(the same move, pattern or mechanism in two domains). If they are, name the shared structure in a few words; \
-otherwise leave it empty. In `why`, make the case for your label in one sentence: what's between them, or why \
-there's nothing beyond their subject. Don't evaluate the ideas."""
-
-DRAFT_SCHEMA = {
-    "type": "object",
-    "properties": {"label": {"type": "string", "enum": ["supports", "elaborates", "tension", "related", "none",
-                                                          "same", "unsure"]},
-                   "direction": {"type": "string", "enum": ["A>B", "B>A", "both", "none"]},
-                   "analogy": {"type": "string"}, "why": {"type": "string"}},
-    "required": ["label", "direction", "analogy", "why"], "additionalProperties": False,
-}
 CORE = ("none", "related", "elaborates", "tension")   # the labels macro_f1_core averages, over those I've used
 
 
@@ -402,13 +346,13 @@ def draft(conn, client, folder: Path, model: str = "claude-opus-5-5", effort: st
     shown = _pairs_as_shown((folder / "sheet.md").read_text())
     out_path = folder / f"draft-{model.replace('/', '_')}-{effort}-labels{LABELSET}{policy_tag()}.json"
     got = json.loads(out_path.read_text()) if out_path.exists() else {}
-    pv = themes.version(DRAFT_SYSTEM, DRAFT_SCHEMA, model, effort)
+    pv = themes.version(connect.SYSTEM, connect.SCHEMA, model, effort)
     cost, failed, stopped = 0.0, [], None
     for num, p in sorted(key["pairs"].items(), key=lambda kv: int(kv[0])):
         if num in got or num not in shown:
             continue
         try:
-            a = egress.ask(conn, client, model, effort, DRAFT_SYSTEM, DRAFT_SCHEMA, shown[num], max_tokens=4000,
+            a = egress.ask(conn, client, model, effort, connect.SYSTEM, connect.SCHEMA, shown[num], max_tokens=4000,
                            segment_ids=egress.segments_of(conn, p["ideas"]), prompt_version=pv,
                            monthly_cap_usd=monthly_cap_usd)
         except llm.Stop as e:
@@ -591,7 +535,7 @@ def _draft_jev(conn, client, folder: Path, key: dict, monthly_cap_usd: float) ->
         if num in got:
             continue
         a, b = p.get("sides") or p["ideas"]
-        state = {"a": side_data(conn, a), "b": side_data(conn, b)}
+        state = {"a": connect.side_data(conn, a), "b": connect.side_data(conn, b)}
         try:
             ans = probe_audit._ask_jev(conn, client, "edge", state, True, egress.segments_of(conn, p["ideas"]),
                                        monthly_cap_usd)

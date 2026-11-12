@@ -56,6 +56,10 @@ def _purge_tombstoned(conn) -> tuple[set[str], int]:
                       SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(v.segment_ids))""")
     conn.execute("""DELETE FROM im.observations o WHERE EXISTS (
                       SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(o.segment_ids))""")
+    # A connection verdict's case (`why`, `analogy`) may paraphrase forgotten speech: it goes, and the pair is asked
+    # again. The connection it wrote stays until then.
+    conn.execute("""DELETE FROM im.connection_verdicts v WHERE EXISTS (
+                      SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(v.segment_ids))""")
     citations.uncite_missing(conn)   # an edge loses the forgotten observations it cited
     # What was sent can't be recalled, but the local copy of the text goes; the segment IDs stay so
     # `im forgotten --sent` can say what went out.

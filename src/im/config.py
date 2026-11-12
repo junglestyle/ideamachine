@@ -7,7 +7,7 @@ config change is a version change and re-derives episodes.
 import os
 import sys
 import tomllib
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 
 HEURISTIC = "heuristic-3"  # 3: episode identity covers how its speakers would be pseudonymized
 
@@ -53,10 +53,10 @@ class ExtractConfig:
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """The model a stage asks, and its effort: [match], [themes], [digest]. Both go into the stage's version: a change
-    re-asks what that stage keys on its version (every idea that fits
-    no theme); the matcher and the digest use it from then on. `max_tokens`, a request's output budget, isn't in the
-    version (None: the stage's own)."""
+    """The model a stage asks, and its effort: [match], [themes], [digest], [connect]. Both go into the stage's version:
+    a change re-asks what that stage keys on its version (every idea that fits no theme, every pair the connection
+    judge has judged); the matcher and the digest use it from then on. `max_tokens`, a request's output budget, isn't
+    in the version (None: the stage's own)."""
     model: str = "claude-opus-5-5"
     effort: str = "low"
     max_tokens: int | None = None
@@ -111,6 +111,7 @@ class Config:
     match: ModelConfig = ModelConfig()          # the lattice's matcher
     themes: ModelConfig = ModelConfig()
     digest: ModelConfig = ModelConfig()
+    connect: ModelConfig = ModelConfig(model="openai/gpt-6.1-terra")   # the connection judge: Terra passed B4
     weight: WeightConfig = WeightConfig()
     egress: EgressConfig = EgressConfig()
 
@@ -134,6 +135,7 @@ def load() -> Config:
         print(f"[extract] {', '.join(retired)}: retired with prompts v1 to v4 (decision 0012); delete it from {path}",
               file=sys.stderr)
     models = {k: ModelConfig(**data.get(k, {})) for k in ("match", "themes", "digest")}
+    models["connect"] = replace(Config.connect, **data.get("connect", {}))
     return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
                   extract=ExtractConfig(**extract), lattice=LatticeConfig(**data.get("lattice", {})),
                   weight=WeightConfig(**data.get("weight", {})), egress=EgressConfig(**egress), **models)

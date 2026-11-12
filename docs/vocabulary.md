@@ -342,7 +342,21 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Stand-in connection.** A connection written by something other than a connection judge: embedding neighbors
   (method `embedding:…;k=3;min=0.7`, `lattice.relate`), which hold a pair until a judge decides it. The archived
   database also holds the ChatGPT archive's cross-references (`chatgpt-archive`) ([connections storage] §Tables).
-  **Status:** a judge's `none` isn't stored yet.
+  A pair with a connection verdict has no stand-in: a connection replaces it, any other verdict removes it, and
+  `lattice.relate` never writes it again. Pairs not judged yet keep theirs.
+- **Connection judge.** The role, and the process, that decides whether a pair of clusters is connected
+  (`im connect`, `im.connect`; SPEC §5). Embeddings nominate the pairs: every two cards at cosine ≥ 0.65 where one is
+  among the other's 10 nearest (`connect.FLOOR`, `connect.K`). Pairs I linked or unlinked are never asked. Jev
+  screens each pair, then Terra types the rest with B4's prompt, which it passed. Its method is `connect-1:…`, from
+  Terra's prompt version, model and effort and the screen's question, model and cut. **Status:** on demand only; not
+  part of `im run` yet.
+- **Connection verdict.** What the connection judge decided about a pair, one per pair (`im.connection_verdicts`,
+  059), with the pair's text hash and the judge's method, so a pair is asked again only when either changes. Terra's
+  label (`supports`, `elaborates`, `tension`, `related`, `same`, `none` or `unsure`), `refused` when it refused, or
+  `screened`. The first five are connections; `none`, `unsure`, `refused` and `screened` are not. A `same` is also
+  logged in `im.merge_review` as `judged_same`, for my review; nothing is merged.
+- **Screened.** A connection verdict that Jev's screen gave without asking Terra: its `belongs`
+  (`jev.QUESTIONS["edge"]`) is below `connect.SCREEN_CUT`, 0.39 (B8). A screened pair isn't connected.
 - **Connection kind.** An optional annotation on a connection that says how the two relate. A connection may carry
   several, each with its own `method` (`im.connection_kinds`, 045:25-35). A connection kind is a suggestion: it never
   decides whether the connection exists, and it isn't graded ([0009]). Each adds `lens.KIND_WEIGHT` to its
@@ -359,7 +373,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 
   The tests are the B4 sheet's (`edge_audit.HEADER`). `supports` and `elaborates` have a direction: `a>b` means `a`
   supports or elaborates `b`, `b>a` the reverse, and `both` both (045:29; `edge_audit.HEADER`).
-  **Status:** no connection-kind judge writes them yet.
+  **Status:** the connection judge writes `supports`, `elaborates` and `tension`, at most one per connection, from
+  Terra's label; nothing writes `sympathy` yet.
 - **Lineage.** The relation that asserts one cluster was derived from another, kept apart from connections
   (`im.lineage(from_id, to_id, kind)`, 045:37-46). Lenses follow it both ways; cluster weight doesn't count it. The
   lineage kinds:
@@ -368,15 +383,16 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
     nothing writes it now. Whether one point builds on another is a connection (`elaborates`, with a direction);
   - `synthesizes`: a synthesized cluster derived from each of its source clusters ([0010]:75-79).
 - **Edge-generation method.** What wrote a connection, connection kind or lineage link (the `method` column): a model
-  and question version, embedding parameters, the matcher's version, or `feedback` (SPEC §3; 045).
+  and question version (the connection judge's `connect-1:…`), embedding parameters, the matcher's version, or
+  `feedback` (SPEC §3; 045).
   `im.edge_methods` records when each method first wrote, so that an unlink hides only what had been written before
   it (045:49-53).
 - **Edge observation citation.** The observations an edge rests on: the founding observations of its two ends
   (`cited_observation_ids`; `citations.py`; [M2 design] §Edges). `im check` fails on an edge that cites nothing where
   it could.
 - **Embedding neighbors.** A cluster's nearest clusters by embedding similarity (cosine) (`pub.card_neighbours`,
-  033; Lattice's `pub.idea_neighbours`, 026, until 058). They nominate pairs and seed a lens's search, and never
-  decide a connection ([0010]:96).
+  033; Lattice's `pub.idea_neighbours`, 026, until 058). They nominate pairs for the connection judge and seed a
+  lens's search, and never decide a connection ([0010]:96).
 - **Graph neighborhood.** A set of clusters joined by connections. "A neighborhood of connected observations"
   ([0010]:33-36) means the observations of those clusters. What makes a set of clusters a neighborhood (how many,
   how densely connected) is **not yet specified**.
@@ -498,8 +514,8 @@ Each role decides one thing. The model behind it can change, so models are liste
 |---|---|---|
 | Extractor | the captures in an episode | `claude-opus-5-5`, effort `medium` (`config.ExtractConfig`) |
 | Matcher | `same_point` against each candidate, so `new` or `same_as` | `[match]`, default `claude-opus-5-5` (`config.ModelConfig`); Jev planned (ROADMAP-v2 M4) |
-| Connection judge | whether a pair is connected | Terra, chosen on B4 (SPEC §5). **Status:** not writing yet; stand-ins hold |
-| Connection-kind judge | the connection kinds on a connection | none yet |
+| Connection judge | whether a pair is connected | `[connect]`, default Terra, effort `low` (`config.ModelConfig`), chosen on B4 (SPEC §5), behind Jev's screen (B8). **Status:** on demand (`im connect`); stand-ins hold the pairs not judged yet |
+| Connection-kind judge | the connection kinds on a connection | the connection judge's label, one kind at most |
 | Tension judge | whether a pair is in tension, as a proposal | Jev, `pulls4` |
 | Embedder | embeddings for neighbors, positions, lens search | `BAAI/bge-small-en-v1.5`, local |
 | Sensitivity tagger | the eight sensitivity tags on each idea and theme | Jev, at `sensitivity.CUT` per tag |
@@ -632,8 +648,8 @@ themes and voice clusters. Whether the capture kind `idea` means "a suggestion" 
 ### summary, statement, gist, title
 
 - No capture or cluster has a `summary` column. The only one is the digest summary (022:11).
-- On the B4 and probe sheets, "Claude's summary" is a cluster's title and statement (`edge_audit.side_data`,
-  `probe_audit`). SPEC.md:121 speaks of each side "as said and summarized".
+- On the B4 and probe sheets, and to the connection judge, "Claude's summary" is a cluster's title and statement
+  (`connect.side_data`, `probe_audit`). SPEC.md:121 speaks of each side "as said and summarized".
 - `summary_audit`, `match_bench`, `miss_audit` and Jev's `summary` questions use "summary" for a capture's gist.
 - ROADMAP-v2 §5 q9 means both.
 
@@ -896,7 +912,6 @@ These terms are in use, but no doc or file defines them:
 - What makes a set of clusters a graph neighborhood that triggers a synthesis ([0010]:33-36).
 - The boundaries between capture kinds other than `question` and `technique`. Capture tags.
 - Merging and rejecting clusters (SPEC §2-3, [M2 design]:138).
-- Storing a connection judge's `none` ([connections storage] §Tables).
 - The full set of speaker basis values (Hearsay's contract).
 
 ## Stale definitions

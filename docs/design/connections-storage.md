@@ -18,15 +18,25 @@ reader counts rows, so one pair with `related`, `evolves` and `mine` counts thre
   `cited_observation_ids`, `decided_at`. One method per pair. Embedding neighbors and the archive's
   cross-references stand in until a model decides the pair, and a model decision replaces them; the embedding
   rebuild deletes and writes only rows whose method is an embedding method, so it never overwrites the archive's or
-  a model's. A model's `none`, which keeps a stand-in from returning, is M4's to store.
+  a model's. A model's `none` lives in `im.connection_verdicts` (below), not here.
 - **`im.connection_kinds`**: `(a, b, kind)` referencing a connection, cascading with it; `kind` is `supports`,
   `elaborates`, `tension` or `sympathy` (the vocabulary grows by migration); `direction` (`a>b`, `b>a`, `both`) for
-  `supports` and `elaborates`; `method`, `decided_at`. Empty until a kind pass writes it.
+  `supports` and `elaborates`; `method`, `decided_at`. The connection judge writes the first three.
 - **`im.lineage`**: `(from_id, to_id, kind)` with `kind` `evolves` or `synthesizes`, directed: `evolves` from the
   new idea to the one it evolves, as the matcher writes it today; `method`, `cited_observation_ids`, `created_at`.
   Citations stay, so the uncited check covers lineage too.
 - **`im.edge_methods`**: every method that has written a connection or a kind, with `seen_event_id`, the highest
   `pub.feedback_events.event_id` when it first wrote. Filled by a trigger, never by hand.
+- **`im.connection_verdicts`** (migration 059): the connection judge's verdict on each pair it asked (`im connect`),
+  one per pair, `a < b`, both cascading from `im.ideas`: Terra's label (`supports`, `elaborates`, `tension`,
+  `related`, `same`, `none`, `unsure`), `refused`, or `screened` when Jev's screen kept the pair from Terra; Terra's
+  direction, analogy and case (`why`); Jev's `belongs`; the judge's `method`; the `input_hash` of the pair as shown;
+  the `segment_ids` its requests carried, so forgetting any of them deletes the verdict; Terra's `egress_id`. This
+  is where a `none` lives: a pair with a verdict that isn't a connection has no row in `im.connections`, and
+  `lattice.relate` skips every pair with a verdict, so a stand-in the judge removed never comes back. A connection
+  verdict writes the pair's connection under the judge's method, replacing a stand-in, with its kind; any other
+  removes the pair's embedding stand-in and an earlier judgment's connection. A `same` is also logged in
+  `im.merge_review` as `judged_same`.
 
 ## My links and unlinks
 
@@ -38,6 +48,9 @@ My links stay events, as all my input does (SPEC §2), and the views read them a
   (`seen_event_id` below the unlink's `event_id`). A method first used after it (a new question version, a new
   model, a new kind's pass) can connect the pair again, and I can unlink again. Embedding neighbors keep one
   method name across runs, so a rebuild doesn't bring a pair back.
+
+The connection judge never asks about a pair I linked or unlinked: my latest decision stands, and each new judge
+method would otherwise connect again every pair I'd unlinked before it first wrote.
 
 ## Archive cross-references
 

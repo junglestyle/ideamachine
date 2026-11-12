@@ -34,6 +34,8 @@ uv run im audit-tension draft saved/tension-2 --model jev-1.14.0   # Jev drafts 
                                   # (OpenRouter models need OPENROUTER_API_KEY)
 uv run im import-chatgpt saved/chatgpt-idea-machine.md saved/chatgpt-curate-sheet.md   # what the ChatGPT Idea Machine's kept messages would send, a session at a time; --write reads them with extraction v5.3 into archive captures, once
 uv run im lattice                 # lattice counts: ideas, evidence, connections
+uv run im connect --limit 0      # the connection judge: how many pairs are nominated and due, sending nothing
+uv run im connect --limit 100    # Jev screens up to 100 due pairs, Terra judges those that pass; without --limit, every due pair
 uv run im themes                  # themes; im themes pin|unpin|reject <name>, im themes rename <name> <new name>
 uv run im load-fixtures --scenario edited   # the same stream after every kind of correction and a forget
 uv run im run
@@ -73,7 +75,7 @@ prompts `v1` to `v4`, decision 0012) and `[egress] names`, `public_names` and `m
 on the next run. Triage rows record the model, its weights revision and a hash of the questions, so a model or
 question change re-triages.
 
-Every stage that asks Claude takes its model and effort from the file:
+Every stage that asks a chat model takes its model and effort from the file:
 
 | Section | Stage | `model` | `effort` |
 |---|---|---|---|
@@ -81,18 +83,29 @@ Every stage that asks Claude takes its model and effort from the file:
 | `[match]` | the lattice's matcher | `claude-opus-5-5` | `low` |
 | `[themes]` | describing, filing and proposing themes | `claude-opus-5-5` | `low` |
 | `[digest]` | the weekly digest | `claude-opus-5-5` | `low` |
+| `[connect]` | the connection judge (`im connect`, on demand; not part of `im run` yet) | `openai/gpt-6.1-terra` | `low` |
 
 Both go into the stage's version. Changing extraction's re-reads every episode, so try it first with `im trial`.
-Changing the themes' asks again about every idea that fits no theme.
+Changing the themes' asks again about every idea that fits no theme, and changing the connection judge's asks again
+about every pair it has judged.
 The matcher and the digest use a new one from then on; what they've already done stays.
 
 The sensitivity tags have no section: Jev (`jev.MODEL`) answers one yes or no per tag, and every idea and theme is
 tagged again when the questions or the cut (`sensitivity.CUT`) change.
 
+`im connect` judges pairs of clusters (SPEC §5). It nominates every two cards at cosine ≥ 0.65 where one is among the
+other's 10 nearest, leaving out pairs I linked or unlinked. Jev screens each, and Terra (`[connect]`) judges the
+pairs Jev rates at 0.39 or above with B4's prompt. Every verdict is kept in `im.connection_verdicts`, so a pair is
+asked again only when its text as shown or the judge's version (its prompt, model, effort, or the screen's
+question or cut) changes, never-asked pairs first. A connection replaces the pair's embedding stand-in; `none`,
+`unsure`, a refusal or a screened pair removes it, and the stand-ins rebuilt each run leave it out. It spends
+under the same monthly cap as `im run` (`extract.monthly_cap_usd`) and prints what it found and what Jev and
+Terra cost.
+
 Each section also takes `max_tokens`, a request's output budget, reasoning included (OpenRouter counts it there).
 It isn't part of any version, so raising it changes nothing already done: a request that ran out is simply asked
-again. Unset, extraction and the stages get 32,000 (`llm.MAX_TOKENS`) and the matcher 4,000. `im trial
---max-tokens` overrides `[extract]`'s for one trial.
+again. Unset, extraction and the stages get 32,000 (`llm.MAX_TOKENS`) and the matcher and the connection judge
+4,000. `im trial --max-tokens` overrides `[extract]`'s for one trial.
 
 Set `CUDA_VISIBLE_DEVICES=""` on a box with a GPU to measure what the NAS's CPU will do.
 
@@ -150,7 +163,8 @@ Then, outside that transaction:
 - **Match into the lattice.** Each new capture is shown the nearest clusters on its side (relayed or my own; local
   embeddings), and the matcher says of each whether the capture makes the same point. It joins the nearest that
   does, else starts a new cluster. Two or more matches are logged in `im.merge_review` as a possible duplicate, for
-  my review. Related-idea edges are rebuilt. The web view reads the result through schema `pub`
+  my review. Related-idea edges are rebuilt, except between clusters the connection judge has a verdict on. The web
+  view reads the result through schema `pub`
   ([ROADMAP §3.5](ROADMAP.md)).
 - **Digest.** Claude writes the last completed week's digest (Monday to Monday) once every episode of that week
   has been read and its captures matched; until then the run leaves it, with `"waiting": true` in its stats, and a

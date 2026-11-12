@@ -340,20 +340,23 @@ def match_stage(conn, client, embedder, monthly_cap_usd: float = 20.0, limit: in
 
 
 def relate(conn, embedder) -> int:
-    """Rebuild the embedding neighbors that stand in as connections until a model decides a pair (0010): each idea's
-    nearest neighbors above RELATED_MIN. Only connections an embedding made are dropped or rewritten, so the archive's
-    and a model's stay. They're cited as they're rebuilt, whichever path called this (an idle run rebuilds them too),
-    along with any new lineage. Returns how many neighbor pairs there are."""
+    """Rebuild the embedding neighbors that stand in as connections until the connection judge decides a pair (0010):
+    each idea's nearest neighbors above RELATED_MIN, leaving out every pair the judge has a verdict on (im.connect),
+    so a pair it found unconnected stays so. Only connections an embedding made are dropped or rewritten, so the
+    archive's and a model's stay. They're cited as they're rebuilt, whichever path called this (an idle run rebuilds
+    them too), along with any new lineage. Returns how many neighbor pairs stand in."""
     ids, M = _idea_matrix(conn, embedder)
     method = f"embedding:{embedder.model_version};k={RELATED_K};min={RELATED_MIN}"
+    judged = set(conn.execute("SELECT a, b FROM im.connection_verdicts").fetchall())
     pairs = {}
     if len(ids) >= 2:
         S = M @ M.T
         np.fill_diagonal(S, -1)
         for i in range(len(ids)):
             for j in np.argsort(-S[i])[:RELATED_K]:
-                if j != i and S[i, j] >= RELATED_MIN:
-                    pairs[tuple(sorted((ids[i], ids[j])))] = round(float(S[i, j]), 4)
+                pair = tuple(sorted((ids[i], ids[j])))
+                if j != i and S[i, j] >= RELATED_MIN and pair not in judged:
+                    pairs[pair] = round(float(S[i, j]), 4)
     a, b = [p[0] for p in pairs], [p[1] for p in pairs]
     with conn.transaction():
         conn.execute("""DELETE FROM im.connections c WHERE c.method LIKE 'embedding:%%'

@@ -90,7 +90,8 @@ QUESTIONS = {
     # agreement and 0.893 precision. `belongs` alone, the one with criteria, passed from 0.78 to 0.83, and held out
     # the same way gave 0.930 and 0.906 (recall 0.83), so it decides alone; the other two are probes. With the cut
     # fixed, all 200 pairs gave 0.900 and 0.894 (the fresh 71: 0.873, 0.842), 11 of 15 misses edges I marked
-    # `related`: it finds an edge with a kind, not one that only belongs. Terra decides edges instead (SPEC §5).
+    # `related`: it finds an edge with a kind, not one that only belongs. Terra decides edges instead (SPEC §5), and
+    # `belongs` screens pairs in front of it at a cut of its own (connect.SCREEN_CUT, B8), not CUT["edge"].
     "edge": {
         "belongs": ("Do `a` and `b` belong in the same tight neighbourhood of ideas: does one support, fill in, "
                     "echo or pull against the other?",

@@ -120,13 +120,18 @@ arrive the same way, triggered by a neighborhood of connections
 
 A model decides edges from structured input (the pair as each side was said and summarized), a choice out. Terra
 (`openai/gpt-6.1-terra`, low effort) decides, having passed B4 (2026-11-07); Jev, the cheap, fast decision model, failed
-it on edges that only belong together, and may come back as a cheaper decider or a filter in front of one.
+it on edges that only belong together, and screens in front of it instead (B8): a pair Jev rates below the cut isn't
+sent to Terra (`im connect`, `im.connect`).
 
-- Embeddings nominate pairs: top-k neighbors plus shared evidence.
+- Embeddings nominate pairs: every two cards at cosine ≥ 0.65 where one is among the other's 10 nearest. Shared
+  evidence doesn't nominate yet. Pairs I linked or unlinked aren't asked: my decision stands.
 - The model decides whether there's an edge: connected or `none`. Connected means the two belong in the same tight
   neighborhood, not that they share a subject, which is a lens's job ([0010](decisions/0010-connections-kinds-lenses.md)).
-  `none` is a real answer. It also suggests kinds, shown on the edge and never deciding whether it exists
-  ([0009](decisions/0009-edges-connection-graded-kind-suggested.md)).
+  `none` is a real answer, kept with every other verdict (`unsure`, a refusal, screened: none of them an edge) in
+  `im.connection_verdicts`, so a pair is asked again only when its text or the judge's method changes, and an
+  embedding stand-in never comes back. The model also suggests a kind, written on the connection and never deciding
+  whether it exists ([0009](decisions/0009-edges-connection-graded-kind-suggested.md)). `same` is an edge, and goes
+  to my merge review; nothing is merged.
 - Tension (two ideas pulling against each other, contradiction included) and analogy (the same structure in
   different subjects) are passes of their own over pairs, each with its own model.
 - Every edge records `method` and model version, so it can be rerun and diffed.
