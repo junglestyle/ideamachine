@@ -66,8 +66,7 @@ def test_the_gate_keeps_repairs_or_drops_each_capture_from_what_jev_says_of_it(p
     assert (due["captures"], due["due"], due["asked"], due["archive_skipped"], len(sent)) == (3, 3, 0, 1, 0)
     stats = gate.run(pipe, client, read, 20.0)
     assert (stats["captures"], stats["asked"], stats["failed"], stats["due"]) == (3, 3, 0, 0)
-    shown = sent[0]["state"]
-    assert shown["gist"] == "Bob's build broke again."
+    shown = next(b["state"] for b in sent if b["state"]["gist"] == "Bob's build broke again.")   # sent by random id
     assert "build broke again" in shown["lines"] and shown["lines"] in shown["context"]
 
     s = gate.summary(pipe, client, read)
