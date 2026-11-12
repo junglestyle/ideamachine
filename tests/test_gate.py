@@ -1,4 +1,4 @@
-"""The capture gate: Jev's checks on a trial's captures, shown the transcript as sent, decided per check in code; and
+"""The capture gate: Jev's checks on the live captures, shown the transcript as sent, decided per check in code; and
 its cuts, set from a sheet two models draft and I review only where they disagree."""
 
 import json
@@ -6,9 +6,10 @@ import re
 from dataclasses import replace
 from types import SimpleNamespace
 
-from im import extract, gate, gate_audit, jev, trial
+from im import egress, extract, fixtures, gate, gate_audit, jev
 
 from helpers import run
+from test_archive_captures import archive_capture
 from test_extract import FakeClaude
 
 
@@ -44,29 +45,34 @@ def test_the_gate_keeps_repairs_or_drops_each_capture_from_what_jev_says_of_it(p
     turns[0] = replace(turns[0], text="Did you see the build broke again, Bob?")
     stream.write(stream.dir)
     run(pipe, cfg, stream)
-    v5, schema = extract.SYSTEM_V5, extract.SCHEMA_V5
 
     def respond(text):
         rows = {int(r[1:].split("]")[0]): r.split(": ", 1) for r in text.splitlines() if r.startswith("[")}
-        n, (_, said) = next((n, r) for n, r in rows.items() if r[0].endswith(" me") and "build broke" in r[1])
-        base = {"quote": said, "lines": [n], "attributed_to": "", "reading": said, "mishearings": []}
+        said = [(n, r[1]) for n, r in rows.items() if r[0].endswith(" me") and "build broke" in r[1]]
+        if not said:
+            return []
+        (n, line), = said
+        base = {"quote": line, "lines": [n], "attributed_to": "", "reading": line, "mishearings": []}
         return [base | {"gist": "Bob's build broke again."}, base | {"gist": "Builds always break."},
                 base | {"gist": "Nobody should ever fix builds."}]
 
-    trial.run(pipe, FakeClaude(respond), v5, schema=schema)
-    read = (trial.version("claude-opus-5-5", "medium", v5, schema=schema), "claude-opus-5-5")
+    read = (extract.run_stage(pipe, FakeClaude(respond))["prompt_version"], "claude-opus-5-5")
+    typed = archive_capture(pipe, fixtures.T0)   # no lines to check its gist against: left out, and counted
+    pipe.execute("UPDATE im.items SET prompt_version = %s, privacy_policy_version = %s WHERE item_id = %s",
+                 (read[0], egress.POLICY_VERSION, typed))
     client, sent = judge({"Builds always break.": ("overstates",), "Nobody should ever fix builds.": ("mocked",
                                                                                                      "two_points")})
+    due = gate.run(pipe, client, read, 20.0, limit=0)
+    assert (due["captures"], due["due"], due["asked"], due["archive_skipped"], len(sent)) == (3, 3, 0, 1, 0)
     stats = gate.run(pipe, client, read, 20.0)
-    assert (stats["captures"], stats["asked"], stats["failed"]) == (3, 3, 0)
-    shown = sent[0]["state"]
-    assert shown["gist"] == "Bob's build broke again."
+    assert (stats["captures"], stats["asked"], stats["failed"], stats["due"]) == (3, 3, 0, 0)
+    shown = next(b["state"] for b in sent if b["state"]["gist"] == "Bob's build broke again.")   # sent by random id
     assert "build broke again" in shown["lines"] and shown["lines"] in shown["context"]
 
     s = gate.summary(pipe, client, read)
     assert s["decisions"] == {"keep": 1, "repair": 1, "drop": 1}
     assert s["by_check"]["overstates"]["likeliest"][0]["gist"] == "Builds always break."
-    assert s["by_check"]["two_points"]["at_cut"] == round(1 / 3, 3)   # flagged, and doesn't decide
+    assert s["by_check"]["two_points"]["at_cut"] == 1   # flagged, and doesn't decide
 
     # Its cuts: a sheet of what Jev answered about, two models' drafts, my review of where they disagree.
     folder = tmp_path / "gate-1"
