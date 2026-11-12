@@ -563,6 +563,24 @@ def cmd_lattice(args) -> None:
         _print(lattice.status(conn))
 
 
+def cmd_connect(args) -> None:
+    """The connection judge, on demand: Jev screens the nominated pairs not judged yet, Terra judges the rest, and
+    their verdicts become connections, or remove the pair's stand-in. --limit 0 only counts."""
+    import anthropic
+
+    from im import connect, jev, llm
+
+    cfg = config.load()
+    with db.connect(db.pipeline_dsn()) as conn:
+        judge = screen = None
+        if args.limit != 0:
+            try:
+                judge, screen = llm.client_for(cfg.connect.model, cfg.egress.zdr), jev.Jev()
+            except (anthropic.AnthropicError, SystemExit) as e:   # no key for OpenRouter, Jev or Claude
+                raise SystemExit(f"the connection judge can't run: {e}") from None
+        _print(connect.stage(conn, judge, screen, cfg.extract.monthly_cap_usd, args.limit, cfg.connect))
+
+
 def cmd_ideas(args) -> None:
     from im import extract
 
@@ -913,6 +931,12 @@ def main(argv=None) -> None:
     ic.set_defaults(func=cmd_import_chatgpt)
     sub.add_parser("lattice", help="counts: ideas, evidence, connections, unmatched items").set_defaults(
         func=cmd_lattice)
+    cn = sub.add_parser("connect", help="the connection judge: Jev screens pairs of nearby clusters, Terra judges "
+                        "the rest, and its connections replace the embedding stand-ins (sends to Jev and Terra; "
+                        "not part of `im run` yet)")
+    cn.add_argument("--limit", type=int, help="ask about at most this many pairs this time (0: send nothing, only "
+                    "count what's nominated and due)")
+    cn.set_defaults(func=cmd_connect)
     th = sub.add_parser("themes", help="list themes; pin, unpin, rename or reject one")
     th.add_argument("action", nargs="?", default="list", choices=["list", "pin", "unpin", "rename", "reject"])
     th.add_argument("theme", nargs="?", help="theme name (or its start), or id prefix")

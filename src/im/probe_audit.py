@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from im import edge_audit, egress, llm, themes
+from im import connect, edge_audit, egress, llm, themes
 
 FACETS = 4
 FACET_BATCH = 25
@@ -209,7 +209,7 @@ def jev_pool(conn, client, pairs: list[dict], folder: Path,
 
     def side(i):
         if i not in sides:
-            sides[i] = edge_audit.side_data(conn, i)
+            sides[i] = connect.side_data(conn, i)
         return sides[i]
 
     def state(p):
@@ -365,8 +365,7 @@ def build(conn, client, embedder, question: str, folder: Path, seed: int = 9, on
     for n, p in enumerate(picked, 1):
         lines += [f"## {n}", ""]
         for side, idea in zip("AB", p["sides"]):
-            first, *rest = edge_audit._side(conn, idea) or ["(nothing said on record)"]
-            lines += [f"{side}. {first.strip()}", *[f"   {x}" if x.startswith(">") else x for x in rest], ""]
+            lines += [*connect.shown(connect.side_data(conn, idea), side), ""]
         lines += ["mark: ", "note: ", ""]
     key = {"benchmark": question, "seed": seed, "sizes": sizes, "excluded": len(exclude or ()),
            "available": {k: len(v) for k, v in proposed.items()},
@@ -431,7 +430,7 @@ def _state(conn, question: str, p: dict, quotes_only: bool) -> dict:
                 "quote": p["quote"], "summary": p["gist"]}
     sides = {}
     for name, idea in zip("ab", p["sides"]):
-        side = edge_audit.side_data(conn, idea)
+        side = connect.side_data(conn, idea)
         sides[name] = {k: v for k, v in side.items() if not (quotes_only and k == "summary")}
     return sides
 

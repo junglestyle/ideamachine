@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from im import analogy_spike, edge_audit, egress, probe_audit
+from im import analogy_spike, connect, edge_audit, egress, probe_audit
 
 from test_edge_audit import NAMED, fill, named_clusters  # noqa: F401 (fixture)
 from test_lattice import seeded  # noqa: F401 (fixture)
@@ -48,7 +48,7 @@ class FakeChat:
 
 def said_on(conn, ideas) -> list:
     """The segments of what these clusters show as said, worked out from what a sheet shows of them."""
-    words = [q["words"] for i in ideas for q in edge_audit.side_data(conn, i)["said"]]
+    words = [q["words"] for i in ideas for q in connect.side_data(conn, i)["said"]]
     return sorted(s for (s,) in conn.execute("SELECT segment_id FROM im.source_segments WHERE text = ANY(%s)",
                                              (words,)))
 

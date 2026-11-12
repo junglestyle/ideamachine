@@ -20,7 +20,8 @@ WHERE e.current
   AND NOT EXISTS (SELECT 1 FROM im.current_segments c WHERE c.segment_id = es.segment_id)
 """
 
-# Nothing derived refers to a tombstoned segment: no episode or observation holds one, and no idea was made from one.
+# Nothing derived refers to a tombstoned segment: no episode, observation or connection verdict holds one, and no idea
+# was made from one.
 TOMBSTONED = """
 SELECT es.episode_id, es.segment_id
 FROM im.episode_segments es JOIN im.source_tombstones t USING (segment_id)
@@ -30,6 +31,9 @@ FROM im.observations o JOIN im.source_tombstones t ON t.segment_id = ANY(o.segme
 UNION ALL
 SELECT d.idea_id, t.segment_id
 FROM im.ideas d JOIN im.source_tombstones t ON t.segment_id = ANY(d.segment_ids)
+UNION ALL
+SELECT v.a, t.segment_id
+FROM im.connection_verdicts v JOIN im.source_tombstones t ON t.segment_id = ANY(v.segment_ids)
 """
 
 # Every edge cites what exists (migration 035): no observation that's gone, and nothing missing when an end has one.
