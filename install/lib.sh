@@ -10,6 +10,8 @@ NAS_CONFIG="$NAS_ROOT/config"
 NAS_PG="$NAS_ROOT/pg"
 NAS_BACKUPS="$NAS_ROOT/backups"
 NAS_SAVED="$NAS_ROOT/saved"   # outputs kept by hand, e.g. `im trial` reports (they quote people: root and apps only)
+NAS_ACCESS="$NAS_ROOT/access"   # connection files for other programs on the NAS (root and apps only)
+NAS_READER_ENV="$NAS_ACCESS/reader.env"   # the read-only role's (im_reader) database URL
 NAS_DB_ENV="$NAS_CONFIG/db.env"
 NAS_PIPELINE_ENV="$NAS_CONFIG/pipeline.env"
 NAS_WEB_ENV="$NAS_CONFIG/web.env"   # the web view's database URL and login token
@@ -21,6 +23,9 @@ OLD_ROOT="/mnt/storage/ideamachine"
 HEARSAY_STREAM_FAST="/mnt/fast/hearsay/stream"
 HEARSAY_STREAM_STORAGE="/mnt/storage/hearsay/stream"
 WEB_HTTPS_PORT=8445   # the neutral view (im web)
+# Postgres on the NAS's loopback, for the read-only role: never the LAN or the tailnet. Policy C's names job had it
+# until 2026-11-11; 55432 is the dev database's.
+DB_LOOPBACK_PORT=55433
 DB_CONTAINER=ideamachine-db
 RUN_LOCK=/run/ideamachine-run.lock
 # Corral's NAS worker runs from here (deployed from the infra repo).
@@ -188,4 +193,15 @@ web_feed() {
     code="$(curl -s -o /dev/null -w '%{http_code}' -b "$jar" "$@" "$base" || true)"
     rm -f "$jar"
     echo "$code"
+}
+
+# Runs one statement as the read-only role, as another program on the NAS would: its URL from access/reader.env,
+# psql from Postgres's own image on the host's network, through the loopback port. Prints unaligned tuples. Any more
+# arguments go to `docker run` (e.g. -e IM_READER_DATABASE_URL=... for another URL).
+reader_sql() {
+    local sql="$1"
+    shift
+    docker run --rm --network host --user "$APPS_UID:$APPS_GID" --env-file "$NAS_READER_ENV" "$@" --entrypoint sh \
+        "$(docker inspect -f '{{.Config.Image}}' "$DB_CONTAINER")" \
+        -c 'exec psql "$IM_READER_DATABASE_URL" -X -v ON_ERROR_STOP=1 -tAc "$1"' sh "$sql"
 }

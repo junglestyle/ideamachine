@@ -23,10 +23,12 @@ echo "ideamachine: $REPO_DIR"
 say "Hearsay's stream"
 pick_hearsay_stream
 echo "using $HEARSAY_STREAM ($HEARSAY_STREAM_WHY)"
-# compose.yaml reads it from here (compose loads install/.env, next to it, on every command, including cron's).
+# compose.yaml reads it, and Postgres's loopback port, from here (compose loads install/.env, next to it, on every
+# command, including cron's).
 cat > "$REPO_DIR/install/.env" <<EOF
 # Written by install/nas.sh on every run: the pool Hearsay is on can change.
 HEARSAY_STREAM=$HEARSAY_STREAM
+DB_LOOPBACK_PORT=$DB_LOOPBACK_PORT
 EOF
 chmod 644 "$REPO_DIR/install/.env"
 
@@ -102,6 +104,9 @@ chown root:root "$NAS_CONFIG"; chmod 700 "$NAS_CONFIG"
 chown "root:$APPS_GID" "$NAS_BACKUPS"; chmod 2770 "$NAS_BACKUPS"
 # saved/: root and apps only (it quotes people). Group-writable, so `im audit-* sheet /saved/<new folder>` can make it.
 mkdir -p "$NAS_SAVED"; chown "root:$APPS_GID" "$NAS_SAVED"; chmod 770 "$NAS_SAVED"
+# access/: connection files for other programs on the NAS, run by a member of the apps group (admin), who can't
+# reach config/. Root and apps only.
+mkdir -p "$NAS_ACCESS"; chown "root:$APPS_GID" "$NAS_ACCESS"; chmod 750 "$NAS_ACCESS"
 # pg: Postgres runs as the apps user (install/compose.yaml). Data from before that change belongs to uid 999
 # (`netdata` on TrueNAS); hand it over once, with the database stopped.
 if [ "$(stat -c %u "$NAS_PG")" != "$APPS_UID" ]; then
@@ -156,6 +161,7 @@ say "Secrets in $NAS_CONFIG"
 env_ensure "$NAS_DB_ENV" POSTGRES_PASSWORD "$(openssl rand -hex 24)"
 env_ensure "$NAS_DB_ENV" IM_PIPELINE_PASSWORD "$(openssl rand -hex 24)"
 env_ensure "$NAS_DB_ENV" IM_WEB_PASSWORD "$(openssl rand -hex 24)"   # the web view's role, lattice_app (058)
+env_ensure "$NAS_DB_ENV" IM_READER_PASSWORD "$(openssl rand -hex 24)"   # the read-only role, im_reader
 env_ensure "$NAS_PIPELINE_ENV" IM_DATABASE_URL \
     "postgresql://im_pipeline:$(env_get "$NAS_DB_ENV" IM_PIPELINE_PASSWORD)@db:5432/im"
 if [ -z "$(env_get "$NAS_PIPELINE_ENV" ANTHROPIC_API_KEY)" ]; then
@@ -169,6 +175,18 @@ fi
 env_ensure "$NAS_WEB_ENV" IM_WEB_DATABASE_URL \
     "postgresql://lattice_app:$(env_get "$NAS_DB_ENV" IM_WEB_PASSWORD)@db:5432/im"
 env_ensure "$NAS_WEB_ENV" IM_WEB_TOKEN "$(openssl rand -base64 24 | tr -d '/+=')"
+# The read-only role's connection, through Postgres on the loopback, for other programs on the NAS: the apps group
+# can read it, nobody else. Rewritten on every run from db.env.
+reader_pw="$(env_get "$NAS_DB_ENV" IM_READER_PASSWORD)"
+install -o root -g "$APPS_GID" -m 640 /dev/stdin "$NAS_READER_ENV" <<EOF
+# Written by install/nas.sh on every run. Role im_reader reads schema pub and nothing else (docs/deploy.md).
+IM_READER_DATABASE_URL=postgresql://im_reader:$reader_pw@127.0.0.1:$DB_LOOPBACK_PORT/im
+PGHOST=127.0.0.1
+PGPORT=$DB_LOOPBACK_PORT
+PGDATABASE=im
+PGUSER=im_reader
+PGPASSWORD=$reader_pw
+EOF
 
 # Idea Machine's own config: readable by the pipeline (the apps group), not secret, but personal, so not in the repo.
 mkdir -p "$NAS_CONFIG/im"
@@ -242,6 +260,12 @@ fi
 # it since (jit off) to a database made before.
 "${COMPOSE[@]}" exec -T db psql -q -v ON_ERROR_STOP=1 -U postgres -d im \
     -f /docker-entrypoint-initdb.d/bootstrap-db.sql.in
+# The read-only role (made, and granted pub, by the setup above) logs in with its password from db.env. Set on every
+# run: a database made before has the role without it.
+"${COMPOSE[@]}" exec -T db psql -q -v ON_ERROR_STOP=1 -U postgres -d im \
+    -v pw="$(env_get "$NAS_DB_ENV" IM_READER_PASSWORD)" <<'SQL'
+ALTER ROLE im_reader LOGIN PASSWORD :'pw';
+SQL
 im migrate
 
 say "Retiring policy C's names role and key (decision 0008, amended 2026-11-11)"
@@ -360,6 +384,29 @@ if [ -n "$ts" ]; then
     echo "web view: the same on the tailnet at $WEB_URL"
 fi
 
+# Another program on the NAS, run by a member of the apps group: the read-only role, from its file in access/,
+# through Postgres on the loopback (published nowhere else, and only with a password), reads pub and can neither
+# write nor read im.
+port="$(docker port "$DB_CONTAINER" 5432/tcp)"
+[ "$port" = "127.0.0.1:$DB_LOOPBACK_PORT" ] || die "Postgres is published on $port, not on 127.0.0.1:$DB_LOOPBACK_PORT"
+out="$(reader_sql "SELECT 1" -e "IM_READER_DATABASE_URL=postgresql://im_reader:wrong@127.0.0.1:$DB_LOOPBACK_PORT/im" \
+    2>&1)" && die "the read-only role logged in on 127.0.0.1:$DB_LOOPBACK_PORT with a wrong password"
+grep -q "password authentication failed" <<<"$out" \
+    || die "a wrong password on 127.0.0.1:$DB_LOOPBACK_PORT failed, but not as a wrong password: $out"
+setpriv --reuid=65534 --regid="$APPS_GID" --clear-groups test -r "$NAS_READER_ENV" \
+    || die "the apps group can't read $NAS_READER_ENV"
+if setpriv --reuid=65534 --regid=65534 --clear-groups test -r "$NAS_READER_ENV"; then
+    die "$NAS_READER_ENV is readable outside the apps group"
+fi
+cards="$(reader_sql "SELECT count(*) FROM pub.cards")" \
+    || die "the read-only role couldn't read pub.cards on 127.0.0.1:$DB_LOOPBACK_PORT"
+for sql in "INSERT INTO pub.feedback_events (kind) SELECT 'star' WHERE false" "SELECT 1 FROM im.egress_log LIMIT 0"; do
+    out="$(reader_sql "$sql" 2>&1)" && die "the read-only role could run: $sql"
+    grep -q "permission denied" <<<"$out" || die "as the read-only role, $sql failed, but not for want of
+    permission: $out"
+done
+echo "read-only role: read pub.cards ($cards cards) on 127.0.0.1:$DB_LOOPBACK_PORT; refused writing and reading im"
+
 say "The im command, for root"
 # The system directories are read-only on TrueNAS, so install/bin goes on root's PATH. An upgrade can reset root's
 # home; the next run of this script adds the line again.
@@ -377,6 +424,7 @@ Hearsay's stream: $HEARSAY_STREAM ($HEARSAY_STREAM_WHY)
 The web view: $WEB_URL
     token: $(env_get "$NAS_WEB_ENV" IM_WEB_TOKEN)
     (in Safari on the phone: open it, log in, Share -> Add to Home Screen)
+Read-only access to pub, for other programs on the NAS (the apps group): $NAS_READER_ENV
 EOF
 if zfs list -H -o name "$OLD_POOL_DATASET" >/dev/null 2>&1; then
     cat <<EOF

@@ -34,7 +34,7 @@ What the pipeline keeps true, whatever the stage:
 
 - Lean on Postgres before writing your own: `im run`'s import, purge and segmentation share one transaction,
   embeddings live in pgvector, and roles draw the boundaries (`im_pipeline` owns `im.*`; `lattice_app`, the web
-  view's role, reads `pub` and only appends feedback).
+  view's role, reads `pub` and only appends feedback; `im_reader`, for other programs on the NAS, only reads `pub`).
 - Outside work on extraction is read for ideas, not copied: the AI Co-Ethnographer (`aicoe`) is AGPL-3, and the
   knowledge-ingestion-pipeline has no license (all rights reserved). psy-qm-skills (MIT) and the hypotheses/claims
   benchmark (Apache-2.0) can be reused with their notices, but nothing here needs them. Write our own.
@@ -51,7 +51,7 @@ What the pipeline keeps true, whatever the stage:
 - The behaviors worth a test: a correction re-derives only the episodes it touches, a second run changes nothing,
   forgetting leaves no text or derived row (and reports what was already sent), labels survive corrections and
   resets, the stream is only read, unknown formats and speakers fail closed, `lattice_app` can only read `pub` and
-  append feedback, and the monthly cap stops extraction, scoring and the digest.
+  append feedback, `im_reader` can only read `pub`, and the monthly cap stops extraction, scoring and the digest.
 - Tests run on synthetic streams from `im.fixtures` and never read the real one. Each gets a fresh `im_test`
   database; the code refuses a dev admin URL that isn't localhost or a local socket, in any DSN form. Each runs
   without the developer's `IM_*`, `ANTHROPIC_*`, `CORRAL_*`, OpenRouter and Typesafe variables
@@ -78,7 +78,7 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
   graph store beside it.
 - Versions and pins: the deployment runs whatever the NAS's clone has checked out. [deploy.md](deploy.md) updates
   with `git pull`, and `install/nas.sh` builds Idea Machine from it; no commit is pinned.
-- Versions and pins: `install/compose.yaml` runs `pgvector/pgvector:pg16` by tag (line 15), not by digest.
+- Versions and pins: `install/compose.yaml` runs `pgvector/pgvector:pg16` by tag (line 16), not by digest.
 - Versions and pins: `pyproject.toml` has no `[tool.uv] required-version`, so CI's `setup-uv`
   (`.github/workflows/test.yml`) installs the newest uv.
 - Versions and pins: the annotated tags `v1` and `v1.1` aren't `vX.Y.Z` or semver, so they aren't releases, though
@@ -94,7 +94,7 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
   hearsay's and lattice's standards do.
 - Privacy: the owner's time zone, `America/New_York`, is the default for reading a ChatGPT export's times
   (`im import-chatgpt --tz`, and `tz` in `archive_observations.parse` and `plan`).
-- Secrets: `install/nas.sh` prints the web view's login token (`IM_WEB_TOKEN`) at the end of every run (line 378).
+- Secrets: `install/nas.sh` prints the web view's login token (`IM_WEB_TOKEN`) at the end of every run (line 425).
 - Docs: V2's roadmap is `docs/ROADMAP-v2.md`, not `docs/ROADMAP.md`, because code comments cite V1's
   [ROADMAP.md](ROADMAP.md) by section. V1's spec stays in its §1–3; V2's is [SPEC.md](SPEC.md).
 - Docs: [SPEC.md](SPEC.md) opens with its scope, not the problem, its requirements have no IDs, and it has no
@@ -107,8 +107,9 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
   behind `judged_by`), not what I'd notice.
 - Deployment repos: [deploy.md](deploy.md), [ROADMAP.md](ROADMAP.md) and `install/` carry the deployment's values:
   `/mnt/fast/...` paths, the `fast/ideamachine`, `fast/repos` and `storage/fast-replica` datasets, the web view's
-  `tailscale serve` port, 8445 (`install/lib.sh` line 23), and the NAS's time zone (`install/compose.yaml` line 46).
-  `install/lib.sh` and `install/nas.sh` hard-code them. These facts belong in a future `ideamachine-deployment` repo.
+  `tailscale serve` port, 8445 (`install/lib.sh` line 25), Postgres's loopback port, 55433 (`install/lib.sh` line
+  28), and the NAS's time zone (`install/compose.yaml` line 51). `install/lib.sh` and `install/nas.sh` hard-code
+  them. These facts belong in a future `ideamachine-deployment` repo.
 - Prose: [SPEC.md](SPEC.md), [ROADMAP-v2.md](ROADMAP-v2.md), [ROADMAP.md](ROADMAP.md) and the design docs carry dates
   and status trails (`Status: plan, 2026-10-27`, answers struck through with the day they were settled), and
   [deploy.md](deploy.md) and [install.md](install.md) keep history ("Moving from `storage` to `fast` (2026-10-15)",

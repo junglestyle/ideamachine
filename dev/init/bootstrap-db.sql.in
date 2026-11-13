@@ -12,6 +12,19 @@ DO $$ BEGIN
 END $$;
 -- A schema's grants belong with the schema: pg_restore -n (install/nas.sh) restores objects, not schemas.
 GRANT USAGE ON SCHEMA pub TO lattice_app;
+-- The read-only role, for other programs on the NAS (docs/deploy.md): reads all of pub, nothing in im, and writes
+-- nothing. Created without a login; install/nas.sh gives it one (IM_READER_PASSWORD). Its grants are by schema, so
+-- they live here: what pub has now, and by default whatever migrations (as im_pipeline) make in it later, including
+-- views dropped and made again. Calling pub's functions can't write while each is STABLE or IMMUTABLE
+-- (tests/test_lattice.py checks).
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'im_reader') THEN CREATE ROLE im_reader NOLOGIN; END IF;
+END $$;
+GRANT USAGE ON SCHEMA pub TO im_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA pub TO im_reader;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pub TO im_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE im_pipeline IN SCHEMA pub GRANT SELECT ON TABLES TO im_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE im_pipeline IN SCHEMA pub GRANT EXECUTE ON FUNCTIONS TO im_reader;
 -- No JIT, for every role: the pub views' cost estimates pass jit_above_cost, so each query on pub.idea_scores spent
 -- about 5 s compiling for 12 ms of work, even on a 3-idea database (review 2026-11-05). New sessions pick it up.
 DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET jit = off', current_database()); END $$;

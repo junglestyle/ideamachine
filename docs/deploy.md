@@ -12,6 +12,8 @@ Idea Machine runs on TrueNAS SCALE next to Hearsay (ROADMAP §1 stack assumption
 - Hearsay's stream is mounted read-only, from whichever pool Hearsay is on (below).
 - The neutral view (`im web`, container `ideamachine-web`) is on the tailnet at
   `https://truenas.<tailnet>.ts.net:8445/` via `tailscale serve`, with its own token (`IM_WEB_TOKEN`).
+- Other programs on the NAS read the database's `pub` schema as role `im_reader`, through Postgres on the NAS's
+  loopback, `127.0.0.1:55433` (below).
 - Logs go to the journal: `journalctl -t ideamachine-run`, `-t ideamachine-backup`, `-t ideamachine-db`,
   `-t ideamachine-web`.
 
@@ -90,8 +92,40 @@ rewritten.
 
 Every time, it ends by checking that it all works: Postgres is up; one run finishes; one backup, the same way,
 writes a readable dump to `backups/`; the neutral view, logged in with its token, loads its feed (as its own
-role) on 127.0.0.1:8792 and, through `tailscale serve`, at the tailnet address on 8445. So each re-run also does a
-run and a backup.
+role) on 127.0.0.1:8792 and, through `tailscale serve`, at the tailnet address on 8445; and the read-only role,
+from `access/reader.env`, reads `pub.cards` on 127.0.0.1:55433, while a wrong password, a write to `pub` and a read
+of `im` are refused. So each re-run also does a run and a backup.
+
+## Reading the database from another program
+
+A program on the NAS run by `admin`, or any member of the `apps` group, can read Idea Machine's database without
+root or Docker:
+- Postgres is published on the NAS's loopback only, `127.0.0.1:55433` (`DB_LOOPBACK_PORT` in `install/lib.sh`,
+  passed to `compose.yaml` through `install/.env`): never the LAN, the tailnet or `0.0.0.0`. Every role needs its
+  password there. Policy C's names job used the same port until 2026-11-11.
+- Role `im_reader` reads all of schema `pub` and nothing else: `SELECT` on its views and on
+  `pub.feedback_events`, and its functions `pub.card_neighbours()` and `pub.embedding_model()`. Nothing in `im`
+  (not `im.egress_log`, not the transcript in `im.source_segments`), and no write anywhere. Its grants are by
+  schema (`dev/init/bootstrap-db.sql.in`), so what a migration adds to `pub` later is readable too.
+- `pub` is what the web view reads: the ideas and their cards (title, statement, my note, counts, maturity),
+  themes, connections and lineage, digests, proposals, sensitivity marks, map positions, my feedback events, and
+  the evidence behind each idea: each capture's quote and gist, the speaker's label as Hearsay gave it, when, and
+  in which conversation. The quotes include other people's words. There are no whole transcripts and no record of
+  what was sent to models.
+- `/mnt/fast/ideamachine/access/reader.env` (directory and file root:apps, 750 and 640) holds
+  `IM_READER_DATABASE_URL` and the same connection as `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and
+  `PGPASSWORD`. `install/nas.sh` makes the password once (`IM_READER_PASSWORD` in `config/db.env`) and rewrites
+  the file on every run.
+
+As admin:
+
+```sh
+set -a; . /mnt/fast/ideamachine/access/reader.env; set +a
+psql "$IM_READER_DATABASE_URL"
+```
+
+A program can take `IM_READER_DATABASE_URL` from that file, or, with libpq (psycopg, psql with no arguments), the
+`PG*` variables.
 
 ## Lattice, removed (2026-11-11)
 
@@ -119,8 +153,9 @@ script says so while the clone is there). On a dev box, rename the same three li
 
 Names said go out as said (decision 0008, amended), so nothing looks for names any more. Each run of
 `install/nas.sh` drops role `im_names` if it's still there, deletes `IM_NAME_KEY` and `IM_NAMES_PASSWORD` from the
-config and the names job's connections in `gpu/`, and Postgres no longer listens on the NAS's loopback. `[egress]
-names`, `public_names` and `my_names` are ignored, with a warning, until deleted from `im.toml`.
+config and the names job's connections in `gpu/`, and Postgres stopped listening on the NAS's loopback (until the
+read-only role, above, brought port 55433 back). `[egress] names`, `public_names` and `my_names` are ignored, with a
+warning, until deleted from `im.toml`.
 TrueNAS's SSH "Allow TCP Port Forwarding", turned on for the names job's tunnel, can be turned off if nothing else
 uses it.
 
@@ -149,6 +184,7 @@ nightly job no longer prunes them).
 | Database | `/mnt/fast/ideamachine/pg` |
 | Nightly dumps (14 days) | `/mnt/fast/ideamachine/backups/` |
 | Kept by hand (trial reports, exports) | `/mnt/fast/ideamachine/saved/` (root and apps only: they quote people) |
+| Read-only access | `/mnt/fast/ideamachine/access/reader.env` (root and apps only; role `im_reader`) |
 | Clone | `/mnt/fast/repos/ideamachine` (admin) |
 | Logs | `journalctl -t ideamachine-run` (and `-t ideamachine-backup`, `-t ideamachine-db`, `-t ideamachine-web`) |
 | Run now | `im` as root (`install/bin/im`; `install/nas.sh` puts it on root's PATH), or `docker compose -f /mnt/fast/repos/ideamachine/install/compose.yaml run --rm run` |
