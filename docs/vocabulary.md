@@ -462,6 +462,29 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   - color: its direction from the map's center.
 
   The home sky is the seedless lens.
+- **Moment.** One capture as it was said: a card, the conversation, a time, who said it, and the quote
+  (`pub.card_moments`, 063). Timed by the capture's own first cited segment; anything that isn't speech keeps its
+  observation's time. _Not_ a row of `pub.card_evidence`, which times a speech capture by its episode's start.
+- **Trail, Trails.** A trail is one conversation's moments in the order said, drawn as a path between their stars at
+  stored map positions. Trails is the Emanation view that draws them, one conversation at a time or played in order
+  ([M6 notes] §Trails, `web.trails`, `/trails`). A stop is one moment on a trail.
+- **Crossroads.** The view of one card with its doors: across, the moments just before and after it in its own
+  conversations; up and down, what's like it said at another time (connections, lineage, then embedding neighbors),
+  earlier above, later below ([M6 notes] §Crossroads, `web.crossroads`, `/crossroads/<id>`). A door is a link to
+  another card's crossroads.
+- **Echo, Echoes.** An echo is a connection between two cards said in no conversation in common: what I came back
+  to. Echoes is the view that lists them, the earlier beside the later, newest first, and draws each as an arc over
+  time ([M6 notes] §Echoes, `web.echoes`, `/echoes`). _Not_ recurrence, which counts one cluster's occurrences.
+- **Judgment (of a pair).** A verdict of the connection judge on two cards as a view reads it: the verdict, its
+  direction, its reason (`why`) and the structure it named if the two are analogous (`pub.card_judgments`, 064, over
+  `im.connection_verdicts`). A `none` is a judgment and no connection.
+- **Thread, Threads.** A thread is a graph neighborhood (`lens.neighbourhoods`: label propagation over the
+  connections) of at least 3 cards said in at least 2 conversations. Threads is the view that draws each as a row
+  across the conversations in order, a knot where it was said, named by the first card said in it ([M6 notes]
+  §Threads, `web.threads`, `/threads`). _Not_ a lens or a theme: nothing names its subject. _Not_ a conversation's
+  trail.
+- **Apart.** The view that lists the pairs the connection judge kept apart (a `none` judgment), each with its
+  reason ([M6 notes] §Apart, `web.apart`, `/apart`). The negative space as a list. _Not_ a proposed connection.
 - **Star (on the sky).** The glyph that draws one cluster. _Not_ the `star` event.
 - **Stored map position.** A cluster's 2D coordinates, projected from embeddings by the pipeline and kept stable from
   run to run (015, 038, `lattice.place`). _Not_ a view layout: where a view draws a cluster. The sky draws at stored

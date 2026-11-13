@@ -1,0 +1,78 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>{title}</title>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14151a" media="(prefers-color-scheme: dark)">
+<style>
+/* Two axes, two colors: time runs across (what was said around it), meaning runs up and down (what's like it). */
+:root { --bg: #f6f4ef; --fg: #1d1d1f; --muted: #6b6b70; --line: #dcd8cf; --card: #fffdf8; --accent: #0a58ca;
+  --time: #9a5b00; --like: #5a3fb5; }
+@media (prefers-color-scheme: dark) { :root { --bg: #14151a; --fg: #ececf0; --muted: #9a9aa6; --line: #2d2f38;
+  --card: #1b1d24; --accent: #9db8ff; --time: #e6b566; --like: #b7a3ff; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+header { padding: .8rem 1rem 0; }
+header a { color: var(--fg); text-decoration: none; font-weight: 600; margin-right: 1rem; }
+header a + a { font-weight: 400; color: var(--accent); margin-right: .8rem; }
+#x { display: grid; gap: 1.6rem 2rem; padding: 1.2rem 1rem 3rem; max-width: 82rem; margin: 0 auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 30rem) minmax(0, 1fr); align-items: center;
+  grid-template-areas: ". up ." "left main right" ". down ."; }
+.up { grid-area: up; } .down { grid-area: down; } .left { grid-area: left; } .right { grid-area: right; }
+main { grid-area: main; text-align: center; padding: 1rem 0; }
+section { display: flex; flex-direction: column; gap: .6rem; }
+.up, .down { display: grid; grid-template-columns: 1fr 1fr; grid-column: 1 / -1; max-width: 62rem; width: 100%;
+  margin: 0 auto; }
+.up h2, .down h2 { grid-column: 1 / -1; text-align: center; }
+h1 { font-size: 1.5rem; line-height: 1.25; margin: 0 0 1rem; text-wrap: balance; }
+h2 { font-size: .72rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; margin: 0; }
+.up h2, .down h2 { color: var(--like); } .left h2, .right h2 { color: var(--time); }
+.left h2::before { content: "← "; } .right h2::after { content: " →"; }
+.up h2::before { content: "↑ "; } .down h2::before { content: "↓ "; }
+.right { text-align: left; } .left { text-align: right; }
+blockquote { margin: 0 0 1rem; }
+main blockquote p { margin: 0; color: var(--fg); text-wrap: pretty;
+  font: 1.3rem/1.45 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+blockquote p::before { content: "\201C"; } blockquote p::after { content: "\201D"; }
+blockquote small { display: block; margin-top: .3rem; font-size: .8rem; }
+small { color: var(--muted); }
+main p { color: var(--muted); margin: 0 0 .4rem; text-wrap: pretty; }
+main nav { margin-top: 1.2rem; display: flex; gap: 1.2rem; justify-content: center; flex-wrap: wrap; }
+main nav a { color: var(--accent); }
+.door { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: .7rem .9rem; color: var(--fg); text-decoration: none; text-align: left; border-left: 3px solid var(--like); }
+.left .door, .right .door { border-left-color: var(--time); }
+.door:hover, .door:focus-visible { border-color: var(--accent); outline: none; }
+.door small { display: block; font-size: .78rem; }
+.door b { display: block; font-weight: 600; line-height: 1.3; margin: .1rem 0; }
+.door q { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  color: var(--muted); font: .95rem/1.4 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+section i { color: var(--muted); font-size: .9rem; text-align: center; grid-column: 1 / -1; }
+.left i { text-align: right; } .right i { text-align: left; }
+kbd { font: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 0 .3rem; }
+footer { text-align: center; color: var(--muted); font-size: .8rem; padding: 0 1rem 2rem; }
+@media (max-width: 900px) {
+  #x { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main" "left" "right" "up" "down"; gap: 1.4rem; }
+  .up, .down { grid-template-columns: minmax(0, 1fr); }
+  .left, .right, .left i, .right i { text-align: left; }
+  .up h2, .down h2, section i { text-align: left; }
+  footer { display: none; }
+}
+</style>
+<header><a href="/"><img src="/icon.svg" alt="" width="24" height="24" style="vertical-align: middle"> Idea Machine</a
+><a href="/sky">Sky</a><a href="/trails">Trails</a><a href="/echoes">Echoes</a><a href="/threads">Threads</a><a href="/apart">Apart</a></header>
+<div id="x">{body}</div>
+<footer><kbd>←</kbd> <kbd>→</kbd> through the conversation · <kbd>↑</kbd> <kbd>↓</kbd> through what's like it ·
+<kbd>r</kbd> somewhere else</footer>
+<script>
+"use strict";
+// The arrow keys walk: each goes through the first door that way.
+addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const way = {ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down"}[e.key];
+  const door = way && document.querySelector(`.door[data-way=${way}]`);
+  if (door) { e.preventDefault(); location.href = door.href; }
+  else if (e.key === "r") location.href = "/crossroads";
+});
+</script>
+</html>

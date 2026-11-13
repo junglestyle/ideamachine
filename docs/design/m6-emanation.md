@@ -71,6 +71,116 @@ a synthesis makes it an idea, linked to what it was made from.
   (`lens.relevance`). Unlit clusters dim; the camera frames the lit ones.
 - Tap a star for its title and facts, then open its card or make it the lens. Drag to pan, pinch or scroll to zoom.
 
+## Trails (`im web`, `/trails`)
+
+The sky's map, drawn through time. The sky shows where a thought sits and nothing of when it was said beyond a soft
+edge; a trail shows the order.
+
+- A **moment** is one capture as it was said: a card, a conversation, a time (`pub.card_moments`, migration 063). It's
+  timed by the capture's own first cited line, where `pub.card_evidence` gives every capture of an episode the
+  episode's start.
+- A **trail** is one conversation's moments in order, drawn as a curve from star to star that brightens toward its
+  end. The last five conversations stay as fading afterimages.
+- The strip along the bottom has one column per conversation, in the order they began, a block per moment in its
+  star's hue: how much each held, and which parts of the map it visited. Columns, not a time axis, so a quiet month
+  or an archive capture years old doesn't squeeze the rest.
+- Step through conversations (arrow keys, or drag along the strip), or play them in order. The list names each stop
+  with its time and who said it. Tapping a star goes to the latest conversation that passed through it.
+  `/trails?at=<id>` opens on a card's conversation.
+- **Returns and new ground.** A stop returns to a card when it's connected to one first said earlier, in another
+  conversation: an echo seen from the later side. It gets a ring; the list says what it returns to and how long
+  after; picking it draws a dashed line back; and its block on the strip is dim, so a column's bright blocks are that
+  conversation's new ground, as far as the connections know.
+- **Heat.** A lit stop glows wider the more arousal Hearsay measured in my voice (048), and the list shows it as a
+  bar. A fact about the voice, never a judgment of the thought. On the live archive 1,002 of 1,046 speech moments
+  have one, spread from 0.1 to 0.8.
+- On a trail of more than 16 stops the numbers show only at its ends and around the stop picked, whose legs in and
+  out are drawn bright. Live conversations run to 82 stops.
+- Nothing ranks: conversations come in the order they happened, and stars keep the sky's size and hue.
+- Positions are today's. A trail says when things were said, never where they sat on the map at the time, which is
+  the same caution as double exposure below.
+- Demo mode: a sensitive card keeps its star, blank, and has no moments, so a trail passes it by.
+
+## Crossroads (`im web`, `/crossroads/<id>`)
+
+A reading view: one card, with the two kinds of neighbor every thought here has.
+
+- **Across, in time:** what was said just before and just after it in its own conversations. Usually about
+  something else: that's the point.
+- **Up and down, in meaning:** what's like it, said at another time: its connections and lineage first, then its
+  nearest by meaning, earlier above and later below, each with how far apart they were said ("41 days earlier").
+  A door across isn't repeated here.
+- Every door opens that card's crossroads, and the arrow keys walk. `/crossroads` picks a card at random: nothing
+  chooses it ([0007](../decisions/0007-neutral-proposals.md)).
+- "Near by meaning" is an embedding neighbor, named as that, never as a connection
+  ([0010](../decisions/0010-connections-kinds-lenses.md)).
+
+## Echoes (`im web`, `/echoes`)
+
+What I came back to. Almost every capture founds its own cluster (1,049 of 1,065 cards were said in one
+conversation, 2026-11-13), so recurrence doesn't show as a cluster said twice. It shows as connections: of 1,015, 511
+join two cards said in different conversations.
+
+- An **echo** is a connection between two cards with no conversation in common. The earlier is shown beside the
+  later, with how far apart they were first said, the connection's kinds and their direction ("the later elaborates
+  the earlier"), and the judge's reason and the structure it named, marked as the judge's (`pub.card_judgments`,
+  migration 064).
+- Above the list, every echo is an arc over the archive's time, from the earlier card to the later, colored by kind.
+  An arc links to its row.
+- Newest first, by when the later card was said. Kind (elaborates, supports, tension, analogous) and gap (a week, a
+  month) only narrow the list.
+- Embedding neighbors the judge hasn't connected aren't echoes: a shared subject is no connection
+  ([0010](../decisions/0010-connections-kinds-lenses.md)). Asking for every card's neighbors would also take minutes:
+  `pub.card_neighbours` takes 0.3 s a card on the live archive.
+- Demo mode leaves out a pair with a sensitive card.
+
+## Threads (`im web`, `/threads`)
+
+What runs through the conversations: the loom. Echoes shows returns a pair at a time; a thread is a whole
+neighborhood that keeps coming back.
+
+- A **thread** is a graph neighborhood of at least 3 cards said in at least 2 conversations. Neighborhoods come from
+  the connections alone, by label propagation (`lens.neighbourhoods`): each card joins the neighborhood its
+  connections pull it to hardest, a connection pulling with 1 plus the number of cards both its ends are connected
+  to. So a connection inside a tight group outweighs a lone bridge out of it, and a broad card connected a little to
+  everything doesn't fuse the neighborhoods it touches, which is the caution in
+  [0010](../decisions/0010-connections-kinds-lenses.md). The same connections always give the same neighborhoods. On
+  the live archive (2026-11-13): 182 neighborhoods, the largest of 18 cards; 78 are threads, holding 488 of the 1,065
+  cards, the longest through 9 of 69 conversations. Connected components would make one of 473.
+- Each thread is a row across every conversation, in the order they began, with a knot where it was said, bigger for
+  more cards. A knot opens that conversation's trail. Opening a row lists the thread's cards in the order said.
+- A thread is named by the first card said in it and colored as the sky colors the middle of its cards. Rows come
+  in the order the threads began. Nothing ranks them.
+- A thread is not a lens or a theme: nothing names its subject, and it writes nothing. It's the neighborhood that a
+  synthesis would be proposed over, so this view is also where to look at what synthesis would be given.
+- Demo mode: a sensitive card is in no thread.
+
+## Apart (`im web`, `/apart`)
+
+The negative space, as a list: pairs near enough by meaning to be asked about, that the connection judge kept apart.
+
+- A row is a `none` from the judge (`pub.card_judgments`): the earlier card beside the later, how far apart they
+  were said, and the judge's reason, which says where it drew the line between sharing a subject and being
+  connected.
+- Newest first, 50 to a page. Nothing here is a connection, and the page makes none.
+- Pairs the screen kept from the judge aren't shown: nothing was said about them.
+- Not seen on the live archive yet (2026-11-13): the reader role can't read verdicts until migration 064 is there,
+  so how many rows this has isn't known.
+
+## Views the data could carry now (ideas, 2026-11-12)
+
+None of these needs lenses, so none waits for M5. Each reads only what `pub` already has.
+
+- **Two voices.** Trails with the not-me moments drawn apart, to show where other people take me. Nothing to draw
+  yet: every moment on the live archive is mine (1,026 by voice, 69 by diarization; 2026-11-13).
+- **Analogies.** The judge names the shared structure when two cards are analogous (`pub.card_judgments.analogy`),
+  and Echoes can narrow to those. An analogy is a lens ([0010](../decisions/0010-connections-kinds-lenses.md)), so its
+  own view waits for lenses: each named structure a lens, its results the other instances.
+- **Keeping from these views.** Apart and Echoes only read. A connection I make or remove is a `link` or `unlink`
+  event already (045); a button on a row would be the "keep a proposed connection" of the negative space above.
+- **Negative space on the sky.** Apart is a list. The dashed links of §Direction would draw the same pairs on the
+  map, once it's clear from the list how many there are.
+
 ## Later encodings (not M6)
 
 - **Mycelium:** growth and lifecycle. More grounded than it looks, because utterance → observation → candidate → idea and

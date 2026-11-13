@@ -1,0 +1,476 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Trails</title>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#0b0d14">
+<style>
+:root { --bg: #0b0d14; --fg: #e8eaf2; --muted: #9aa0b4; --panel: rgba(20, 23, 34, .92); --accent: #9db8ff;
+  --trail: #ffecc8; --line: rgba(255, 255, 255, .09); --strip: 76px; --side: 21rem; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+  font: 15px/1.45 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+#c { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: grab; }
+a { color: var(--accent); text-decoration: none; }
+button { font: inherit; color: var(--fg); background: none; border: 0; padding: 4px 9px; border-radius: 6px;
+  cursor: pointer; }
+button:hover, button[aria-pressed=true] { background: rgba(255, 255, 255, .1); }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+nav { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 16px; display: flex; gap: 8px; flex-wrap: wrap;
+  max-width: calc(100vw - 32px); }
+nav > * { background: var(--panel); border-radius: 6px; }
+nav a { padding: 4px 10px; }
+#strip { position: fixed; left: 0; right: 0; bottom: 0; height: calc(var(--strip) + env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, rgba(11, 13, 20, .96) 30%); touch-action: none; cursor: ew-resize; }
+#strip canvas { display: block; width: 100%; height: var(--strip); }
+#side { position: fixed; top: max(12px, env(safe-area-inset-top)); right: 16px; width: var(--side);
+  max-height: calc(100vh - var(--strip) - 40px); background: var(--panel); border-radius: 10px; display: flex;
+  flex-direction: column; }
+#side header { padding: 12px 14px 8px; border-bottom: 1px solid var(--line); cursor: default; }
+#side header b { display: block; } #side header small { color: var(--muted); }
+#stops { list-style: none; margin: 0; padding: 4px 0 8px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+#stops li { display: grid; grid-template-columns: 1.6rem 1fr; gap: 0 6px; padding: 6px 14px; cursor: pointer; }
+#stops li:hover { background: rgba(255, 255, 255, .05); }
+#stops li[aria-current] { background: rgba(255, 236, 200, .1); }
+#stops i { font-style: normal; color: var(--trail); font-variant-numeric: tabular-nums; text-align: right; }
+#stops small { grid-column: 2; color: var(--muted); }
+#stops small a { margin-left: 10px; }
+#stops u { display: inline-block; height: 3px; margin-right: 8px; vertical-align: middle; border-radius: 2px;
+  background: var(--trail); opacity: .75; text-decoration: none; }
+#stops .back { grid-column: 2; font-size: 12.5px; line-height: 1.35; margin-top: 2px; }
+#stops .gap { display: block; padding: 0 14px 0 calc(1.6rem + 20px); color: var(--muted); font-size: 12px;
+  cursor: default; }
+#stops .gap:hover { background: none; }
+@media (max-width: 760px) {
+  #side { left: 8px; right: 8px; top: auto; bottom: calc(var(--strip) + env(safe-area-inset-bottom) + 4px);
+    width: auto; max-height: 42vh; }
+  #side.shut #stops { display: none; }
+  #side header { cursor: pointer; }
+}
+</style>
+<nav><a href="/">Feed</a><a href="/sky">Sky</a><a href="/echoes">Echoes</a><a href="/threads">Threads</a>
+<span><button id="prev" title="Earlier conversation (left arrow)" aria-label="Earlier conversation">◀</button
+><button id="play" title="Play (space)" aria-pressed="false">Play</button
+><button id="next" title="Later conversation (right arrow)" aria-label="Later conversation">▶</button></span>
+<button id="all" aria-pressed="false" title="Draw every conversation's trail, faintly">All trails</button>
+<button id="follow" aria-pressed="true" title="Move the camera to each conversation">Follow</button></nav>
+<canvas id="c"></canvas>
+<aside id="side" class="shut"><header><b id="when"></b><small id="what"></small></header><ol id="stops"></ol></aside>
+<div id="strip"><canvas id="s"></canvas></div>
+<script type="application/json" id="d">{data}</script>
+<script>
+"use strict";
+// Trails: the sky's map, drawn through time. A conversation is the path it took from one thought to the next, in the
+// order they were said. Positions are today's (the pipeline's): a trail shows when things were said, not where they
+// sat on the map at the time. Nothing here ranks anything: conversations come in the order they happened.
+const D = JSON.parse(document.getElementById("d").textContent);
+const S = D.stars.map(([id, x, y, size, title, facts]) => ({id, x, y: -y, size, title, facts, convs: [], links: []}));
+for (const [a, b, kinds] of D.links) { S[a].links.push({to: S[b], kinds}); S[b].links.push({to: S[a], kinds}); }
+const RADIUS = [1.6, 2.6, 3.6, 4.8];   // observation, candidate, pinned idea, canonical idea: as on the sky
+const mx = S.reduce((a, s) => a + s.x, 0) / (S.length || 1), my = S.reduce((a, s) => a + s.y, 0) / (S.length || 1);
+for (const s of S) s.hue = Math.round((Math.atan2(s.y - my, s.x - mx) * 180 / Math.PI + 360) % 360);   // the sky's hue
+
+// Conversations, in the order each began. A stop is one moment: a star, when, and who said it.
+const C = [];
+for (const [star, conv, t, who, heat] of D.moments) {
+  const c = C[conv] || (C[conv] = {n: conv, stops: []});
+  c.stops.push({s: S[star], t, who, heat});
+  if (!S[star].convs.includes(conv)) { S[star].convs.push(conv); }
+  if (S[star].first === undefined) { S[star].first = t; S[star].firstConv = conv; }   // moments come in time order
+}
+// A stop returns to a card when it's connected to one first said earlier, in another conversation: an echo, seen
+// from the later side. A stop with none is new ground as far as the connections know.
+for (const c of C) for (const k of c.stops) {
+  k.back = k.s.links.filter(l => l.to.first !== undefined && l.to.first < k.t && l.to.firstConv !== c.n && k.s.firstConv === c.n)
+    .sort((a, b) => b.to.first - a.to.first);
+}
+const SAMPLES = 14;   // points drawn between two stops
+for (const c of C) {   // the trail: a smooth curve through the stops, as points in map coordinates
+  const p = c.stops.map(k => k.s), path = [];
+  for (let i = 0; i + 1 < p.length; i++) {
+    const a = p[Math.max(i - 1, 0)], b = p[i], d = p[i + 1], e = p[Math.min(i + 2, p.length - 1)];
+    const T = .3, m0x = T * (d.x - a.x), m0y = T * (d.y - a.y), m1x = T * (e.x - b.x), m1y = T * (e.y - b.y);
+    for (let j = 0; j < SAMPLES; j++) {   // a cardinal spline: gentle, so a trail doesn't swing wide of its stops
+      const u = j / SAMPLES, u2 = u * u, u3 = u2 * u;
+      const h0 = 2 * u3 - 3 * u2 + 1, h1 = u3 - 2 * u2 + u, h2 = -2 * u3 + 3 * u2, h3 = u3 - u2;
+      path.push([h0 * b.x + h1 * m0x + h2 * d.x + h3 * m1x, h0 * b.y + h1 * m0y + h2 * d.y + h3 * m1y]);
+    }
+  }
+  if (p.length) path.push([p[p.length - 1].x, p[p.length - 1].y]);
+  c.path = path;
+}
+
+const c = document.getElementById("c"), g = c.getContext("2d");
+const strip = document.getElementById("s"), sg = strip.getContext("2d"), side = document.getElementById("side");
+let W = 0, H = 0, dpr = 1, cam = {x: 0, y: 0, k: 200}, goal = null;
+let cur = 0, stop = null, drawn = 1, playing = false, all = false, follow = true, started = 0, raf = 0;
+const GHOSTS = 5;   // how many earlier conversations stay as fading afterimages
+
+const HUES = 48, SPRITE = 64, sprites = [];
+function sprite(hue) {
+  const h = Math.round(hue / (360 / HUES)) % HUES;
+  if (!sprites[h]) {
+    const sp = document.createElement("canvas"), R = SPRITE / 2; sp.width = sp.height = SPRITE;
+    const q = sp.getContext("2d"), grad = q.createRadialGradient(R, R, 0, R, R, R), color = h * (360 / HUES);
+    grad.addColorStop(0, `hsla(${color}, 55%, 84%, 1)`);
+    grad.addColorStop(.4, `hsla(${color}, 55%, 75%, .85)`);
+    grad.addColorStop(1, `hsla(${color}, 55%, 70%, 0)`);
+    q.fillStyle = grad; q.fillRect(0, 0, SPRITE, SPRITE);
+    sprites[h] = sp;
+  }
+  return sprites[h];
+}
+for (const s of S) s.img = sprite(s.hue);
+
+const narrow = () => W <= 760;
+// The part of the window the map is seen through: beside the list, above the strip.
+function view() {
+  const stripH = 84, sideW = narrow() ? 0 : side.offsetWidth + 24;
+  const bottom = stripH + (narrow() ? side.offsetHeight + 8 : 0);
+  return {x: (W - sideW) / 2, y: 54 + (H - 54 - bottom) / 2, w: W - sideW, h: H - 54 - bottom};
+}
+function frame(stars, pad) {   // the camera that fits these stars in the view
+  const xs = stars.map(s => s.x), ys = stars.map(s => s.y), v = view();
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const k = Math.min(v.w / Math.max(x1 - x0, pad), v.h / Math.max(y1 - y0, pad)) * .78;
+  return {k, x: (x0 + x1) / 2 - (v.x - W / 2) / k, y: (y0 + y1) / 2 - (v.y - H / 2) / k};
+}
+const sx = x => (x - cam.x) * cam.k + W / 2, sy = y => (y - cam.y) * cam.k + H / 2;
+let span = 1;   // the map's width, so a short trail isn't blown up to fill the window
+
+function trail(conv, upto, style, width) {
+  const p = conv.path, n = Math.min(p.length - 1, Math.floor(upto * (p.length - 1)));
+  if (n < 1) return;
+  g.lineWidth = width; g.lineJoin = g.lineCap = "round";
+  const CHUNK = 7;   // a trail brightens toward its end, so its direction reads without arrowheads
+  for (let i = 0; i < n; i += CHUNK) {
+    const j = Math.min(i + CHUNK, n);
+    g.strokeStyle = style(.16 + .84 * Math.pow(j / (p.length - 1), 1.5));
+    g.beginPath(); g.moveTo(sx(p[i][0]), sy(p[i][1]));
+    for (let k = i + 1; k <= j; k++) g.lineTo(sx(p[k][0]), sy(p[k][1]));
+    g.stroke();
+  }
+}
+const WARM = a => `rgba(255, 236, 200, ${a.toFixed(3)})`;
+
+function draw() {
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = "#0b0d14"; g.fillRect(0, 0, W, H);
+  const grow = Math.min(2.2, .75 + .25 * Math.sqrt(cam.k / 200)), now = C[cur];
+  if (all) {
+    g.lineWidth = 1; g.strokeStyle = "rgba(170, 180, 215, .06)";
+    for (const conv of C) {
+      if (conv.stops.length < 2) continue;
+      g.beginPath(); g.moveTo(sx(conv.path[0][0]), sy(conv.path[0][1]));
+      for (const [x, y] of conv.path) g.lineTo(sx(x), sy(y));
+      g.stroke();
+    }
+  }
+  const lit = new Map(), heat = new Map();   // star -> how brightly a trail lights it; how loud my voice was there
+  for (let back = Math.min(GHOSTS, cur); back >= 1; back--) {
+    const conv = C[cur - back], fade = Math.pow(.62, back);
+    trail(conv, 1, a => `rgba(170, 180, 215, ${(.5 * fade * a).toFixed(3)})`, 1.2);
+    for (const k of conv.stops) lit.set(k.s, Math.max(lit.get(k.s) || 0, .25 + .5 * fade));
+  }
+  if (now) {
+    trail(now, drawn, WARM, now.stops.length > 16 ? 1.3 : 1.8);
+    const reached = drawn * (now.path.length - 1);
+    now.stops.forEach((k, i) => {
+      if (i * SAMPLES > reached + .5) return;
+      lit.set(k.s, 1);
+      if (k.heat >= 0) heat.set(k.s, Math.max(heat.get(k.s) || 0, k.heat));
+    });
+  }
+  for (const s of S) {
+    const x = sx(s.x), y = sy(s.y);
+    if (x < -40 || y < -40 || x > W + 40 || y > H + 40) continue;
+    const l = lit.get(s) || 0, r = RADIUS[s.size] * grow * (1 + .5 * l), halo = r * (2 + 1.2 * l + 2.6 * (heat.get(s) || 0));
+    g.globalAlpha = .2 + .8 * l; g.drawImage(s.img, x - halo, y - halo, 2 * halo, 2 * halo);
+  }
+  g.globalAlpha = 1;
+  if (!now) return;
+  if (drawn < 1 && now.path.length > 1) {   // the head of the trail as it's drawn
+    const [hx, hy] = now.path[Math.floor(drawn * (now.path.length - 1))];
+    g.fillStyle = "#fff"; g.beginPath(); g.arc(sx(hx), sy(hy), 3, 0, 7); g.fill();
+  }
+  const reached = drawn * (now.path.length - 1), seen = new Set(), many = now.stops.length > 16;
+  if (stop !== null && now.stops[stop]) {
+    const k = now.stops[stop];
+    g.setLineDash([3, 4]); g.lineWidth = 1; g.strokeStyle = "rgba(157, 184, 255, .8)";
+    for (const l of k.back) {   // what it returns to: said earlier, in another conversation
+      g.beginPath(); g.moveTo(sx(k.s.x), sy(k.s.y)); g.lineTo(sx(l.to.x), sy(l.to.y)); g.stroke();
+      g.globalAlpha = 1; const r = 9; g.drawImage(l.to.img, sx(l.to.x) - r, sy(l.to.y) - r, 2 * r, 2 * r);
+    }
+    g.setLineDash([]);
+    g.lineWidth = 2.4; g.strokeStyle = "#fff"; g.lineJoin = g.lineCap = "round";   // the legs in and out
+    const from = Math.max(0, (stop - 1) * SAMPLES), to = Math.min(now.path.length - 1, (stop + 1) * SAMPLES, Math.floor(reached));
+    if (to > from) {
+      g.beginPath(); g.moveTo(sx(now.path[from][0]), sy(now.path[from][1]));
+      for (let i = from + 1; i <= to; i++) g.lineTo(sx(now.path[i][0]), sy(now.path[i][1]));
+      g.stroke();
+    }
+  }
+  // Each stop's number (on a long trail, only around the stop picked and at its ends), and the picked stop's title
+  // with its neighbors', or the first and last.
+  g.textBaseline = "middle";
+  const label = (text, x, y, bold) => {
+    const t = text.length > 44 ? text.slice(0, 42) + "…" : text, edge = narrow() ? W - 8 : side.offsetLeft - 8;
+    g.font = "12px system-ui, sans-serif"; g.fillStyle = bold ? "#fff" : "rgba(232, 234, 242, .82)";
+    g.lineWidth = 3; g.strokeStyle = "rgba(11, 13, 20, .85)"; g.lineJoin = "round";
+    if (x + g.measureText(t).width > edge && x > W / 3) {   // no room to its right: the title goes to its left
+      g.textAlign = "right"; g.strokeText(t, x - 30, y); g.fillText(t, x - 30, y); g.textAlign = "left";
+    } else { g.strokeText(t, x, y); g.fillText(t, x, y); }
+  };
+  now.stops.forEach((k, i) => {
+    if (i * SAMPLES > reached + .5) return;
+    const x = sx(k.s.x), y = sy(k.s.y), ends = i === 0 || i === now.stops.length - 1;
+    const near = stop !== null && Math.abs(i - stop) <= 1, named = stop === null ? ends : near;
+    if (k.back.length && !seen.has(k.s)) {   // a return: a ring
+      g.strokeStyle = "rgba(157, 184, 255, .9)"; g.lineWidth = 1; g.beginPath(); g.arc(x, y, 7, 0, 7); g.stroke();
+    }
+    if (stop === i) { g.strokeStyle = "#fff"; g.lineWidth = 1.4; g.beginPath(); g.arc(x, y, 11, 0, 7); g.stroke(); }
+    if (seen.has(k.s) && stop !== i) return;
+    seen.add(k.s);
+    if (!many || ends || near) {
+      g.font = "600 11px system-ui, sans-serif"; g.fillStyle = WARM(.95);
+      g.lineWidth = 3; g.strokeStyle = "rgba(11, 13, 20, .85)"; g.strokeText(String(i + 1), x + 8, y - 9);
+      g.fillText(String(i + 1), x + 8, y - 9);
+    }
+    if (named) label(k.s.title || "hidden", x + 8 + 7 * String(i + 1).length + 4, y - 9, stop === i);
+  });
+}
+
+// The strip: one column per conversation, in order, a block per stop in its star's hue, dim where the stop returns to
+// something said before. So it shows at a glance how much each conversation held, which parts of the map it visited
+// and how much of it was new ground; months are marked where they begin.
+const fmtMonth = new Intl.DateTimeFormat(undefined, {month: "short", year: "2-digit"});
+function drawStrip() {
+  if (!C.length) return;
+  const w = strip.clientWidth, h = strip.clientHeight, n = C.length || 1, col = w / n, top = 16, room = h - top - 4;
+  strip.width = w * dpr; strip.height = h * dpr; sg.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const most = Math.max(...C.map(conv => conv.stops.length), 1), unit = Math.min(6, room / most);
+  sg.font = "11px system-ui, sans-serif"; sg.textBaseline = "top";
+  let month = "", lastLabel = -100;
+  C.forEach((conv, i) => {
+    const x = i * col, m = fmtMonth.format(conv.stops[0].t * 1000);
+    if (m !== month) {
+      month = m;
+      sg.fillStyle = "rgba(255, 255, 255, .14)"; sg.fillRect(Math.floor(x), 12, 1, h - 12);
+      if (x - lastLabel > 52) { sg.fillStyle = "#9aa0b4"; sg.fillText(m, x + 4, 1); lastLabel = x; }
+    }
+    conv.stops.forEach((k, j) => {
+      sg.fillStyle = `hsla(${k.s.hue}, 55%, ${i === cur ? 80 : 62}%, ${k.back.length ? .38 : i === cur ? 1 : .8})`;
+      sg.fillRect(x, h - 4 - (j + 1) * unit, Math.max(col - (col > 3 ? 1 : 0), 1), Math.max(unit - (unit > 3 ? 1 : 0), 1));
+    });
+  });
+  sg.fillStyle = "#fff"; sg.fillRect(cur * col + col / 2 - 1, h - 3, 2, 3);   // the marker: where we are
+  sg.fillRect(cur * col + col / 2 - .5, top, 1, Math.max(room - C[cur].stops.length * unit - 2, 0));
+}
+
+const fmtDay = new Intl.DateTimeFormat(undefined, {weekday: "short", day: "numeric", month: "short", year: "numeric"});
+const fmtTime = new Intl.DateTimeFormat(undefined, {hour: "2-digit", minute: "2-digit"});
+const WHO = ["", "me (diarization)", "not me"];
+function gap(seconds) {
+  for (const [size, name] of [[86400 * 30.4, "month"], [86400, "day"], [3600, "hour"], [60, "minute"]]) {
+    if (seconds >= size) { const n = Math.round(seconds / size); return `${n} ${name}${n === 1 ? "" : "s"}`; }
+  }
+  return "";
+}
+function list() {
+  const conv = C[cur], first = conv.stops[0].t * 1000, last = conv.stops[conv.stops.length - 1].t * 1000;
+  document.getElementById("when").textContent = fmtDay.format(first);
+  const places = new Set(conv.stops.map(k => k.s)).size, back = conv.stops.filter(k => k.back.length).length;
+  document.getElementById("what").textContent = `${fmtTime.format(first)}` + (last - first >= 60000 ? `–${fmtTime.format(last)}` : "")
+    + ` · ${conv.stops.length} thought${conv.stops.length === 1 ? "" : "s"}`
+    + (places < conv.stops.length ? ` at ${places} places` : "") + (back ? ` · ${back} return${back === 1 ? "" : "s"}` : "")
+    + ` · conversation ${cur + 1} of ${C.length}`;
+  const ol = document.getElementById("stops"); ol.textContent = "";
+  conv.stops.forEach((k, i) => {
+    if (i && k.t - conv.stops[i - 1].t >= 600) {   // a pause worth showing: ten minutes or more
+      const li = document.createElement("li"); li.className = "gap"; li.textContent = gap(k.t - conv.stops[i - 1].t) + " later";
+      ol.append(li);
+    }
+    const li = document.createElement("li"), n = document.createElement("i"), t = document.createElement("span");
+    const small = document.createElement("small");
+    n.textContent = i + 1; t.textContent = k.s.title || "hidden";
+    small.textContent = fmtTime.format(k.t * 1000) + (WHO[k.who] ? " · " + WHO[k.who] : "");
+    for (const [name, href] of [["card", "/idea/" + k.s.id], ["crossroads", "/crossroads/" + k.s.id]]) {
+      const a = document.createElement("a"); a.textContent = name; a.href = href; small.append(a);
+    }
+    if (k.heat >= 0) {   // how loud my voice was: a fact about the voice, not about the thought
+      const bar = document.createElement("u"); bar.style.width = Math.round(6 + 34 * k.heat) + "px";
+      bar.title = "arousal in my voice"; small.prepend(bar);
+    }
+    li.dataset.stop = i; li.append(n, t, small);
+    for (const l of k.back.slice(0, 2)) {
+      const back = document.createElement("a"); back.className = "back"; back.href = "/crossroads/" + l.to.id;
+      back.textContent = `↺ ${gap(k.t - l.to.first) || "moments"} after “${l.to.title || "hidden"}”` + (l.kinds ? ` · ${l.kinds}` : "");
+      li.append(back);
+    }
+    if (k.back.length > 2) { const more = document.createElement("small"); more.textContent = `and ${k.back.length - 2} more`; li.append(more); }
+    ol.append(li);
+  });
+}
+function mark() {
+  for (const li of document.querySelectorAll("#stops li[data-stop]")) {
+    if (Number(li.dataset.stop) === stop) { li.setAttribute("aria-current", "true"); li.scrollIntoView({block: "nearest"}); }
+    else li.removeAttribute("aria-current");
+  }
+}
+
+// Showing a conversation: its list, the strip's marker, the camera gliding to it, and the trail drawing itself.
+function show(i, picked, instant) {
+  cur = Math.max(0, Math.min(i, C.length - 1)); stop = picked === undefined ? null : picked;
+  const conv = C[cur];
+  list(); mark(); drawStrip();
+  history.replaceState(null, "", "/trails?at=" + conv.stops[stop || 0].s.id);
+  if (follow) {
+    const ghosts = C.slice(Math.max(0, cur - 1), cur).flatMap(x => x.stops.map(k => k.s));   // keep the last one in sight
+    goal = frame(conv.stops.map(k => k.s).concat(conv.stops.length < 3 ? ghosts : []), span * .22);
+    if (instant) { cam = goal; goal = null; }
+  }
+  drawn = instant || conv.stops.length < 2 ? 1 : 0; started = performance.now();
+  tick();
+}
+const drawTime = conv => Math.min(4200, 500 + 380 * (conv.stops.length - 1));
+function tick() {
+  if (raf) return;
+  raf = requestAnimationFrame(step);
+}
+function step(t) {
+  raf = 0;
+  const conv = C[cur]; let more = false;
+  if (goal) {
+    const e = .14;   // ease toward the goal; zoom eases in log space so it feels even
+    cam.x += (goal.x - cam.x) * e; cam.y += (goal.y - cam.y) * e; cam.k *= Math.pow(goal.k / cam.k, e);
+    if (Math.abs(goal.x - cam.x) * cam.k < .5 && Math.abs(goal.y - cam.y) * cam.k < .5 && Math.abs(goal.k / cam.k - 1) < .003) { cam = goal; goal = null; }
+    else more = true;
+  }
+  if (drawn < 1) { drawn = Math.min(1, (t - started) / drawTime(conv)); more = more || drawn < 1; }
+  draw();
+  if (playing) {
+    const hold = conv.stops.length < 2 ? 650 : drawTime(conv) + 900;
+    if (t - started >= hold) {
+      if (cur + 1 < C.length) show(cur + 1); else play(false);
+    }
+    more = true;
+  }
+  if (more) tick();
+}
+function play(on) {
+  playing = on;
+  const b = document.getElementById("play"); b.textContent = on ? "Pause" : "Play"; b.setAttribute("aria-pressed", on);
+  if (on) { if (cur + 1 >= C.length) show(0); else { started = performance.now(); tick(); } }
+}
+const redraw = tick;
+
+function resize() {
+  dpr = window.devicePixelRatio || 1; W = innerWidth; H = innerHeight;
+  c.width = W * dpr; c.height = H * dpr; drawStrip(); redraw();
+}
+function zoom(factor, px, py) {
+  goal = null;
+  const wx = (px - W / 2) / cam.k + cam.x, wy = (py - H / 2) / cam.k + cam.y;
+  cam.k = Math.max(20, Math.min(cam.k * factor, 200000));
+  cam.x = wx - (px - W / 2) / cam.k; cam.y = wy - (py - H / 2) / cam.k; redraw();
+}
+function hit(px, py) {
+  let best = null, bestD = Infinity;
+  const mine = new Set(C[cur].stops.map(k => k.s));
+  for (const s of S) {
+    if (!s.convs.length) continue;   // a star with no moment (typed, or hidden in demo mode) is on no trail
+    const d = Math.hypot(sx(s.x) - px, sy(s.y) - py) - (mine.has(s) ? 6 : 0);   // this trail's stops win a near tie
+    if (d < bestD) { best = s; bestD = d; }
+  }
+  return bestD <= 18 ? best : null;
+}
+function pick(s) {   // a star tapped: its stop on this trail, or else the latest conversation that passed through it
+  if (!s) { stop = null; mark(); redraw(); return; }
+  const here = C[cur].stops.findIndex(k => k.s === s);
+  if (here >= 0) { stop = here; mark(); history.replaceState(null, "", "/trails?at=" + s.id); redraw(); return; }
+  const conv = s.convs[s.convs.length - 1];
+  play(false); show(conv, C[conv].stops.findIndex(k => k.s === s));
+}
+
+const pointers = new Map();
+let down = null, pinch = null;
+c.addEventListener("pointerdown", e => {
+  c.setPointerCapture(e.pointerId); pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  down = pointers.size === 1 ? {x: e.clientX, y: e.clientY, t: Date.now(), moved: false} : null;
+  if (pointers.size === 2) { const [p, q] = [...pointers.values()]; pinch = Math.hypot(p.x - q.x, p.y - q.y); }
+});
+c.addEventListener("pointermove", e => {
+  const prev = pointers.get(e.pointerId);
+  if (!prev) return;
+  const now = {x: e.clientX, y: e.clientY};
+  pointers.set(e.pointerId, now);
+  if (pointers.size === 2) {
+    const [p, q] = [...pointers.values()], d = Math.hypot(p.x - q.x, p.y - q.y);
+    if (pinch) zoom(d / pinch, (p.x + q.x) / 2, (p.y + q.y) / 2);
+    pinch = d;
+  } else if (pointers.size === 1) {
+    if (down && Math.hypot(now.x - down.x, now.y - down.y) > 6) down.moved = true;
+    if (down && down.moved) { goal = null; cam.x -= (now.x - prev.x) / cam.k; cam.y -= (now.y - prev.y) / cam.k; redraw(); }
+  }
+});
+const up = e => {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") pick(hit(e.clientX, e.clientY));
+  down = null;
+};
+c.addEventListener("pointerup", up);
+c.addEventListener("pointercancel", up);
+c.addEventListener("wheel", e => { e.preventDefault(); zoom(Math.exp(-e.deltaY / 400), e.clientX, e.clientY); },
+                   {passive: false});
+
+// Dragging along the strip goes to the conversation under the pointer.
+const box = document.getElementById("strip");
+let scrub = false;
+const at = e => Math.floor((e.clientX - strip.getBoundingClientRect().left) / (strip.clientWidth / C.length));
+box.addEventListener("pointerdown", e => { scrub = true; box.setPointerCapture(e.pointerId); play(false); show(at(e)); });
+box.addEventListener("pointermove", e => { if (scrub && at(e) !== cur && at(e) >= 0 && at(e) < C.length) show(at(e)); });
+box.addEventListener("pointerup", () => { scrub = false; });
+box.addEventListener("pointercancel", () => { scrub = false; });
+
+document.getElementById("stops").addEventListener("click", e => {
+  const li = e.target.closest("li[data-stop]");
+  if (!li || e.target.closest("a")) return;
+  stop = Number(li.dataset.stop); mark();
+  if (follow) goal = frame(C[cur].stops.map(k => k.s), span * .22);
+  redraw();
+});
+side.querySelector("header").addEventListener("click", () => { side.classList.toggle("shut"); if (follow) show(cur, stop, false); });
+document.getElementById("prev").addEventListener("click", () => { play(false); show(cur - 1); });
+document.getElementById("next").addEventListener("click", () => { play(false); show(cur + 1); });
+document.getElementById("play").addEventListener("click", () => play(!playing));
+function toggle(id, set) {
+  document.getElementById(id).addEventListener("click", e => {
+    const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
+    e.currentTarget.setAttribute("aria-pressed", on); set(on); redraw();
+  });
+}
+toggle("all", on => { all = on; });
+toggle("follow", on => { follow = on; if (on) show(cur, stop, false); else { goal = frame(S, span); } });
+addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "ArrowLeft") { play(false); show(cur - 1); }
+  else if (e.key === "ArrowRight") { play(false); show(cur + 1); }
+  else if (e.key === " ") { e.preventDefault(); play(!playing); }
+});
+addEventListener("resize", resize);
+
+if (C.length) {
+  span = Math.max(...S.map(s => s.x)) - Math.min(...S.map(s => s.x)) || 1;
+  dpr = window.devicePixelRatio || 1; W = innerWidth; H = innerHeight; c.width = W * dpr; c.height = H * dpr;
+  // Open on the card asked for (its latest conversation), or on the latest conversation with somewhere to go.
+  const asked = D.at && S.find(s => s.id === D.at && s.convs.length);
+  let first = C.length - 1;
+  while (!asked && first > 0 && C[first].stops.length < 3) first--;
+  if (!asked && C[first].stops.length < 3) first = C.length - 1;
+  if (asked) first = asked.convs[asked.convs.length - 1];
+  cam = frame(S, span);
+  show(first, asked ? C[first].stops.findIndex(k => k.s === asked) : undefined);
+} else {
+  side.hidden = true; document.getElementById("strip").hidden = true;
+  resize();
+}
+</script>
+</html>

@@ -5,6 +5,12 @@ diarization, not me; never a name), in how many conversations, when, its maturit
 No score orders or filters anything. From a card I keep a cluster (canonical or pinned), un-keep it or dismiss it,
 as feedback events, the same kinds Lattice's keep_idea wrote.
 
+Two more pages draw the same cards (docs/design/m6-emanation.md): Trails (`/trails`), the sky's map with each
+conversation as the path it took from thought to thought, and Crossroads (`/crossroads/<id>`), one card with what was
+said around it and what's like it; and Echoes (`/echoes`), every connection between thoughts said in different
+conversations; and Threads (`/threads`), the neighborhoods of connected thoughts that run through several
+conversations; and Apart (`/apart`), the near pairs the connection judge kept apart. They only read.
+
 Demo mode (a toggle, or `im web --demo` for nothing else) reads the `demo` views instead of `pub`'s, so nothing
 sensitive is there to show: the sky keeps a sensitive cluster's star, blank, with its edges, and the lists (the
 feed, a card's quotes and connections) leave it out. Nothing can be kept or dismissed in demo mode.
@@ -18,9 +24,11 @@ import hashlib
 import hmac
 import html
 import json
+import math
 import os
 import re
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from urllib.parse import parse_qs, urlsplit
@@ -107,7 +115,8 @@ def feed(conn, show: str = "candidates", page: int = 0, demo: bool = False) -> s
                            ORDER BY last_seen DESC, idea_id LIMIT %s OFFSET %s""",
                  (list(maturities), PAGE + 1, page * PAGE))
     tabs = " ".join(f'<a href="/?show={k}"{" aria-current=page" if k == show else ""}>{name}</a>'
-                    for k, (_, name) in SHOW.items()) + ' <a href="/sky">sky</a>' \
+                    for k, (_, name) in SHOW.items()) + ' <a href="/sky">sky</a> <a href="/trails">trails</a>' \
+        + ' <a href="/echoes">echoes</a> <a href="/threads">threads</a> <a href="/apart">apart</a> <a href="/crossroads">crossroads</a>' \
         + f' <a href="/demo?on={0 if demo else 1}">{"leave demo mode" if demo else "demo mode"}</a>'
     cards = "".join(f'<li><a href="/idea/{r["idea_id"]}">{_e(r["title"])}</a><p>{_e(r["statement"])}</p>'
                     f'<small>{_e(_facts(r))}</small></li>' for r in rows[:PAGE])
@@ -141,7 +150,8 @@ def card(conn, idea_id: str, demo: bool = False) -> str | None:
     buttons = "".join(f'<button name="action" value="{a}">{a}</button>' for a in ACTIONS)
     body = [f"<h1>{_e(r['title'])}</h1><p>{_e(r['statement'])}</p><small>{_e(_facts(r))}</small>",
             "" if demo else f'<form method="post" action="/idea/{idea_id}">{buttons}</form>',
-            f'<p><a href="/sky?seed={idea_id}">Light the sky from here</a></p>']
+            f'<p><a href="/sky?seed={idea_id}">Light the sky from here</a> · '
+            f'<a href="/trails?at={idea_id}">Its trail</a> · <a href="/crossroads/{idea_id}">Its crossroads</a></p>']
     if r["my_note"]:
         body.append(f"<h2>My note</h2><p>{_e(r['my_note'])}</p>")
     body.append("<h2>Said</h2><ol>" + "".join(
@@ -205,6 +215,351 @@ def sky_lens(conn, seed: str, demo: bool = False) -> dict | None:
     return {"seed": seed, "rel": _relevance(conn, seed, on_map), "title": on_map[seed] or "Sky"}
 
 
+WHO = {"me": 0, "me_diar": 1, "not_me": 2}
+
+
+def trails(conn, at: str | None = None, demo: bool = False) -> str | None:
+    """The sky's map, drawn through time (docs/design/m6-emanation.md, Trails): every card where the sky puts it, and
+    every moment (pub.card_moments: a card, said in a conversation at a time), so the page can draw each conversation
+    as the trail it took across the map. A moment carries the arousal in my voice, where it was measured (a fact about
+    the voice, 048), and the connections come too, so a stop can say what it returns to: a card it's connected to,
+    first said earlier in another conversation. Conversations are sent as numbers, never their ids. `at` opens the page on a
+    card's conversation; None if that card isn't on the map. In demo mode a sensitive card keeps its star, blank, and
+    has no moments, so a trail passes it by."""
+    v = _views(demo)
+    rows = _rows(conn, f"""SELECT c.*, p.x, p.y FROM {v}cards c JOIN pub.card_positions p USING (idea_id)
+                           ORDER BY c.idea_id""")
+    index = {str(r["idea_id"]): n for n, r in enumerate(rows)}
+    if at is not None and at not in index:
+        return None
+    stars = [[str(r["idea_id"]), round(float(r["x"]), 4), round(float(r["y"]), 4),
+              SIZES[r["maturity"]] + (r["kept_as"] == "canonical"), r["title"] or "", _facts(r)] for r in rows]
+    conversations: dict[str, int] = {}
+    moments = [[index[i], conversations.setdefault(c, len(conversations)), int(t.timestamp()), WHO.get(who, 2),
+                -1 if heat is None else round(min(max(float(heat), 0.0), 1.0), 2)]
+               for i, c, t, who, heat in conn.execute(
+                   f"""SELECT idea_id::text, conversation_id, said_at, speaker, arousal FROM {v}card_moments
+                       WHERE conversation_id IS NOT NULL AND said_at IS NOT NULL
+                       ORDER BY said_at, conversation_id, item_id, observation_id""") if i in index]
+    links = sorted((*sorted((index[a], index[b])), ", ".join(kinds)) for a, b, kinds in conn.execute(
+        "SELECT a::text, b::text, kinds FROM pub.card_links") if a in index and b in index and a != b)
+    data = json.dumps({"stars": stars, "moments": moments, "links": links, "at": at}, separators=(",", ":"))
+    return _TRAILS.replace("{data}", data.replace("</", "<\\/"))
+
+
+def _apart(a, b) -> str:
+    """How far apart two times are, in words: "4 minutes", "3 days", "5 months"."""
+    s = abs((a - b).total_seconds())
+    for size, name in ((86400 * 365, "year"), (86400 * 30.4, "month"), (86400, "day"), (3600, "hour"), (60, "minute")):
+        if s >= size:
+            n = round(s / size)
+            return f"{n} {name}{'s' * (n != 1)}"
+    return "moments"
+
+
+def _door(way: str, r: dict, why: str, quotes: dict) -> str:
+    quote = quotes.get(r["idea_id"])
+    return (f'<a class="door" data-way="{way}" href="/crossroads/{r["idea_id"]}"><small>{_e(why)}</small>'
+            f'<b>{_e(r["title"])}</b>' + (f"<q>{_e(quote)}</q>" if quote else "") + "</a>")
+
+
+ECHOES = 4   # how many doors each way in meaning
+
+
+def crossroads(conn, idea_id: str, demo: bool = False) -> str | None:
+    """One card with the two kinds of neighbor it has (docs/design/m6-emanation.md, Crossroads). Across: what was said
+    just before and just after it in its own conversations, usually about something else. Up and down: what's like
+    it, said at another time (its connections, lineage and nearest by meaning, less the doors across), earlier above
+    and later below. Every door leads to that card's own crossroads. Nothing orders a door but time, and likeness within one direction.
+    None if there's no such card; in demo mode a sensitive one says only that it's hidden, and no door leads to one."""
+    v = _views(demo)
+    shown = "AND NOT c.redacted" if demo else ""
+    rows = _rows(conn, f"SELECT * FROM {v}cards WHERE idea_id = %s", (idea_id,))
+    if not rows:
+        return None
+    r = rows[0]
+    if demo and r["redacted"]:
+        return _page("Hidden", f"<h1>Hidden in demo mode</h1><small>{_e(_facts(r))}</small>")
+    # Across: every moment of the conversations this card was said in, in the order said.
+    said = _rows(conn, f"""SELECT m.idea_id, m.conversation_id, m.said_at, m.speaker, m.quote, c.title
+                           FROM {v}card_moments m JOIN {v}cards c USING (idea_id)
+                           WHERE m.conversation_id IN (SELECT conversation_id FROM {v}card_moments WHERE idea_id = %s)
+                             AND m.said_at IS NOT NULL
+                           ORDER BY m.conversation_id, m.said_at, m.item_id, m.observation_id""", (idea_id,))
+    mine = [m for m in said if str(m["idea_id"]) == idea_id]
+    before, after, seen = [], [], {idea_id}
+    for n, m in enumerate(said):
+        if str(m["idea_id"]) != idea_id:
+            continue
+        for found, step in ((before, -1), (after, 1)):
+            k = n + step
+            while 0 <= k < len(said) and said[k]["conversation_id"] == m["conversation_id"] \
+                    and str(said[k]["idea_id"]) == idea_id:
+                k += step
+            if 0 <= k < len(said) and said[k]["conversation_id"] == m["conversation_id"] \
+                    and (step, said[k]["idea_id"]) not in seen:
+                seen.add((step, said[k]["idea_id"]))
+                found.append((said[k], f"{_apart(said[k]['said_at'], m['said_at'])} {'earlier' if step < 0 else 'later'}"
+                                       ", same conversation"))
+    # Up and down: connections and lineage first, then the nearest by meaning, each once.
+    like = _rows(conn, f"""SELECT c.idea_id, c.title, c.first_said,
+                                  coalesce(nullif(array_to_string(l.kinds, ', '), ''), 'connected') AS why,
+                                  2::real AS similarity
+                           FROM pub.card_links l
+                           JOIN {v}cards c ON c.idea_id = CASE WHEN l.a = %s THEN l.b ELSE l.a END
+                           WHERE %s IN (l.a, l.b) {shown}
+                           UNION ALL
+                           SELECT c.idea_id, c.title, c.first_said, 'lineage', 2 FROM pub.card_lineage l
+                           JOIN {v}cards c ON c.idea_id = CASE WHEN l.from_id = %s THEN l.to_id ELSE l.from_id END
+                           WHERE %s IN (l.from_id, l.to_id) {shown}
+                           UNION ALL
+                           SELECT c.idea_id, c.title, c.first_said, 'near by meaning', n.similarity
+                           FROM pub.card_neighbours(%s, %s) n JOIN {v}cards c USING (idea_id) WHERE true {shown}
+                           ORDER BY similarity DESC, idea_id""", (idea_id,) * 5 + (4 * ECHOES,))
+    earlier, later, met = [], [], {r["idea_id"]} | {x["idea_id"] for x, _ in before + after}
+    for x in like:
+        if x["idea_id"] in met:
+            continue
+        met.add(x["idea_id"])
+        if r["first_said"] and x["first_said"]:
+            past = x["first_said"] < r["first_said"]
+            why = f"{x['why']} · {_apart(x['first_said'], r['first_said'])} {'earlier' if past else 'later'}"
+        else:
+            past, why = False, x["why"]
+        side = earlier if past else later
+        if len(side) < ECHOES:
+            side.append((x, why))
+    doors = [x["idea_id"] for x, _ in before + after + earlier + later]
+    quotes = dict(conn.execute(f"""SELECT DISTINCT ON (idea_id) idea_id, quote FROM {v}card_moments
+                                   WHERE idea_id = ANY(%s) ORDER BY idea_id, said_at, item_id""", (doors,)).fetchall())
+
+    def arm(way: str, name: str, found: list) -> str:
+        inner = "".join(_door(way, x, why, quotes) for x, why in found) or "<i>nothing</i>"
+        return f'<section class="{way}"><h2>{name}</h2>{inner}</section>'
+
+    here = "".join(f"<blockquote><p>{_e(m['quote'])}</p><small>{_e(SPEAKERS.get(m['speaker'], m['speaker']))} · "
+                   f"{_when(m['said_at'])}</small></blockquote>" for m in mine[:3])
+    body = (arm("up", "Like it, earlier", earlier) + arm("left", "Just before", before)
+            + f'<main><h1>{_e(r["title"])}</h1>{here}<p>{_e(r["statement"])}</p><small>{_e(_facts(r))}</small>'
+              f'<nav><a href="/idea/{idea_id}">Card</a><a href="/trails?at={idea_id}">Its trail</a>'
+              f'<a href="/sky?seed={idea_id}">Light the sky</a><a href="/crossroads">Somewhere else</a></nav></main>'
+            + arm("right", "Just after", after) + arm("down", "Like it, later", later))
+    return _CROSSROADS.replace("{title}", _e(r["title"] or "Crossroads")).replace("{body}", body)
+
+
+GAPS = {"any": (0, "any gap"), "week": (7, "a week or more"), "month": (30, "a month or more")}
+ECHO_KINDS = {"all": "every kind", "elaborates": "elaborates", "supports": "supports", "tension": "tension",
+              "analogy": "analogous"}
+
+
+def _arcs(found: list, first, last) -> str:
+    """Every echo as an arc over the archive's time, from when the earlier card was first said to the later one."""
+    width, base, top = 1000.0, 250.0, 240.0
+    span = max((last - first).total_seconds(), 1.0)
+    at = lambda t: round(8 + (width - 16) * (t - first).total_seconds() / span, 1)   # noqa: E731
+    out = []
+    for n, e in enumerate(found):
+        x0, x1 = at(e["earlier"]["first_said"]), at(e["later"]["first_said"])
+        r = max((x1 - x0) / 2, 1.5)
+        out.append(f'<a href="#e{n}"><path class="{" ".join(e["kinds"]) or "plain"}" d="M{x0},{base}A{r:.1f},'
+                   f'{min(r, top):.1f} 0 0 1 {x1},{base}"><title>{_e(e["earlier"]["title"])} … '
+                   f'{_e(e["later"]["title"])} ({_e(e["gap"])})</title></path></a>')
+    ticks, t = [], first.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    while t <= last:
+        if t >= first:
+            ticks.append(f'<line x1="{at(t)}" x2="{at(t)}" y1="{base}" y2="{base + 6}"/>'
+                         f'<text x="{at(t) + 4}" y="{base + 16}">{t.strftime("%b %Y")}</text>')
+        t = (t.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return (f'<svg viewBox="0 0 {width:.0f} {base + 22:.0f}" role="img" aria-label="Each echo as an arc from when '
+            f'the earlier thought was said to when the later one was"><line class="axis" x1="0" x2="{width:.0f}" '
+            f'y1="{base}" y2="{base}"/>{"".join(ticks)}{"".join(out)}</svg>')
+
+
+def echoes(conn, kind: str = "all", gap: str = "any", demo: bool = False) -> str:
+    """What I came back to (docs/design/m6-emanation.md, Echoes): every connection between two cards said in
+    different conversations, the earlier beside the later, with how far apart they were said, the connection's kinds
+    and the judge's reason. Almost every capture founds its own cluster, so this is where recurrence shows. Newest
+    first, by when the later one was said: nothing else orders it (decision 0007). `kind` and `gap` only narrow it.
+    In demo mode a pair with a sensitive card is left out."""
+    v = _views(demo)
+    kind, gap = (kind if kind in ECHO_KINDS else "all"), (gap if gap in GAPS else "any")
+    cards = {r["idea_id"]: r for r in _rows(conn, f"SELECT * FROM {v}cards WHERE first_said IS NOT NULL")
+             if not (demo and r["redacted"])}
+    said: dict = {}   # card -> its conversations, and its first quote
+    for i, c, q in conn.execute(f"""SELECT idea_id, conversation_id, quote FROM {v}card_moments
+                                    ORDER BY said_at, item_id, observation_id"""):
+        convs, _ = said.setdefault(i, (set(), q))
+        convs.add(c)
+    found = []
+    for a, b, kinds, direction, why, analogy in conn.execute(
+            """SELECT l.a, l.b, l.kinds, j.direction, j.why, j.analogy FROM pub.card_links l
+               LEFT JOIN pub.card_judgments j ON j.a = least(l.a, l.b) AND j.b = greatest(l.a, l.b)
+               ORDER BY l.a, l.b"""):
+        if a not in cards or b not in cards or said.get(a, (set(),))[0] & said.get(b, (set(),))[0]:
+            continue
+        earlier, later = sorted((cards[a], cards[b]), key=lambda r: (r["first_said"], r["idea_id"]))
+        days = (later["first_said"] - earlier["first_said"]).days
+        if days < GAPS[gap][0] or not (kind == "all" or kind in kinds or (kind == "analogy" and analogy)):
+            continue
+        how = []
+        for k in kinds:   # a>b reads "the lower id supports (or elaborates) the higher"
+            subject = min(a, b) if direction == "a>b" else max(a, b) if direction == "b>a" else None
+            how.append(k if subject is None or k == "tension" else
+                       f"the later {k} the earlier" if subject == later["idea_id"] else f"the earlier {k} the later")
+        found.append({"earlier": earlier, "later": later, "kinds": kinds, "why": why, "analogy": analogy,
+                      "gap": _apart(later["first_said"], earlier["first_said"]), "how": ", ".join(how) or "connected"})
+    found.sort(key=lambda e: (e["later"]["first_said"], e["later"]["idea_id"], e["earlier"]["idea_id"]), reverse=True)
+
+    def side(r: dict) -> str:
+        quote = said.get(r["idea_id"], (None, None))[1]
+        return (f'<a class="side" href="/crossroads/{r["idea_id"]}"><small>{_when(r["first_said"])}</small>'
+                f'<b>{_e(r["title"])}</b>' + (f"<q>{_e(quote)}</q>" if quote else "") + "</a>")
+
+    def chips(name: str, options: dict, current: str, other: str) -> str:
+        return "".join(f'<a href="/echoes?{name}={k}&{other}"{" aria-current=true" if k == current else ""}>'
+                       f'{_e(label if isinstance(label, str) else label[1])}</a>' for k, label in options.items())
+
+    rows = "".join(
+        f'<li id="e{n}" class="{" ".join(e["kinds"]) or "plain"}">{side(e["earlier"])}'
+        f'<div class="gap"><b>{_e(e["gap"])}</b><small>{_e(e["how"])}</small></div>{side(e["later"])}'
+        + (f'<p>{_e(e["why"])}' + (f' <i>Same structure: {_e(e["analogy"])}</i>' if e["analogy"] else "") + "</p>"
+           if e["why"] or e["analogy"] else "") + "</li>" for n, e in enumerate(found))
+    times = [r["first_said"] for r in cards.values()]
+    body = (f'<h1>Echoes</h1><p class="lede">{len(found)} connection{"s" * (len(found) != 1)} between thoughts said '
+            f'in different conversations: what I came back to. Newest first.</p>'
+            f'<nav>{chips("kind", ECHO_KINDS, kind, f"gap={gap}")}<span></span>'
+            f'{chips("gap", GAPS, gap, f"kind={kind}")}</nav>'
+            + (_arcs(found, min(times), max(times)) if found else "")
+            + (f"<ol>{rows}</ol>" if found else "<p>Nothing here.</p>"))
+    return _ECHOES.replace("{body}", body)
+
+
+THREAD_CARDS, THREAD_CONVERSATIONS = 3, 2   # the least a thread holds, and the least it runs through
+
+
+def threads(conn, demo: bool = False) -> str:
+    """What runs through the conversations (docs/design/m6-emanation.md, Threads): each graph neighbourhood
+    (lens.neighbourhoods, over the connections) of at least THREAD_CARDS cards said in at least THREAD_CONVERSATIONS
+    conversations, as a row across every conversation in the order they began, with a knot where it was said. A
+    thread is named by the first card said in it, and they come in the order they began: nothing ranks them
+    (decision 0007). In demo mode a sensitive card is in no thread."""
+    from im import lens
+
+    v = _views(demo)
+    cards = {str(r["idea_id"]): r for r in _rows(
+        conn, f"SELECT c.*, p.x, p.y FROM {v}cards c LEFT JOIN pub.card_positions p USING (idea_id)")
+        if not (demo and r["redacted"])}
+    said: dict = defaultdict(list)   # card -> its moments, in the order said
+    columns: dict = {}               # conversation -> its column, in the order they began; and when that was
+    for i, c, t, quote in conn.execute(f"""SELECT idea_id::text, conversation_id, said_at, quote FROM {v}card_moments
+                                           WHERE conversation_id IS NOT NULL AND said_at IS NOT NULL
+                                           ORDER BY said_at, conversation_id, item_id, observation_id"""):
+        if i in cards:
+            said[i].append((t, columns.setdefault(c, (len(columns), t))[0], quote))
+    placed = [(float(r["x"]), -float(r["y"])) for r in cards.values() if r["x"] is not None]
+    mx, my = (sum(p[0] for p in placed) / len(placed), sum(p[1] for p in placed) / len(placed)) if placed else (0, 0)
+    pairs = [(a, b) for a, b in conn.execute("SELECT a::text, b::text FROM pub.card_links") if a in said and b in said]
+    found = []
+    for group in lens.neighbourhoods(pairs):
+        order = sorted(group, key=lambda i: (said[i][0][0], i))
+        knots: dict = defaultdict(list)   # column -> the thread's cards said in that conversation, first said first
+        for i in order:
+            for _, column, _ in said[i]:
+                if i not in knots[column]:
+                    knots[column].append(i)
+        if len(group) < THREAD_CARDS or len(knots) < THREAD_CONVERSATIONS:
+            continue
+        at = [(float(cards[i]["x"]), -float(cards[i]["y"])) for i in group if cards[i]["x"] is not None]
+        # The sky's color: the direction from the map's center, here of the thread's middle.
+        hue = round(math.degrees(math.atan2(sum(p[1] for p in at) / len(at) - my,
+                                            sum(p[0] for p in at) / len(at) - mx)) % 360) if at else 0
+        found.append({"cards": order, "knots": knots, "hue": hue, "began": said[order[0]][0][0],
+                      "ended": max(m[0] for i in group for m in said[i])})
+    found.sort(key=lambda t: (t["began"], t["cards"][0]))
+    step, n = 14, max(len(columns), 1)
+    months, last = [], None
+    for column, t in sorted(columns.values()):
+        if (t.year, t.month) != last:
+            last = (t.year, t.month)
+            if months and column - months[-1][0] < 3:   # two months starting side by side: the later one's name
+                months.pop()
+            months.append((column, f'<line x1="{column * step}" x2="{column * step}" y1="0" y2="22"/>'
+                                   f'<text x="{column * step + 3}" y="10">{t.strftime("%b")}</text>'))
+    rows = []
+    for t in found:
+        first, cols = cards[t["cards"][0]], sorted(t["knots"])
+        knots = "".join(
+            f'<a href="/trails?at={t["knots"][c][0]}"><circle cx="{c * step + step / 2}" cy="11" '
+            f'r="{min(2 + 1.6 * len(t["knots"][c]) ** .5, 9):.1f}"><title>{len(t["knots"][c])} said here: '
+            f'{_e("; ".join(cards[i]["title"] or "" for i in t["knots"][c][:4]))}</title></circle></a>' for c in cols)
+        listed = "".join(
+            f'<li><a href="/crossroads/{i}"><small>{_when(said[i][0][0])}</small><b>{_e(cards[i]["title"])}</b>'
+            f'<q>{_e(said[i][0][2])}</q></a></li>' for i in t["cards"])
+        rows.append(
+            f'<details style="--hue: {t["hue"]}"><summary><span><b>{_e(first["title"])}</b><small>{len(t["cards"])} '
+            f'cards · {len(cols)} conversations · over {_apart(t["ended"], t["began"])}</small></span>'
+            f'<svg viewBox="0 0 {n * step} 22" preserveAspectRatio="none"><line x1="{cols[0] * step + step / 2}" '
+            f'x2="{cols[-1] * step + step / 2}" y1="11" y2="11"/></svg>'
+            f'<svg viewBox="0 0 {n * step} 22">{knots}</svg></summary><ol>{listed}</ol></details>')
+    body = (f'<h1>Threads</h1><p class="lede">{len(found)} thread{"s" * (len(found) != 1)}: neighborhoods of connected '
+            f'thoughts that run through more than one conversation. Each row crosses all {len(columns)} conversations '
+            f'in order, with a knot where the thread was said; it&#x27;s named by the first thing said in it. '
+            f'In the order they began.</p>'
+            + (f'<div class="loom"><div class="months"><span></span><svg viewBox="0 0 {n * step} 22">'
+               f'{"".join(m for _, m in months)}</svg></div>{"".join(rows)}</div>' if found else "<p>Nothing here.</p>"))
+    return _THREADS.replace("{body}", body)
+
+
+def apart(conn, page: int = 0, demo: bool = False) -> str:
+    """The negative space (docs/design/m6-emanation.md, Apart): pairs of cards near enough by meaning to be asked
+    about, that the connection judge kept apart (a `none` in pub.card_judgments), side by side with its reason. A
+    shared subject is no connection (decision 0010), and the reason says where the judge drew the line. Newest
+    first, by when the later one was said. Nothing here is a connection, and nothing can be made one from this
+    page. In demo mode a pair with a sensitive card is left out."""
+    v = _views(demo)
+    cards = {r["idea_id"]: r for r in _rows(conn, f"SELECT * FROM {v}cards") if not (demo and r["redacted"])}
+    found = []
+    for a, b, why in conn.execute("SELECT a, b, why FROM pub.card_judgments WHERE verdict = 'none' ORDER BY a, b"):
+        if a in cards and b in cards:
+            earlier, later = sorted((cards[a], cards[b]), key=lambda r: (r["first_said"] or r["last_seen"], r["idea_id"]))
+            found.append((earlier, later, why))
+    found.sort(key=lambda e: (e[1]["first_said"] or e[1]["last_seen"], e[1]["idea_id"], e[0]["idea_id"]), reverse=True)
+    shown = found[page * PAGE:(page + 1) * PAGE]
+    said: dict = {}   # card -> its conversations, and its first quote
+    for i, c, q in conn.execute(f"""SELECT idea_id, conversation_id, quote FROM {v}card_moments WHERE idea_id = ANY(%s)
+                                    ORDER BY said_at, item_id, observation_id""",
+                                ([r["idea_id"] for e in shown for r in e[:2]],)):
+        said.setdefault(i, (set(), q))[0].add(c)
+
+    def side(r: dict) -> str:
+        quote = said.get(r["idea_id"], (None, None))[1]
+        return (f'<a class="side" href="/crossroads/{r["idea_id"]}"><small>{_when(r["first_said"])}</small>'
+                f'<b>{_e(r["title"])}</b>' + (f"<q>{_e(quote)}</q>" if quote else "") + "</a>")
+
+    def gap(earlier: dict, later: dict) -> str:
+        if said.get(earlier["idea_id"], (set(),))[0] & said.get(later["idea_id"], (set(),))[0]:
+            return "same conversation"
+        both = earlier["first_said"] and later["first_said"]
+        return f"{_apart(later['first_said'], earlier['first_said'])} apart" if both else "—"
+
+    rows = "".join(f'<li class="apart">{side(earlier)}<div class="gap"><b>{_e(gap(earlier, later))}</b>'
+                   f'<small>kept apart</small></div>{side(later)}' + (f"<p>{_e(why)}</p>" if why else "") + "</li>"
+                   for earlier, later, why in shown)
+    turn = " ".join(f'<a href="/apart?page={n}">{name}</a>' for n, name, there in (
+        (page - 1, "newer", page > 0), (page + 1, "older", len(found) > (page + 1) * PAGE)) if there)
+    body = (f'<h1>Apart</h1><p class="lede">{len(found)} pair{"s" * (len(found) != 1)} near by meaning that the '
+            f'connection judge looked at and kept apart, each with its reason. A shared subject is no connection. '
+            f'Newest first.</p>' + (f"<ol>{rows}</ol><nav>{turn}</nav>" if shown else "<p>Nothing here.</p>"))
+    return _ECHOES.replace("<title>Echoes</title>", "<title>Apart</title>").replace("{body}", body)
+
+
+def anywhere(conn, demo: bool = False) -> str | None:
+    """A card picked at random, for a crossroads to start from: nothing chooses it (decision 0007)."""
+    row = conn.execute(f"""SELECT idea_id::text FROM {_views(demo)}cards c
+                           WHERE true {"AND NOT c.redacted" if demo else ""} ORDER BY random() LIMIT 1""").fetchone()
+    return row[0] if row else None
+
+
 def act(conn, idea_id: str, action: str) -> None:
     kind, payload = ACTIONS[action]
     conn.execute("INSERT INTO pub.feedback_events (kind, idea_id, payload, source) VALUES (%s, %s, %s, 'emanation')",
@@ -239,6 +594,10 @@ _LOGIN = _page("Log in", '<form method="post" action="/login"><input type="passw
 
 
 _SKY = (files("im") / "sky.html").read_text()
+_TRAILS = (files("im") / "trails.html").read_text()
+_CROSSROADS = (files("im") / "crossroads.html").read_text()
+_ECHOES = (files("im") / "echoes.html").read_text()
+_THREADS = (files("im") / "threads.html").read_text()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -299,8 +658,22 @@ class Handler(BaseHTTPRequestHandler):
                 got = sky_lens(conn, seed, demo) if _UUID.match(seed) else None
                 return self._send(200, json.dumps(got, separators=(",", ":")), content_type="application/json") \
                     if got else self._send(404, "{}", content_type="application/json")
-            m = re.fullmatch(r"/idea/([0-9a-f-]{36})", url.path)
-            body = card(conn, m[1], demo) if m and _UUID.match(m[1]) else None
+            if url.path == "/trails":
+                at = q.get("at")
+                body = trails(conn, at, demo) if at is None or _UUID.match(at) else None
+                return self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))
+            if url.path == "/echoes":
+                return self._send(200, echoes(conn, q.get("kind", "all"), q.get("gap", "any"), demo))
+            if url.path == "/apart":
+                page = int(q["page"]) if q.get("page", "").isdigit() else 0
+                return self._send(200, apart(conn, page, demo))
+            if url.path == "/threads":
+                return self._send(200, threads(conn, demo))
+            if url.path == "/crossroads":   # anywhere: a card at random
+                to = anywhere(conn, demo)
+                return self._send(303, headers={"Location": f"/crossroads/{to}" if to else "/"})
+            m = re.fullmatch(r"/(idea|crossroads)/([0-9a-f-]{36})", url.path)
+            body = (card if m[1] == "idea" else crossroads)(conn, m[2], demo) if m and _UUID.match(m[2]) else None
         self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))
 
     def do_POST(self) -> None:

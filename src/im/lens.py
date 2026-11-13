@@ -46,3 +46,38 @@ def relevance(conn, seed: str) -> dict[str, float]:
         r = nxt
     top = max((v for n, v in r.items() if n != seed), default=0.0)
     return {n: (1.0 if n == seed else round(min(v / top, 1.0), 4)) for n, v in r.items() if v > 0 and top > 0}
+
+
+ROUNDS = 30   # label propagation settles in a handful on the live graph
+
+
+def neighbourhoods(pairs) -> list[list[str]]:
+    """Graph neighbourhoods (decision 0010): sets of clusters that connections hold together, from every connection
+    as an (a, b) pair. Label propagation: each cluster starts as its own neighbourhood and, taken in id order, joins
+    the one its connections pull it to hardest (the lowest id on a tie), until nothing moves. A connection pulls with
+    1 plus the number of clusters both its ends are connected to, so one inside a tight group outweighs a lone bridge
+    out of it, and a broad cluster connected a little to everything doesn't fuse the neighbourhoods it touches, which
+    connected components would. The same pairs always give the same neighbourhoods. A cluster with no connection
+    is in none. Each is sorted, and they come largest first."""
+    near: dict = defaultdict(set)
+    for a, b in pairs:
+        if a != b:
+            near[a].add(b)
+            near[b].add(a)
+    label = {n: n for n in near}
+    for _ in range(ROUNDS):
+        moved = False
+        for n in sorted(near):
+            pull: dict = defaultdict(int)
+            for m in near[n]:
+                pull[label[m]] += 1 + len(near[n] & near[m])
+            most = max(pull.values())
+            if pull.get(label[n], 0) < most:
+                label[n] = min(k for k, v in pull.items() if v == most)
+                moved = True
+        if not moved:
+            break
+    groups: dict = defaultdict(list)
+    for n, k in label.items():
+        groups[k].append(n)
+    return sorted((sorted(g) for g in groups.values()), key=lambda g: (-len(g), g))

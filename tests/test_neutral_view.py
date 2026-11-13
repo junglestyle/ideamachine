@@ -1,6 +1,7 @@
 """The neutral view (decision 0007): every cluster past the gates, newest first, no score, no verdict filter."""
 
 import http.client
+import uuid
 import threading
 from http.server import ThreadingHTTPServer
 
@@ -244,3 +245,165 @@ def test_a_seed_nothing_is_like_lights_only_itself():
 
     assert lens.relevance(Nearby([], [("b", -0.2), ("c", 0.0)]), "a") == {"a": 1.0}
     assert lens.relevance(Nearby([("b", "c", 1.0)], [("b", 0.0)]), "a") == {"a": 1.0}   # linked, but not to the seed
+
+
+def test_a_trail_is_a_conversations_moments_in_the_order_said(matched, admin):  # noqa: F811
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    lattice.place(matched, HashEmbedder().model_version)
+    build, coffee, new = (str(idea(matched, t)) for t in (
+        "Broken builds as signal", "The coffee order is the real meeting.", "Something new"))
+    data = sky_data(as_app(admin, web.trails))
+    ids = [s[0] for s in data["stars"]]
+    assert ids == [s[0] for s in sky_data(as_app(admin, web.sky))["stars"]]   # the sky's map, star for star
+    # Both captures of the one episode share its start in pub.card_evidence; a moment is timed by its own lines.
+    assert [(ids[star], conv, who) for star, conv, _, who, _ in data["moments"]] == [
+        (build, 0, 0), (coffee, 0, 2), (new, 1, 0)]
+    assert data["moments"][0][2] < data["moments"][1][2]
+    assert [m[4] for m in data["moments"]] == [-1, -1, 0.72]           # the arousal in my voice, where measured
+    judged(matched, uuid.UUID(new), uuid.UUID(build), "tension")       # a connection: what a stop can return to
+    assert [*sorted((ids.index(build), ids.index(new))), "tension"] in sky_data(as_app(admin, web.trails))["links"]
+    assert "c-conv" not in as_app(admin, web.trails)                   # a conversation is a number, never its id
+    assert sky_data(as_app(admin, web.trails, new))["at"] == new
+    assert as_app(admin, web.trails, "00000000-0000-0000-0000-000000000000") is None
+
+
+def test_a_crossroads_has_doors_across_its_conversation_and_to_what_is_like_it(matched, admin):  # noqa: F811
+    build, coffee = (str(idea(matched, t)) for t in ("Broken builds as signal", "The coffee order is the real meeting."))
+    page = as_app(admin, web.crossroads, build)
+    across, like = page.split('<section class="right">')[1].split('<section class="down">')
+    assert f'href="/crossroads/{coffee}"' in across and "moments later, same conversation" in across
+    assert "nothing" in page.split('<section class="left">')[1].split("<main>")[0]   # it opened its conversation
+    assert "Something new" in like and "near by meaning · 1 hour later" in like
+    assert coffee not in like                                   # a door across isn't repeated among what's like it
+    signal, grape = table(matched, "SELECT a::text, b::text FROM pub.card_links")[0]
+    assert f'href="/crossroads/{grape}"><small>connected' in as_app(admin, web.crossroads, signal)
+    judged(matched, idea(matched, "Something new"), uuid.UUID(build), "tension")   # a kind names the door
+    assert "<small>tension · 1 hour later</small><b>Something new" in as_app(admin, web.crossroads, build)
+    assert "Did you see the build broke again?" in page and "anon A" not in page
+    back = as_app(admin, web.crossroads, coffee).split('<section class="left">')[1].split("<main>")[0]
+    assert f'href="/crossroads/{build}"' in back and "moments earlier" in back
+    assert as_app(admin, web.crossroads, "00000000-0000-0000-0000-000000000000") is None
+    assert as_app(admin, web.anywhere) in {r[0] for r in table(matched, "SELECT idea_id::text FROM pub.cards")}
+
+
+def test_demo_mode_keeps_a_sensitive_card_off_every_trail_and_behind_no_door(matched, admin):  # noqa: F811
+    import json
+
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    build, coffee = (str(idea(matched, t)) for t in ("Broken builds as signal", "The coffee order is the real meeting."))
+    as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
+                                         VALUES ('idea_sensitive', %s, %s)""", (coffee, json.dumps({"sensitive": True}))))
+    lattice.place(matched, HashEmbedder().model_version)
+    data = sky_data(as_app(admin, web.trails, None, True))
+    star = [s[0] for s in data["stars"]].index(coffee)
+    assert data["stars"][star][4] == "" and star not in {m[0] for m in data["moments"]}   # its star, blank, on no trail
+    assert coffee not in as_app(admin, web.crossroads, build, True)
+    hidden = as_app(admin, web.crossroads, coffee, True)
+    assert "Hidden in demo mode" in hidden and "coffee" not in hidden
+    for _ in range(20):
+        assert as_app(admin, web.anywhere, True) != coffee
+
+
+def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F811
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    lattice.place(matched, HashEmbedder().model_version)
+    new = str(idea(matched, "Something new"))
+    for path in ("/trails", "/echoes", "/threads", "/apart", "/crossroads", f"/crossroads/{new}"):
+        assert request(served, "GET", path)[0] == 303 and request(served, "GET", path)[1]["Location"] == "/login"
+    _, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")
+    cookie = headers["Set-Cookie"].split(";")[0]
+    assert sky_data(request(served, "GET", f"/trails?at={new}", cookie=cookie)[2])["at"] == new
+    status, headers, _ = request(served, "GET", "/crossroads", cookie=cookie)
+    assert status == 303 and headers["Location"].startswith("/crossroads/")       # somewhere, at random
+    assert "Something new" in request(served, "GET", headers["Location"], cookie=cookie)[2]
+    assert request(served, "GET", f"/crossroads/{new}", cookie=cookie)[0] == 200
+    assert "<h1>Echoes</h1>" in request(served, "GET", "/echoes?kind=tension&gap=week", cookie=cookie)[2]
+    assert "<h1>Threads</h1>" in request(served, "GET", "/threads", cookie=cookie)[2]
+    assert "<h1>Apart</h1>" in request(served, "GET", "/apart?page=2", cookie=cookie)[2]
+    assert request(served, "GET", "/trails?at=nope", cookie=cookie)[0] == 404
+    assert request(served, "GET", "/crossroads/nope", cookie=cookie)[0] == 404
+
+
+def judged(conn, a, b, verdict, direction=None, why="Because.", analogy=""):
+    """As the connection judge records a pair (connect._record): its verdict, and a connection with its kind."""
+    a, b, flip = min(a, b), max(a, b), a > b
+    direction = {"a>b": "b>a", "b>a": "a>b"}.get(direction, direction) if flip else direction
+    conn.execute("""INSERT INTO im.connection_verdicts (a, b, verdict, direction, analogy, why, belongs, method,
+                                                        input_hash) VALUES (%s, %s, %s, %s, %s, %s, .9, 'connect-t', 'h')""",
+                 (a, b, verdict, direction, analogy, why))
+    if verdict != "none":
+        conn.execute("INSERT INTO im.connections (a, b, method) VALUES (%s, %s, 'connect-t')", (a, b))
+    if verdict in ("supports", "elaborates", "tension"):
+        conn.execute("INSERT INTO im.connection_kinds (a, b, kind, direction, method) VALUES (%s, %s, %s, %s, 'connect-t')",
+                     (a, b, verdict, direction))
+
+
+def test_an_echo_is_a_connection_across_conversations_the_earlier_beside_the_later(matched, admin):  # noqa: F811
+    build, coffee, new = (idea(matched, t) for t in (
+        "Broken builds as signal", "The coffee order is the real meeting.", "Something new"))
+    judged(matched, new, build, "elaborates", "a>b", "The sensors carry the build's idea further.", "a signal nobody reads")
+    judged(matched, build, coffee, "tension")            # said in one conversation: connected, but no echo
+    page = as_app(admin, web.echoes)
+    assert "1 connection between" in page and page.count("<li ") == 1
+    row = page.split("<ol>")[1]
+    assert row.index("Broken builds as signal") < row.index("1 hour") < row.index("Something new")
+    assert "the later elaborates the earlier" in row and 'class="elaborates"' in row
+    assert "The sensors carry the build&#x27;s idea further." in row and "Same structure: a signal nobody reads" in row
+    assert "Did you see the build broke again?" in row and f'href="/crossroads/{new}"' in row
+    assert page.count("<path") == 1                                               # its arc over the archive's time
+    for narrowed in (("tension",), ("all", "week")):                                # filters only narrow
+        assert "0 connections" in as_app(admin, web.echoes, *narrowed)
+    assert "1 connection between" in as_app(admin, web.echoes, "analogy", "nonsense")   # an unknown filter is none
+    # The judge's `none` is kept for views to read, and is no connection.
+    judged(matched, coffee, new, "none")
+    assert as_app(admin, lambda c: c.execute("SELECT count(*) FROM pub.card_judgments WHERE verdict = 'none'"
+                                             ).fetchone()) == (1,)
+    assert as_app(admin, web.echoes).count("<li ") == 1
+    # Apart shows the pair the judge kept apart, with its reason: the earlier beside the later, and no connection.
+    page = as_app(admin, web.apart)
+    assert "1 pair near by meaning" in page and page.count("<li ") == 1 and "Because." in page
+    assert page.index("coffee order") < page.index("1 hour apart") < page.index("Something new")
+    assert "Nothing here." in as_app(admin, web.apart, 1)                           # a page past the end
+    as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
+                                         VALUES ('idea_sensitive', %s, '{"sensitive": true}')""", (new,)))
+    assert "0 connections" in as_app(admin, web.echoes, "all", "any", True)         # demo mode leaves the pair out
+    assert "0 pairs" in as_app(admin, web.apart, 0, True)
+
+
+def test_a_broad_card_does_not_fuse_the_neighbourhoods_it_touches():
+    from im import lens
+
+    left, right = [("a", "b"), ("b", "c"), ("a", "c")], [("x", "y"), ("y", "z"), ("x", "z")]
+    assert lens.neighbourhoods(left + right + [("c", "x")]) == [["a", "b", "c"], ["x", "y", "z"]]   # one bridge
+    assert lens.neighbourhoods([("b", "a"), ("a", "a")]) == [["a", "b"]] and lens.neighbourhoods([]) == []
+    pairs = left + right + [("c", "x"), ("p", "q")]
+    assert lens.neighbourhoods(pairs) == lens.neighbourhoods(list(reversed(pairs)))                  # the same every time
+
+
+def test_a_thread_is_a_neighbourhood_said_in_more_than_one_conversation(matched, admin):  # noqa: F811
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    lattice.place(matched, HashEmbedder().model_version)
+    build, coffee, new = (idea(matched, t) for t in (
+        "Broken builds as signal", "The coffee order is the real meeting.", "Something new"))
+    judged(matched, build, coffee, "related")
+    assert "0 threads" in as_app(admin, web.threads)            # two cards, one conversation: no thread
+    judged(matched, coffee, new, "related")
+    judged(matched, build, new, "related")
+    page = as_app(admin, web.threads)
+    row = page.split("<details")[1]
+    assert "1 thread:" in page and "<b>Broken builds as signal</b>" in row.split("</summary>")[0]   # the first said
+    assert "3 cards · 2 conversations · over 1 hour" in row and row.count("<circle") == 2            # a knot in each
+    assert f'href="/trails?at={build}"' in row and f'href="/trails?at={new}"' in row
+    listed = row.split("<ol>")[1]
+    assert listed.index("Broken builds") < listed.index("coffee order") < listed.index("Something new")
+    as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
+                                         VALUES ('idea_sensitive', %s, '{"sensitive": true}')""", (new,)))
+    assert "0 threads" in as_app(admin, web.threads, True)       # demo mode: a sensitive card is in no thread
