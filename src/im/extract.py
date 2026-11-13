@@ -43,10 +43,15 @@ SYSTEM_V5_2 = resources.files("im.prompts").joinpath("extract_v5_2.txt").read_te
 # also spells out what "that kind of …", "this approach" or "the same way" points back to: all three earlier versions
 # left "that kind of overview" (Astra's review) unresolved.
 SYSTEM_V5_3 = resources.files("im.prompts").joinpath("extract_v5_3.txt").read_text().rstrip("\n")
+# v5.4 (trial, 2026-11-13, the moment-bound-remarks experiment; not live): v5.3 and one frozen paragraph after "The
+# test for a capture", against remarks tied to the occasion (banter, a passing reaction, a fact in passing, a story of
+# what just happened) without losing a characterization, preference, pattern, rule or lesson. Tried on held-out
+# episodes against v5.3's live captures (`im audit-misses sheet --live`), never read by `im run`.
+SYSTEM_V5_4 = resources.files("im.prompts").joinpath("extract_v5_4.txt").read_text().rstrip("\n")
 
 # Every prompt here captures only my speech (decision 0011), so an episode where I don't speak isn't sent (_pending).
-PROMPTS = {"v5": SYSTEM_V5, "v5.1": SYSTEM_V5_1, "v5.2": SYSTEM_V5_2, "v5.3": SYSTEM_V5_3}
-LIVE = ("v5.3",)   # what `im run` may read with; v5 to v5.2 are for `im trial` only
+PROMPTS = {"v5": SYSTEM_V5, "v5.1": SYSTEM_V5_1, "v5.2": SYSTEM_V5_2, "v5.3": SYSTEM_V5_3, "v5.4": SYSTEM_V5_4}
+LIVE = ("v5.3",)   # what `im run` may read with; v5 to v5.2 and v5.4 are for `im trial` only
 
 # v5's schema lists the evidence first, the gist after it; what JSON Schema can't say (lines exist and are in order,
 # strings aren't empty) is checked in code (capture_checks).

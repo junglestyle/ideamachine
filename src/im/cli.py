@@ -358,12 +358,21 @@ def cmd_trial(args) -> None:
     cap = x.monthly_cap_usd if args.monthly_cap_usd is None else args.monthly_cap_usd
     with db.connect(db.pipeline_dsn()) as conn:
         out = {}
+        exclude = set()
+        if args.exclude:
+            exclude, sampleable = trial.held_out(conn, args.exclude)
+            out["held_out"] = {"audit_episodes": len(exclude), "excluded_from_the_pool": sampleable}
         candidate = (trial.version(model, effort, system, args.replicate, schema), model)
         reference = (trial.version(ref_model, ref_effort, system, schema=schema), ref_model)
         if not args.report:
             client = llm.client_for(model, cfg.egress.zdr)
             out["trial"] = trial.run(conn, client, system, model, effort, cap, args.limit, args.sample,
-                                     args.replicate, schema, args.max_tokens or x.max_tokens)
+                                     args.replicate, schema, args.max_tokens or x.max_tokens, args.seed, exclude)
+        if candidate == reference:   # a new prompt on the configured model: nothing to compare with in the trials
+            out["report"] = ("the reference is this read itself; compare it with the live read: "
+                             f"im audit-misses sheet FOLDER {args.prompt} --model {model} --live")
+            _print(out)
+            return
         same = None
         if args.same_point:
             judge = jev.Jev()
@@ -508,14 +517,16 @@ def cmd_hard_set(args) -> None:
 
 def cmd_audit_misses(args) -> None:
     """A blind sheet of the reference's solid captures, missed or found by a cheaper model in a trial, or (--both-ways)
-    of the captures only one of them made and those both made; my marks."""
+    of the captures only one of them made and those both made, or (--live) a trial against the live read, marked
+    under the eligibility rubric; my marks."""
     from pathlib import Path
 
-    from im import extract, miss_audit, probe_audit, trial
+    from im import eligibility_audit, extract, miss_audit, probe_audit, trial
 
     folder = Path(args.folder)
     if args.action == "score":
-        _print(probe_audit.score(folder))
+        live = json.loads((folder / "key.json").read_text()).get("benchmark") == "live"
+        _print(miss_audit.score_live(folder) if live else probe_audit.score(folder))
         return
     if not args.prompt or not args.model:
         raise SystemExit("sheet needs the trial's prompt and candidate, e.g. v5.3 --model openai/gpt-6.1-terra")
@@ -523,10 +534,17 @@ def cmd_audit_misses(args) -> None:
     x = cfg.extract
     system, schema = extract.PROMPTS[args.prompt], extract.SCHEMA_V5
     effort = args.effort or x.effort
-    ref_model, _, ref_effort = (args.against or f"{x.model}:{x.effort}").partition(":")
-    ref_effort = ref_effort or x.effort
+    candidate = (trial.version(args.model, effort, system, schema=schema), args.model)
     with db.connect(db.pipeline_dsn()) as conn:
-        _print(miss_audit.write(conn, folder, (trial.version(args.model, effort, system, schema=schema), args.model),
+        if args.live:
+            if args.against or args.both_ways:
+                raise SystemExit("--live compares with the live read: no --against or --both-ways")
+            _print(miss_audit.write(conn, folder, candidate, eligibility_audit.live_read(x), None, args.seed,
+                                    args.size, live=True))
+            return
+        ref_model, _, ref_effort = (args.against or f"{x.model}:{x.effort}").partition(":")
+        ref_effort = ref_effort or x.effort
+        _print(miss_audit.write(conn, folder, candidate,
                                 (trial.version(ref_model, ref_effort, system, schema=schema), ref_model),
                                 None if args.both_ways else
                                 (trial.version(ref_model, ref_effort, system, 2, schema), ref_model),
@@ -903,7 +921,10 @@ def main(argv=None) -> None:
     tr.add_argument("--model", help="the candidate model: claude-sonnet-5-5, or through OpenRouter, e.g. "
                     "openai/gpt-6.1-sol (default: the configured one)")
     tr.add_argument("--against", help="the reference, model[:effort] (default: the configured model and effort)")
-    tr.add_argument("--sample", type=int, default=150, help="how many episodes, the same for every model")
+    tr.add_argument("--sample", type=int, default=150, help="how many episodes I speak in, the same for every model")
+    tr.add_argument("--seed", type=int, help="another order to draw the sample in (default: the trials' usual one)")
+    tr.add_argument("--exclude", nargs="+", metavar="FOLDER", help="leave out every episode a capture on these "
+                    "audit sheets came from (their key.json): a held-out sample")
     tr.add_argument("--replicate", type=int, default=1,
                     help="a further independent read by the same model (2, 3...): the reference against its own "
                          "replicate is the ceiling for every candidate's recall")
@@ -1002,6 +1023,10 @@ def main(argv=None) -> None:
     am.add_argument("--both-ways", action="store_true",
                     help="sheet: captures only the candidate made, only the reference made, and both made, side by "
                          "side; needs no second read")
+    am.add_argument("--live", action="store_true",
+                    help="sheet: the trial against the live read (what `im run` keeps), not a trial read: every "
+                         "capture only the live read made, every one only the trial made, and --size (default 20) "
+                         "both made, marked under the eligibility rubric")
     am.add_argument("--seed", type=int, default=13, help="sheet: the sample and shuffle's seed")
     am.add_argument("--size", type=int, help="sheet: how many misses (default: all), beside as many found; "
                     "--both-ways: how many from each set (default 20)")
