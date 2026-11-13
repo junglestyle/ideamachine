@@ -1,5 +1,6 @@
 # Idea Machine on TrueNAS (install/nas.sh): Postgres, the pipeline run, and the web view.
-# Hearsay's stream path comes from install/.env, which install/nas.sh writes (it's on whichever pool Hearsay is on).
+# Hearsay's stream path and Postgres's loopback port come from install/.env, which install/nas.sh writes (the stream
+# is on whichever pool Hearsay is on).
 name: ideamachine
 
 # Container output goes to the journal (on the boot pool), not to files on the data disks:
@@ -10,7 +11,7 @@ x-logging: &logging
     tag: "{{.Name}}"
 
 services:
-  # Internal only: no host port. Admin access: docker compose -f ... exec db psql -U postgres -d im
+  # Admin access: docker compose -f ... exec db psql -U postgres -d im
   db:
     image: pgvector/pgvector:pg16
     container_name: ideamachine-db
@@ -24,6 +25,10 @@ services:
     volumes:
       - /mnt/fast/ideamachine/pg:/var/lib/postgresql/data
       - ../dev/init:/docker-entrypoint-initdb.d:ro
+    # The NAS's loopback only (DB_LOOPBACK_PORT in install/lib.sh, by way of install/.env): other programs on the box
+    # read pub as role im_reader (docs/deploy.md). Never the LAN, never 0.0.0.0, never tailscale serve.
+    ports:
+      - "127.0.0.1:${DB_LOOPBACK_PORT:?no install/.env; run install/nas.sh}:5432"
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres", "-d", "im"]
       interval: 5s

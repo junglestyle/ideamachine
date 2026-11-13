@@ -331,40 +331,40 @@ def test_my_latest_star_or_unstar_is_what_pub_ideas_shows(seeded, admin):
         assert table(seeded, "SELECT starred FROM pub.ideas WHERE idea_id = %s", idea) == [(starred,)]
 
 
-def lattice_app_can(admin) -> dict:
-    """Everything lattice_app may do, from the catalog: on the relations, columns, sequences, functions and schemas
-    the database has beyond Postgres's own, and the roles it could become."""
-    q = lambda sql: set(admin.execute(sql).fetchall())  # noqa: E731
+def role_can(admin, role: str) -> dict:
+    """Everything ROLE may do, from the catalog: on the relations, columns, sequences, functions and schemas the
+    database has beyond Postgres's own, and the roles it could become."""
+    q = lambda sql: set(admin.execute(sql, {"role": role}).fetchall())  # noqa: E731
     return {
         "relations": q("""SELECT n.nspname, c.relname, p FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace,
                             unnest('{SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER}'::text[]) p
                           WHERE n.nspname IN ('im', 'pub', 'public') AND c.relkind IN ('r', 'v', 'm', 'p', 'f')
-                            AND has_table_privilege('lattice_app', c.oid, p)"""),
+                            AND has_table_privilege(%(role)s, c.oid, p)"""),
         "columns": q("""SELECT n.nspname, c.relname, a.attname, p FROM pg_attribute a
                         JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace,
                           unnest('{SELECT,INSERT,UPDATE,REFERENCES}'::text[]) p
                         WHERE n.nspname IN ('im', 'pub', 'public') AND a.attnum > 0 AND NOT a.attisdropped
-                          AND has_column_privilege('lattice_app', c.oid, a.attnum, p)
-                          AND NOT has_table_privilege('lattice_app', c.oid, p)"""),
+                          AND has_column_privilege(%(role)s, c.oid, a.attnum, p)
+                          AND NOT has_table_privilege(%(role)s, c.oid, p)"""),
         "sequences": q("""SELECT n.nspname, c.relname, p FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace,
                             unnest('{USAGE,SELECT,UPDATE}'::text[]) p
                           WHERE n.nspname IN ('im', 'pub', 'public') AND c.relkind = 'S'
-                            AND has_sequence_privilege('lattice_app', c.oid, p)"""),
+                            AND has_sequence_privilege(%(role)s, c.oid, p)"""),
         # What it can call: EXECUTE, in a schema it can use. Public holds pgvector's functions, not ours.
         "functions": q("""SELECT n.nspname, p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-                          WHERE n.nspname IN ('im', 'pub') AND has_function_privilege('lattice_app', p.oid, 'EXECUTE')
-                            AND has_schema_privilege('lattice_app', n.oid, 'USAGE')"""),
+                          WHERE n.nspname IN ('im', 'pub') AND has_function_privilege(%(role)s, p.oid, 'EXECUTE')
+                            AND has_schema_privilege(%(role)s, n.oid, 'USAGE')"""),
         "schemas": q("""SELECT n.nspname, p FROM pg_namespace n, unnest('{USAGE,CREATE}'::text[]) p
-                        WHERE n.nspname IN ('im', 'pub') AND has_schema_privilege('lattice_app', n.oid, p)"""),
+                        WHERE n.nspname IN ('im', 'pub') AND has_schema_privilege(%(role)s, n.oid, p)"""),
         "roles": q("""SELECT r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
-                      WHERE m.member = 'lattice_app'::regrole"""),
+                      WHERE m.member = %(role)s::regrole"""),
     }
 
 
 def test_the_web_role_can_read_pub_append_feedback_and_call_its_functions_and_nothing_else(seeded, admin):
     pub = {r for (r,) in admin.execute("""SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                                           WHERE n.nspname = 'pub' AND c.relkind IN ('r', 'v', 'm')""")}
-    assert lattice_app_can(admin) == {
+    assert role_can(admin, "lattice_app") == {
         "relations": {("pub", r, "SELECT") for r in pub} | {("pub", "feedback_events", "INSERT")},
         "columns": set(), "sequences": set(),
         "functions": {("pub", "card_neighbours"), ("pub", "embedding_model")},
@@ -374,6 +374,29 @@ def test_the_web_role_can_read_pub_append_feedback_and_call_its_functions_and_no
                             WHERE n.nspname = 'pub' AND p.prosecdef
                               AND has_function_privilege('public', p.oid, 'EXECUTE')""").fetchall() == []
 
+
+def test_the_reader_role_can_read_all_of_pub_and_nothing_else(seeded, admin):
+    # Granted by schema (dev/init/bootstrap-db.sql.in) before the migrations made pub's views: by default, then.
+    pub = {r for (r,) in admin.execute("""SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                                          WHERE n.nspname = 'pub' AND c.relkind IN ('r', 'v', 'm')""")}
+    functions = {("pub", f) for (f,) in admin.execute("""SELECT p.proname FROM pg_proc p
+                                                          JOIN pg_namespace n ON n.oid = p.pronamespace
+                                                          WHERE n.nspname = 'pub'""")}
+    assert role_can(admin, "im_reader") == {
+        "relations": {("pub", r, "SELECT") for r in pub}, "columns": set(), "sequences": set(),
+        "functions": functions, "schemas": {("pub", "USAGE")}, "roles": set()}
+    # It may call every function in pub, so none may write: each is STABLE or IMMUTABLE.
+    assert admin.execute("""SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                            WHERE n.nspname = 'pub' AND p.provolatile = 'v'""").fetchall() == []
+    with admin.transaction():
+        admin.execute("SET LOCAL ROLE im_reader")
+        assert admin.execute("SELECT count(*) FROM pub.ideas").fetchone()[0] == 3
+    for sql in ["SELECT 1 FROM im.egress_log", "SELECT 1 FROM im.source_segments",
+                "INSERT INTO pub.feedback_events (kind) VALUES ('star')", "DELETE FROM pub.feedback_events"]:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with admin.transaction():
+                admin.execute("SET LOCAL ROLE im_reader")
+                admin.execute(sql)
 
 
 def test_forgetting_removes_ideas_born_from_it_and_their_stars(seeded, cfg, stream):
