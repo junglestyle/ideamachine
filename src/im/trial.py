@@ -29,6 +29,7 @@ above as found, best first, each capture once.
 import hashlib
 import json
 import re
+from pathlib import Path
 
 from im import egress, extract, jev, llm
 from im.feedback import CARRY_MIN_SCORE, quote_score
@@ -40,23 +41,46 @@ SAME = ("same", "same_v2")
 SAME_CUT = jev.YES   # not yet set from marks: Jev's own threshold for a confident yes
 
 
-def sample(conn, n: int = SAMPLE) -> list:
-    """The first n current episodes in a fixed pseudo-random order: the same ones for every model."""
+def sample(conn, n: int = SAMPLE, seed: int | None = None, exclude=()) -> list:
+    """The first n current episodes I speak in, in a fixed pseudo-random order: the same ones for every model.
+    Extraction never reads an `others_only` episode, so there's no live read to compare with. A `seed` gives another
+    order (still a prefix order); `exclude` leaves out episodes (held_out: the ones an audit sheet showed)."""
     return [eid for (eid,) in conn.execute(
-        "SELECT episode_id FROM im.episodes WHERE current ORDER BY md5(episode_id::text) LIMIT %s", (n,))]
+        """SELECT episode_id FROM im.episodes WHERE current AND kind <> 'others_only' AND episode_id <> ALL(%s::uuid[])
+           ORDER BY md5(coalesce(%s::text || ':', '') || episode_id::text) LIMIT %s""",
+        ([str(e) for e in exclude], None if seed is None else str(seed), n))]
+
+
+def held_out(conn, folders) -> tuple[set[str], int]:
+    """The episodes any capture on these audit sheets came from (each folder's key.json: an eligibility sheet's
+    `items`, a misses or both-ways sheet's `pairs`), and how many of them a trial could sample (current, and I
+    speak in)."""
+    out = set()
+    for folder in folders:
+        key = json.loads((Path(folder) / "key.json").read_text())
+        entries = list((key.get("items") or key.get("pairs") or {}).values())
+        if not entries:
+            raise SystemExit(f"{folder}/key.json lists no items or pairs to hold out")
+        out |= {str(e.get("episode_id") or e["episode"]) for e in entries}
+    eligible = conn.execute("""SELECT count(*) FROM im.episodes WHERE current AND kind <> 'others_only'
+                               AND episode_id = ANY(%s::uuid[])""", (sorted(out),)).fetchone()[0]
+    return out, eligible
 
 
 def run(conn, client, system: str, model: str = "claude-opus-5-5", effort: str = "medium",
         monthly_cap_usd: float = 20.0, limit: int | None = None, n: int = SAMPLE,
-        replicate: int = 1, schema: dict = extract.SCHEMA_V5, max_tokens: int | None = None) -> dict:
+        replicate: int = 1, schema: dict = extract.SCHEMA_V5, max_tokens: int | None = None,
+        seed: int | None = None, exclude=()) -> dict:
     """Send the sampled episodes this model hasn't read yet under this prompt and policy (or whose payload changed).
-    `max_tokens`, each request's output budget, isn't part of the trial's version."""
+    `max_tokens`, each request's output budget, isn't part of the trial's version; nor are `seed` and `exclude` (the
+    sample's order and held-out episodes: see sample)."""
     pv = version(model, effort, system, replicate, schema)
     policy = egress.POLICY_VERSION
     done = {r[0]: r[1] for r in conn.execute(
         """SELECT episode_id, payload_sha256 FROM im.prompt_trials
            WHERE prompt_version = %s AND model = %s AND privacy_policy_version = %s""", (pv, model, policy))}
-    todo = [p for p in (egress.build(conn, eid) for eid in sample(conn, n)) if done.get(p.episode_id) != p.sha256]
+    todo = [p for p in (egress.build(conn, eid) for eid in sample(conn, n, seed, exclude))
+            if done.get(p.episode_id) != p.sha256]
     stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "failed": 0, "cost_usd": 0.0,
              "stopped": None}
     for p in todo[:limit] if limit else todo:

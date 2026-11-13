@@ -38,6 +38,40 @@ def test_the_live_prompt_keeps_its_version():
         extract.prompt_version("claude-opus-5-5", "medium", extract.PROMPTS["v5.3"], extract.SCHEMA_V5)
 
 
+V5_4_PARAGRAPH = (
+    "A remark tied to the immediate occasion doesn't count unless I express a point beyond that occurrence. Don't "
+    "turn banter, a passing reaction, a fact mentioned in passing, or a story of what just happened into a lasting "
+    "claim. Being about a particular person, place or tool doesn't disqualify a thought: preserve an expressed "
+    "characterization, preference, pattern, rule or lesson. Judge what I actually express, not what could be inferred "
+    "from it.")
+
+
+def test_v5_4_is_v5_3_and_one_frozen_paragraph_after_the_test_for_a_capture():
+    before = extract.SYSTEM_V5_3.split("\n\n")
+    after = extract.SYSTEM_V5_4.split("\n\n")
+    at = next(n for n, p in enumerate(before) if p.startswith("The test for a capture: does its meaning reach"))
+    assert after == before[:at + 1] + [V5_4_PARAGRAPH] + before[at + 1:]
+    assert "v5.4" in extract.PROMPTS and "v5.4" not in extract.LIVE
+
+
+def test_a_sample_leaves_out_others_only_episodes_and_held_out_ones_and_can_be_reordered(pipe, cfg, stream, tmp_path):
+    run(pipe, cfg, stream)
+    pool = [e for (e,) in table(pipe, "SELECT episode_id FROM im.episodes WHERE current AND kind <> 'others_only'")]
+    assert sorted(trial.sample(pipe, 1000), key=str) == sorted(pool, key=str)
+    assert sorted(trial.sample(pipe, 1000, seed=7), key=str) == sorted(pool, key=str)
+    assert trial.sample(pipe, 2, seed=7) == trial.sample(pipe, 5, seed=7)[:2]
+    first = trial.sample(pipe, 1)[0]
+    (tmp_path / "eligibility").mkdir()
+    (tmp_path / "eligibility" / "key.json").write_text(json.dumps({"items": {"1": {"episode_id": str(first)}}}))
+    held, n = trial.held_out(pipe, [tmp_path / "eligibility"])
+    assert held == {str(first)} and n == 1
+    assert first not in trial.sample(pipe, 1000, exclude=held) and len(trial.sample(pipe, 1000, exclude=held)) == \
+        len(pool) - 1
+    (tmp_path / "both-ways").mkdir()   # a misses or both-ways sheet names its episodes under `pairs`
+    (tmp_path / "both-ways" / "key.json").write_text(json.dumps({"pairs": {"1": {"episode": str(first)}}}))
+    assert trial.held_out(pipe, [tmp_path / "both-ways"])[0] == held
+
+
 def test_a_leftover_interests_key_is_ignored_with_a_warning(tmp_path, monkeypatch, capsys):
     path = tmp_path / "im.toml"
     path.write_text('[extract]\nprompt = "v5.3"\ninterests = "model railways"\n')
@@ -54,7 +88,7 @@ def both(*needles):
 def test_a_trial_scores_a_candidate_against_a_reference_on_the_same_sample(pipe, cfg, stream):
     run(pipe, cfg, stream)
     items_before = table(pipe, "SELECT count(*) FROM im.items")
-    episodes = table(pipe, "SELECT count(*) FROM im.episodes WHERE current")[0][0]
+    episodes = table(pipe, "SELECT count(*) FROM im.episodes WHERE current AND kind <> 'others_only'")[0][0]
     assert trial.sample(pipe, 2) == trial.sample(pipe, 5)[:2]   # a smaller sample is a prefix of a larger one
 
     v5 = extract.SYSTEM_V5_3
