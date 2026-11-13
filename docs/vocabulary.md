@@ -478,6 +478,11 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Judgment (of a pair).** A verdict of the connection judge on two cards as a view reads it: the verdict, its
   direction, its reason (`why`) and the structure it named if the two are analogous (`pub.card_judgments`, 064, over
   `im.connection_verdicts`). A `none` is a judgment and no connection.
+- **Thread, Threads.** A thread is a graph neighborhood (`lens.neighbourhoods`: label propagation over the
+  connections) of at least 3 cards said in at least 2 conversations. Threads is the view that draws each as a row
+  across the conversations in order, a knot where it was said, named by the first card said in it ([M6 notes]
+  §Threads, `web.threads`, `/threads`). _Not_ a lens or a theme: nothing names its subject. _Not_ a conversation's
+  trail.
 - **Star (on the sky).** The glyph that draws one cluster. _Not_ the `star` event.
 - **Stored map position.** A cluster's 2D coordinates, projected from embeddings by the pipeline and kept stable from
   run to run (015, 038, `lattice.place`). _Not_ a view layout: where a view draws a cluster. The sky draws at stored

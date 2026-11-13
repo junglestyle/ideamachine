@@ -8,6 +8,7 @@ as feedback events, the same kinds Lattice's keep_idea wrote.
 Two more pages draw the same cards (docs/design/m6-emanation.md): Trails (`/trails`), the sky's map with each
 conversation as the path it took from thought to thought, and Crossroads (`/crossroads/<id>`), one card with what was
 said around it and what's like it; and Echoes (`/echoes`), every connection between thoughts said in different
+conversations; and Threads (`/threads`), the neighborhoods of connected thoughts that run through several
 conversations. They only read.
 
 Demo mode (a toggle, or `im web --demo` for nothing else) reads the `demo` views instead of `pub`'s, so nothing
@@ -23,8 +24,10 @@ import hashlib
 import hmac
 import html
 import json
+import math
 import os
 import re
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
@@ -113,7 +116,7 @@ def feed(conn, show: str = "candidates", page: int = 0, demo: bool = False) -> s
                  (list(maturities), PAGE + 1, page * PAGE))
     tabs = " ".join(f'<a href="/?show={k}"{" aria-current=page" if k == show else ""}>{name}</a>'
                     for k, (_, name) in SHOW.items()) + ' <a href="/sky">sky</a> <a href="/trails">trails</a>' \
-        + ' <a href="/echoes">echoes</a> <a href="/crossroads">crossroads</a>' \
+        + ' <a href="/echoes">echoes</a> <a href="/threads">threads</a> <a href="/crossroads">crossroads</a>' \
         + f' <a href="/demo?on={0 if demo else 1}">{"leave demo mode" if demo else "demo mode"}</a>'
     cards = "".join(f'<li><a href="/idea/{r["idea_id"]}">{_e(r["title"])}</a><p>{_e(r["statement"])}</p>'
                     f'<small>{_e(_facts(r))}</small></li>' for r in rows[:PAGE])
@@ -431,6 +434,82 @@ def echoes(conn, kind: str = "all", gap: str = "any", demo: bool = False) -> str
     return _ECHOES.replace("{body}", body)
 
 
+THREAD_CARDS, THREAD_CONVERSATIONS = 3, 2   # the least a thread holds, and the least it runs through
+
+
+def threads(conn, demo: bool = False) -> str:
+    """What runs through the conversations (docs/design/m6-emanation.md, Threads): each graph neighbourhood
+    (lens.neighbourhoods, over the connections) of at least THREAD_CARDS cards said in at least THREAD_CONVERSATIONS
+    conversations, as a row across every conversation in the order they began, with a knot where it was said. A
+    thread is named by the first card said in it, and they come in the order they began: nothing ranks them
+    (decision 0007). In demo mode a sensitive card is in no thread."""
+    from im import lens
+
+    v = _views(demo)
+    cards = {str(r["idea_id"]): r for r in _rows(
+        conn, f"SELECT c.*, p.x, p.y FROM {v}cards c LEFT JOIN pub.card_positions p USING (idea_id)")
+        if not (demo and r["redacted"])}
+    said: dict = defaultdict(list)   # card -> its moments, in the order said
+    columns: dict = {}               # conversation -> its column, in the order they began; and when that was
+    for i, c, t, quote in conn.execute(f"""SELECT idea_id::text, conversation_id, said_at, quote FROM {v}card_moments
+                                           WHERE conversation_id IS NOT NULL AND said_at IS NOT NULL
+                                           ORDER BY said_at, conversation_id, item_id, observation_id"""):
+        if i in cards:
+            said[i].append((t, columns.setdefault(c, (len(columns), t))[0], quote))
+    placed = [(float(r["x"]), -float(r["y"])) for r in cards.values() if r["x"] is not None]
+    mx, my = (sum(p[0] for p in placed) / len(placed), sum(p[1] for p in placed) / len(placed)) if placed else (0, 0)
+    pairs = [(a, b) for a, b in conn.execute("SELECT a::text, b::text FROM pub.card_links") if a in said and b in said]
+    found = []
+    for group in lens.neighbourhoods(pairs):
+        order = sorted(group, key=lambda i: (said[i][0][0], i))
+        knots: dict = defaultdict(list)   # column -> the thread's cards said in that conversation, first said first
+        for i in order:
+            for _, column, _ in said[i]:
+                if i not in knots[column]:
+                    knots[column].append(i)
+        if len(group) < THREAD_CARDS or len(knots) < THREAD_CONVERSATIONS:
+            continue
+        at = [(float(cards[i]["x"]), -float(cards[i]["y"])) for i in group if cards[i]["x"] is not None]
+        # The sky's color: the direction from the map's center, here of the thread's middle.
+        hue = round(math.degrees(math.atan2(sum(p[1] for p in at) / len(at) - my,
+                                            sum(p[0] for p in at) / len(at) - mx)) % 360) if at else 0
+        found.append({"cards": order, "knots": knots, "hue": hue, "began": said[order[0]][0][0],
+                      "ended": max(m[0] for i in group for m in said[i])})
+    found.sort(key=lambda t: (t["began"], t["cards"][0]))
+    step, n = 14, max(len(columns), 1)
+    months, last = [], None
+    for column, t in sorted(columns.values()):
+        if (t.year, t.month) != last:
+            last = (t.year, t.month)
+            if months and column - months[-1][0] < 3:   # two months starting side by side: the later one's name
+                months.pop()
+            months.append((column, f'<line x1="{column * step}" x2="{column * step}" y1="0" y2="22"/>'
+                                   f'<text x="{column * step + 3}" y="10">{t.strftime("%b")}</text>'))
+    rows = []
+    for t in found:
+        first, cols = cards[t["cards"][0]], sorted(t["knots"])
+        knots = "".join(
+            f'<a href="/trails?at={t["knots"][c][0]}"><circle cx="{c * step + step / 2}" cy="11" '
+            f'r="{min(2 + 1.6 * len(t["knots"][c]) ** .5, 9):.1f}"><title>{len(t["knots"][c])} said here: '
+            f'{_e("; ".join(cards[i]["title"] or "" for i in t["knots"][c][:4]))}</title></circle></a>' for c in cols)
+        listed = "".join(
+            f'<li><a href="/crossroads/{i}"><small>{_when(said[i][0][0])}</small><b>{_e(cards[i]["title"])}</b>'
+            f'<q>{_e(said[i][0][2])}</q></a></li>' for i in t["cards"])
+        rows.append(
+            f'<details style="--hue: {t["hue"]}"><summary><span><b>{_e(first["title"])}</b><small>{len(t["cards"])} '
+            f'cards · {len(cols)} conversations · over {_apart(t["ended"], t["began"])}</small></span>'
+            f'<svg viewBox="0 0 {n * step} 22" preserveAspectRatio="none"><line x1="{cols[0] * step + step / 2}" '
+            f'x2="{cols[-1] * step + step / 2}" y1="11" y2="11"/></svg>'
+            f'<svg viewBox="0 0 {n * step} 22">{knots}</svg></summary><ol>{listed}</ol></details>')
+    body = (f'<h1>Threads</h1><p class="lede">{len(found)} thread{"s" * (len(found) != 1)}: neighborhoods of connected '
+            f'thoughts that run through more than one conversation. Each row crosses all {len(columns)} conversations '
+            f'in order, with a knot where the thread was said; it&#x27;s named by the first thing said in it. '
+            f'In the order they began.</p>'
+            + (f'<div class="loom"><div class="months"><span></span><svg viewBox="0 0 {n * step} 22">'
+               f'{"".join(m for _, m in months)}</svg></div>{"".join(rows)}</div>' if found else "<p>Nothing here.</p>"))
+    return _THREADS.replace("{body}", body)
+
+
 def anywhere(conn, demo: bool = False) -> str | None:
     """A card picked at random, for a crossroads to start from: nothing chooses it (decision 0007)."""
     row = conn.execute(f"""SELECT idea_id::text FROM {_views(demo)}cards c
@@ -475,6 +554,7 @@ _SKY = (files("im") / "sky.html").read_text()
 _TRAILS = (files("im") / "trails.html").read_text()
 _CROSSROADS = (files("im") / "crossroads.html").read_text()
 _ECHOES = (files("im") / "echoes.html").read_text()
+_THREADS = (files("im") / "threads.html").read_text()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -541,6 +621,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))
             if url.path == "/echoes":
                 return self._send(200, echoes(conn, q.get("kind", "all"), q.get("gap", "any"), demo))
+            if url.path == "/threads":
+                return self._send(200, threads(conn, demo))
             if url.path == "/crossroads":   # anywhere: a card at random
                 to = anywhere(conn, demo)
                 return self._send(303, headers={"Location": f"/crossroads/{to}" if to else "/"})

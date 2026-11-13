@@ -314,7 +314,7 @@ def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F8
 
     lattice.place(matched, HashEmbedder().model_version)
     new = str(idea(matched, "Something new"))
-    for path in ("/trails", "/echoes", "/crossroads", f"/crossroads/{new}"):
+    for path in ("/trails", "/echoes", "/threads", "/crossroads", f"/crossroads/{new}"):
         assert request(served, "GET", path)[0] == 303 and request(served, "GET", path)[1]["Location"] == "/login"
     _, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")
     cookie = headers["Set-Cookie"].split(";")[0]
@@ -324,6 +324,7 @@ def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F8
     assert "Something new" in request(served, "GET", headers["Location"], cookie=cookie)[2]
     assert request(served, "GET", f"/crossroads/{new}", cookie=cookie)[0] == 200
     assert "<h1>Echoes</h1>" in request(served, "GET", "/echoes?kind=tension&gap=week", cookie=cookie)[2]
+    assert "<h1>Threads</h1>" in request(served, "GET", "/threads", cookie=cookie)[2]
     assert request(served, "GET", "/trails?at=nope", cookie=cookie)[0] == 404
     assert request(served, "GET", "/crossroads/nope", cookie=cookie)[0] == 404
 
@@ -337,6 +338,7 @@ def judged(conn, a, b, verdict, direction=None, why="Because.", analogy=""):
                  (a, b, verdict, direction, analogy, why))
     if verdict != "none":
         conn.execute("INSERT INTO im.connections (a, b, method) VALUES (%s, %s, 'connect-t')", (a, b))
+    if verdict in ("supports", "elaborates", "tension"):
         conn.execute("INSERT INTO im.connection_kinds (a, b, kind, direction, method) VALUES (%s, %s, %s, %s, 'connect-t')",
                      (a, b, verdict, direction))
 
@@ -365,3 +367,36 @@ def test_an_echo_is_a_connection_across_conversations_the_earlier_beside_the_lat
     as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
                                          VALUES ('idea_sensitive', %s, '{"sensitive": true}')""", (new,)))
     assert "0 connections" in as_app(admin, web.echoes, "all", "any", True)         # demo mode leaves the pair out
+
+
+def test_a_broad_card_does_not_fuse_the_neighbourhoods_it_touches():
+    from im import lens
+
+    left, right = [("a", "b"), ("b", "c"), ("a", "c")], [("x", "y"), ("y", "z"), ("x", "z")]
+    assert lens.neighbourhoods(left + right + [("c", "x")]) == [["a", "b", "c"], ["x", "y", "z"]]   # one bridge
+    assert lens.neighbourhoods([("b", "a"), ("a", "a")]) == [["a", "b"]] and lens.neighbourhoods([]) == []
+    pairs = left + right + [("c", "x"), ("p", "q")]
+    assert lens.neighbourhoods(pairs) == lens.neighbourhoods(list(reversed(pairs)))                  # the same every time
+
+
+def test_a_thread_is_a_neighbourhood_said_in_more_than_one_conversation(matched, admin):  # noqa: F811
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    lattice.place(matched, HashEmbedder().model_version)
+    build, coffee, new = (idea(matched, t) for t in (
+        "Broken builds as signal", "The coffee order is the real meeting.", "Something new"))
+    judged(matched, build, coffee, "related")
+    assert "0 threads" in as_app(admin, web.threads)            # two cards, one conversation: no thread
+    judged(matched, coffee, new, "related")
+    judged(matched, build, new, "related")
+    page = as_app(admin, web.threads)
+    row = page.split("<details")[1]
+    assert "1 thread:" in page and "<b>Broken builds as signal</b>" in row.split("</summary>")[0]   # the first said
+    assert "3 cards · 2 conversations · over 1 hour" in row and row.count("<circle") == 2            # a knot in each
+    assert f'href="/trails?at={build}"' in row and f'href="/trails?at={new}"' in row
+    listed = row.split("<ol>")[1]
+    assert listed.index("Broken builds") < listed.index("coffee order") < listed.index("Something new")
+    as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
+                                         VALUES ('idea_sensitive', %s, '{"sensitive": true}')""", (new,)))
+    assert "0 threads" in as_app(admin, web.threads, True)       # demo mode: a sensitive card is in no thread

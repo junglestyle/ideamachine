@@ -134,13 +134,31 @@ join two cards said in different conversations.
   `pub.card_neighbours` takes 0.3 s a card on the live archive.
 - Demo mode leaves out a pair with a sensitive card.
 
+## Threads (`im web`, `/threads`)
+
+What runs through the conversations: the loom. Echoes shows returns a pair at a time; a thread is a whole
+neighborhood that keeps coming back.
+
+- A **thread** is a graph neighborhood of at least 3 cards said in at least 2 conversations. Neighborhoods come from
+  the connections alone, by label propagation (`lens.neighbourhoods`): each card joins the neighborhood its
+  connections pull it to hardest, a connection pulling with 1 plus the number of cards both its ends are connected
+  to. So a connection inside a tight group outweighs a lone bridge out of it, and a broad card connected a little to
+  everything doesn't fuse the neighborhoods it touches, which is the caution in
+  [0010](../decisions/0010-connections-kinds-lenses.md). The same connections always give the same neighborhoods. On
+  the live archive (2026-11-13): 182 neighborhoods, the largest of 18 cards; 78 are threads, holding 488 of the 1,065
+  cards, the longest through 9 of 69 conversations. Connected components would make one of 473.
+- Each thread is a row across every conversation, in the order they began, with a knot where it was said, bigger for
+  more cards. A knot opens that conversation's trail. Opening a row lists the thread's cards in the order said.
+- A thread is named by the first card said in it and colored as the sky colors the middle of its cards. Rows come
+  in the order the threads began. Nothing ranks them.
+- A thread is not a lens or a theme: nothing names its subject, and it writes nothing. It's the neighborhood that a
+  synthesis would be proposed over, so this view is also where to look at what synthesis would be given.
+- Demo mode: a sensitive card is in no thread.
+
 ## Views the data could carry now (ideas, 2026-11-12)
 
 None of these needs lenses, so none waits for M5. Each reads only what `pub` already has.
 
-- **The loom.** Conversations as rows, the map's neighborhoods as columns, a mark where a conversation touched one.
-  Trails' strip with the second axis opened out. It needs neighborhoods with names, so it wants subject lenses, or a
-  clustering of the map that a model titles once.
 - **Two voices.** Trails with the not-me moments drawn apart, to show where other people take me. Nothing to draw
   yet: every moment on the live archive is mine (1,026 by voice, 69 by diarization; 2026-11-13).
 - **Negative space, once `im connect` has run:** pairs the screen passed and Terra answered `none` for, drawn as
