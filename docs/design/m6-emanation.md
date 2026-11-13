@@ -70,6 +70,15 @@ a synthesis makes it an idea, linked to what it was made from.
 - `/sky?seed=<id>` is a lens: personalized PageRank from the seed over edges, plus the seed's nearest by meaning
   (`lens.relevance`). Unlit clusters dim; the camera frames the lit ones.
 - Tap a star for its title and facts, then open its card or make it the lens. Drag to pan, pinch or scroll to zoom.
+- Drawn as stars (2026-11-13): a white core with a faint halo of its color, and four spikes that shorten with age, so
+  sharpness still reads as recency. Behind them, a haze summed from the stars themselves: where cards sit close, the
+  sky glows their color. No mark that isn't a card.
+- Motion never changes where a star rests. Stars twinkle slowly, the sharp ones most. A tap sends a pulse out along
+  the star's connections, four hops, with less energy each hop. The pulse draws each link as it crosses it, and each
+  star it strikes flares and is knocked a few pixels the way the pulse was going, then springs back to its place.
+- While a star is picked, only the links it reaches are drawn, fainter each hop out; up to eight of the cards it's
+  connected to are named; and the rest of the sky dims. Stars aren't draggable, so a drag always pans. With reduced
+  motion asked for, nothing animates.
 
 ## Trails (`im web`, `/trails`)
 

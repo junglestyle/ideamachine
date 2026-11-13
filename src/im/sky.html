@@ -1,9 +1,9 @@
 <!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>{title}</title>
 <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#0b0d14">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#070910">
 <style>
-:root { --bg: #0b0d14; --fg: #e8eaf2; --muted: #9aa0b4; --panel: rgba(20, 23, 34, .92); --accent: #9db8ff; }
+:root { --bg: #070910; --fg: #e8eaf2; --muted: #9aa0b4; --panel: rgba(20, 23, 34, .92); --accent: #9db8ff; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
   font: 15px/1.45 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
 canvas { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: grab; }
@@ -28,36 +28,87 @@ const S = D.stars.map(([id, x, y, size, conv, age, title, facts]) =>
   ({id, x, y: -y, size, conv, age, title, facts, rel: D.rel ? (D.rel[id] || 0) : 1}));
 const RADIUS = [1.6, 2.6, 3.6, 4.8];   // observation, candidate, pinned idea, canonical idea
 const c = document.getElementById("c"), g = c.getContext("2d");
-let W = 0, H = 0, dpr = 1, cam = {x: 0, y: 0, k: 200}, selected = null, queued = false;
+let W = 0, H = 0, dpr = 1, cam = {x: 0, y: 0, k: 200}, selected = null, queued = false, dirty = false, last = 0;
+S.forEach((s, i) => { s.i = i; s.next = []; s.dx = s.dy = 0; });
+for (const [i, j] of D.links) { S[i].next.push(j); S[j].next.push(i); }
 
 // Color is the direction from the map's center, so neighbors share a hue.
 const mx = S.reduce((a, s) => a + s.x, 0) / (S.length || 1), my = S.reduce((a, s) => a + s.y, 0) / (S.length || 1);
 for (const s of S) s.hue = Math.round((Math.atan2(s.y - my, s.x - mx) * 180 / Math.PI + 360) % 360);
 
 // Each kind of star is drawn once, as a sprite, and stamped: a fresh radial gradient per star per frame is what made
-// panning slow. A sprite is a star's glow at full opacity for one hue (in HUES steps) and one age (in AGES steps);
-// its opacity and size are applied when it's stamped.
-const HUES = 48, AGES = 6, SPRITE = 64, sprites = new Map();   // at most 288 sprites of 16 KB
+// panning slow. A sprite is one hue (in HUES steps) at one age (in AGES steps): a white-hot core, a faint halo of
+// its color, and four spikes. Sharpness is recency, so a card said lately is a point with long spikes, and an old
+// one a wider, dimmer core with none. Its opacity and size are applied when it's stamped.
+const HUES = 48, AGES = 6, SPRITE = 128, REACH = 7, sprites = new Map();   // a sprite reaches REACH radii out
 const LINK = {};   // a link's stroke style by its opacity
 function sprite(hue, old) {
   const h = Math.round(hue / (360 / HUES)) % HUES, o = Math.round(old * (AGES - 1)), key = h * AGES + o;
   if (!sprites.has(key)) {
-    const age = o / (AGES - 1), color = h * (360 / HUES), R = SPRITE / 2;
+    const age = o / (AGES - 1), color = h * (360 / HUES), R = SPRITE / 2, core = R / REACH * (1 + .8 * age);
     const sp = document.createElement("canvas"); sp.width = sp.height = SPRITE;
-    const q = sp.getContext("2d"), grad = q.createRadialGradient(R, R, 0, R, R, R);
-    grad.addColorStop(0, `hsla(${color}, 55%, 82%, 1)`);
-    grad.addColorStop(1 / (1.6 + 3 * age), `hsla(${color}, 55%, 75%, ${1 - .6 * age})`);   // the core's edge
-    grad.addColorStop(1, `hsla(${color}, 55%, 70%, 0)`);
-    q.fillStyle = grad; q.fillRect(0, 0, SPRITE, SPRITE);
+    const q = sp.getContext("2d");
+    q.globalCompositeOperation = "lighter";
+    const halo = q.createRadialGradient(R, R, 0, R, R, R);
+    halo.addColorStop(0, `hsla(${color}, 60%, 70%, ${.24 - .06 * age})`);
+    halo.addColorStop(.3, `hsla(${color}, 60%, 62%, .06)`);
+    halo.addColorStop(1, `hsla(${color}, 60%, 55%, 0)`);
+    q.fillStyle = halo; q.fillRect(0, 0, SPRITE, SPRITE);
+    const point = q.createRadialGradient(R, R, 0, R, R, core * 1.3);
+    point.addColorStop(0, `hsla(${color}, 50%, 98%, ${1 - .3 * age})`);
+    point.addColorStop(.45, `hsla(${color}, 60%, 88%, ${.9 - .45 * age})`);
+    point.addColorStop(1, `hsla(${color}, 65%, 72%, 0)`);
+    q.fillStyle = point; q.fillRect(0, 0, SPRITE, SPRITE);
+    const reach = R * .95 * (1 - age) ** 1.5;
+    if (reach > core * 2) for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      const spike = q.createLinearGradient(R - dx * reach, R - dy * reach, R + dx * reach, R + dy * reach);
+      spike.addColorStop(0, `hsla(${color}, 70%, 85%, 0)`);
+      spike.addColorStop(.5, `hsla(${color}, 70%, 92%, ${.6 * (1 - age)})`);
+      spike.addColorStop(1, `hsla(${color}, 70%, 85%, 0)`);
+      q.fillStyle = spike;
+      q.fillRect(R - (dx ? reach : 1.2), R - (dy ? reach : 1.2), dx ? 2 * reach : 2.4, dy ? 2 * reach : 2.4);
+    }
     sprites.set(key, sp);
   }
   return sprites.get(key);
 }
 for (const s of S) {
   s.old = Math.round(Math.min(s.age / 120, 1) * (AGES - 1)) / (AGES - 1);   // recency: softer, wider with age
-  s.bright = .35 + .65 * Math.min(1, Math.log2(1 + s.conv) / 3);       // recurrence: 7 conversations is full
+  s.bright = .4 + .6 * Math.min(1, Math.log2(1 + s.conv) / 3);       // recurrence: 7 conversations is full
   s.img = sprite(s.hue, s.old);
+  // A sharp star twinkles, a soft one barely: each at its own pace, set by where it is, so it's the same every visit.
+  const n = Math.abs(Math.sin(s.x * 12.9898 + s.y * 78.233) * 43758.5453) % 1;
+  s.phase = n * 6.283; s.pace = .5 + 1.3 * ((n * 7.13) % 1); s.swing = .2 * (1 - .75 * s.old);
 }
+
+// The haze behind the stars is the stars themselves, blurred: where many cards sit close, the sky glows their color.
+// Summed once over the map's extent, in numbers so faint light doesn't band, and stretched with the camera.
+const HAZE = 160, haze = document.createElement("canvas"), hz = {x: 0, y: 0, w: 1, h: 1};
+function mist() {
+  if (!S.length) return;
+  const xs = S.map(s => s.x), ys = S.map(s => s.y), x0 = Math.min(...xs), y0 = Math.min(...ys);
+  const span = Math.max(Math.max(...xs) - x0, Math.max(...ys) - y0, .05), pad = span * .3;
+  Object.assign(hz, {x: x0 - pad, y: y0 - pad, w: span + 2 * pad, h: span + 2 * pad});
+  haze.width = haze.height = HAZE;
+  const sum = new Float32Array(HAZE * HAZE * 3), sigma = HAZE * .028, reach = Math.ceil(4.5 * sigma);
+  for (const s of S) {
+    const cx = (s.x - hz.x) / hz.w * HAZE, cy = (s.y - hz.y) / hz.h * HAZE, h = s.hue / 60;
+    const rgb = [0, 4, 2].map(n => 1 - .6 * Math.max(0, Math.min(1, 2 - Math.abs((h + n) % 6 - 3))));   // a pale tint
+    for (let y = Math.max(0, Math.floor(cy - reach)); y <= Math.min(HAZE - 1, cy + reach); y++)
+      for (let x = Math.max(0, Math.floor(cx - reach)); x <= Math.min(HAZE - 1, cx + reach); x++) {
+        const w = s.bright * Math.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * sigma * sigma)), at = (y * HAZE + x) * 3;
+        sum[at] += w * rgb[0]; sum[at + 1] += w * rgb[1]; sum[at + 2] += w * rgb[2];
+      }
+  }
+  const q = haze.getContext("2d"), px = q.createImageData(HAZE, HAZE), full = 14;   // how much light is full glow
+  for (let i = 0; i < HAZE * HAZE; i++) {
+    const r = sum[3 * i], gr = sum[3 * i + 1], b = sum[3 * i + 2], top = Math.max(r, gr, b, 1e-6);
+    px.data[4 * i] = 255 * r / top; px.data[4 * i + 1] = 255 * gr / top; px.data[4 * i + 2] = 255 * b / top;
+    px.data[4 * i + 3] = 255 * .3 * top / (top + full);
+  }
+  q.putImageData(px, 0, 0);
+}
+mist();
 
 function fit(stars) {
   if (!stars.length) return;
@@ -66,32 +117,118 @@ function fit(stars) {
   cam.x = (x0 + x1) / 2; cam.y = (y0 + y1) / 2;
   cam.k = Math.min(W / Math.max(x1 - x0, .05), H / Math.max(y1 - y0, .05)) * .8;
 }
-const sx = s => (s.x - cam.x) * cam.k + W / 2, sy = s => (s.y - cam.y) * cam.k + H / 2;
+// Where a star is on the screen: its place on the map, plus how far a pulse has knocked it for the moment.
+const sx = s => (s.x - cam.x) * cam.k + W / 2 + s.dx, sy = s => (s.y - cam.y) * cam.k + H / 2 + s.dy;
 
-function draw() {
-  queued = false;
+// A picked star reaches what its connections lead to, HOPS hops out: `near` is each of those stars' hops from it,
+// and the connections that lead outward. A tap sends a pulse along them, one hop every HOP ms with less energy
+// each hop. It draws each link as it crosses it, and each star it strikes flares, is named if it's a neighbor,
+// and is knocked the way the pulse was going, then springs back to its place: the pipeline's positions are where
+// stars rest (decision 0005).
+const HOP = 240, HOPS = 4, still = matchMedia("(prefers-reduced-motion: reduce)");
+const NAMED = 8;   // how many of the picked star's connections are named beside it
+const REACHED = [.75, .3, .16, .08];   // a link's opacity by how many hops out it starts
+const FADE = [1, 1, .85, .65, .5], UNLIT = .45;   // a star's brightness by its hops, and beyond reach
+const KNOCK = 10, LOSS = .68, SPRING = 260, DAMP = 150;   // px at the first hop, kept per hop, ms a swing, ms to settle
+let ripple = null, near = null;
+function reach(s) {
+  const depth = new Map([[s.i, 0]]), edges = [];
+  let rim = [s.i], far = 0;
+  for (let d = 0; d < HOPS && rim.length; d++) {
+    const next = [];
+    for (const i of rim) for (const j of S[i].next) {
+      if (!depth.has(j)) { depth.set(j, d + 1); next.push(j); }
+      if (depth.get(j) === d + 1) { edges.push([i, j, d]); far = d + 1; }
+    }
+    rim = next;
+  }
+  // The way a pulse is going when it strikes a star: the sum of the directions of the links it arrives by.
+  const push = new Map();
+  for (const [i, j] of edges) {
+    const x = S[j].x - S[i].x, y = S[j].y - S[i].y, len = Math.hypot(x, y) || 1, v = push.get(j) || [0, 0];
+    push.set(j, [v[0] + x / len, v[1] + y / len]);
+  }
+  for (const [j, [x, y]] of push) { const len = Math.hypot(x, y) || 1; push.set(j, [x / len, y / len]); }
+  return {depth, edges, push, far};
+}
+function pluck(s) {
+  if (!still.matches) ripple = {at: performance.now(), seed: s, ends: (near.far + 1) * HOP + 4 * DAMP};
+}
+
+function draw(now) {
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g.fillStyle = "#0b0d14"; g.fillRect(0, 0, W, H);
-  const grow = Math.min(2.2, .75 + .25 * Math.sqrt(cam.k / 200));
-  g.lineWidth = 1;
-  // Each link stroked on its own, so where links cross they add up, as they always have.
+  g.globalCompositeOperation = "source-over";
+  g.fillStyle = "#070910"; g.fillRect(0, 0, W, H);
+  const t = still.matches ? 0 : now / 1000, wave = ripple ? now - ripple.at : 0;
+  if (ripple && wave > ripple.ends) ripple = null;
+  g.globalCompositeOperation = "lighter";
+  g.globalAlpha = D.rel ? .4 : 1; g.imageSmoothingQuality = "high";
+  g.drawImage(haze, (hz.x - cam.x) * cam.k + W / 2, (hz.y - cam.y) * cam.k + H / 2, hz.w * cam.k, hz.h * cam.k);
+  g.globalAlpha = 1;
+  // Stars are smaller on a small screen, where the same map is packed tighter.
+  const grow = Math.min(2.2, .75 + .25 * Math.sqrt(cam.k / 200)) * Math.max(.6, Math.min(1, Math.min(W, H) / 800));
+  // How far the pulse has got, in hops: past everything when there's no pulse.
+  const drawn = ripple && ripple.seed === selected ? wave / HOP : 99;
+  for (const s of S) s.dx = s.dy = 0;
+  if (ripple && near) for (const [j, [x, y]] of near.push) {
+    const d = near.depth.get(j), since = wave - d * HOP;
+    if (since <= 0) continue;
+    const far = KNOCK * LOSS ** (d - 1) * Math.exp(-since / DAMP) * Math.sin(6.283 * since / SPRING);
+    S[j].dx = x * far; S[j].dy = y * far;
+  }
+  // Each link stroked on its own, so where links cross they add up, as they always have. With a star picked, only
+  // the links it reaches are drawn, fainter each hop out, each growing from its nearer end as the pulse crosses
+  // it; a lens still shows what it lights.
   for (const [i, j] of D.links) {
-    const a = S[i], b = S[j];
-    const alpha = D.rel ? Math.round(45 * Math.min(a.rel, b.rel)) / 100 : .07;
+    const a = S[i], b = S[j], da = near ? near.depth.get(i) : undefined, db = near ? near.depth.get(j) : undefined;
+    const d = da === undefined || db === undefined ? HOPS : Math.min(da, db);
+    const lit = D.rel ? Math.round(45 * Math.min(a.rel, b.rel)) / 100 : near ? 0 : .12;
+    const part = d < HOPS ? Math.max(0, Math.min(drawn - d, 1)) : 0;
+    const alpha = part > 0 ? Math.max(REACHED[d], lit) : lit;
     if (alpha < .02) continue;
-    g.strokeStyle = LINK[alpha] || (LINK[alpha] = `rgba(170, 180, 215, ${alpha})`);
-    g.beginPath(); g.moveTo(sx(a), sy(a)); g.lineTo(sx(b), sy(b)); g.stroke();
+    g.lineWidth = part > 0 && d === 0 ? 1.5 : 1;
+    g.strokeStyle = LINK[alpha] || (LINK[alpha] = `rgba(${alpha > .5 ? "200, 212, 255" : "150, 165, 220"}, ${alpha})`);
+    const [from, to] = db < da ? [b, a] : [a, b], fx = sx(from), fy = sy(from), whole = part > 0 && lit < .02 ? part : 1;
+    g.beginPath(); g.moveTo(fx, fy); g.lineTo(fx + (sx(to) - fx) * whole, fy + (sy(to) - fy) * whole); g.stroke();
+  }
+  if (ripple) {
+    g.lineWidth = 1.5; g.lineCap = "round";
+    for (const [i, j, d] of near.edges) {
+      const u = wave / HOP - d;
+      if (u <= 0 || u >= 1.4) continue;
+      const head = Math.min(u, 1), tail = Math.max(0, u - .3), ax = sx(S[i]), ay = sy(S[i]), bx = sx(S[j]), by = sy(S[j]);
+      g.strokeStyle = `rgba(215, 225, 255, ${.9 * LOSS ** d})`;
+      g.beginPath(); g.moveTo(ax + (bx - ax) * tail, ay + (by - ay) * tail);
+      g.lineTo(ax + (bx - ax) * head, ay + (by - ay) * head); g.stroke();
+    }
+    const p = wave / 650;
+    if (p < 1) {
+      g.strokeStyle = `rgba(215, 225, 255, ${.6 * (1 - p)})`; g.lineWidth = 1.2;
+      g.beginPath(); g.arc(sx(ripple.seed), sy(ripple.seed), 5 + 34 * p, 0, 6.283); g.stroke();
+    }
   }
   for (const s of S) {
     const x = sx(s), y = sy(s);
-    if (x < -40 || y < -40 || x > W + 40 || y > H + 40) continue;
+    if (x < -60 || y < -60 || x > W + 60 || y > H + 60) continue;
     // In a lens, what it reaches stands out at any recurrence, and the rest recedes to a faint backdrop.
-    const a = !D.rel ? s.bright : s.rel > 0 ? Math.max(s.bright, .7) * (.45 + .55 * s.rel) : .05 * s.bright;
-    const r = RADIUS[s.size] * grow * (D.rel && s.rel > 0 ? 1.3 : 1), halo = r * (1.6 + 3 * s.old);
-    g.globalAlpha = a; g.drawImage(s.img, x - halo, y - halo, 2 * halo, 2 * halo);
+    let a = !D.rel ? s.bright : s.rel > 0 ? Math.max(s.bright, .7) * (.45 + .55 * s.rel) : .06 * s.bright;
+    let r = RADIUS[s.size] * grow * (D.rel && s.rel > 0 ? 1.3 : 1);
+    a *= 1 + s.swing * Math.sin(t * s.pace + s.phase);
+    // The picked star and what it reaches stand out, less each hop, once the pulse has got there; outside a lens,
+    // the rest dim.
+    const d = near ? near.depth.get(s.i) : undefined, struck = d !== undefined && drawn >= d;
+    if (ripple && struck) {
+      const flare = Math.exp(-(wave - d * HOP) / 420) * LOSS ** d;
+      a += flare * .9; r *= 1 + .7 * flare;
+    }
+    if (struck && d === 0) { a = 1; r *= 1.25; }
+    else if (struck && d === 1) { a = Math.max(a, .9); r *= 1.15; }
+    else if (near && !D.rel) a *= struck ? FADE[d] : UNLIT;
+    g.globalAlpha = Math.min(a, 1); g.drawImage(s.img, x - r * REACH, y - r * REACH, 2 * r * REACH, 2 * r * REACH);
   }
-  g.globalAlpha = 1;
+  g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
   const labelled = D.rel ? S.filter(s => s.rel > 0).sort((a, b) => b.rel - a.rel).slice(0, 9) : [];
+  if (selected && drawn >= 1) for (const j of selected.next.slice(0, NAMED)) if (!labelled.includes(S[j])) labelled.push(S[j]);
   if (selected && !labelled.includes(selected)) labelled.push(selected);
   g.font = "12px system-ui, sans-serif"; g.textBaseline = "middle";
   for (const s of labelled) {
@@ -100,7 +237,15 @@ function draw() {
     g.fillText(t, sx(s) + 8, sy(s));
   }
 }
-const redraw = () => { if (!queued) { queued = true; requestAnimationFrame(draw); } };
+// The sky twinkles at 30 frames a second while the page is in view, and draws every frame while a ripple runs or
+// the map is being moved. With reduced motion asked for, it draws only when something changes.
+function frame(now) {
+  queued = false;
+  if (dirty || ripple || now - last >= 33) { dirty = false; last = now; draw(now); }
+  if (ripple || !still.matches && !document.hidden) { queued = true; requestAnimationFrame(frame); }
+}
+const redraw = () => { dirty = true; if (!queued) { queued = true; requestAnimationFrame(frame); } };
+document.addEventListener("visibilitychange", redraw);
 
 function resize() {
   dpr = window.devicePixelRatio || 1; W = innerWidth; H = innerHeight;
@@ -113,8 +258,9 @@ function zoom(factor, px, py) {
   cam.x = wx - (px - W / 2) / cam.k; cam.y = wy - (py - H / 2) / cam.k; redraw();
 }
 
-function select(s) {
-  selected = s;
+function select(s, tapped) {
+  selected = s; near = s ? reach(s) : null;
+  if (s && tapped) pluck(s);
   const bar = document.getElementById("bar");
   bar.style.display = s ? "block" : "none";
   if (s) {
@@ -165,7 +311,7 @@ c.addEventListener("pointermove", e => {
 const up = e => {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
-  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") select(hit(e.clientX, e.clientY));
+  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") select(hit(e.clientX, e.clientY), true);
   down = null;
 };
 c.addEventListener("pointerup", up);
