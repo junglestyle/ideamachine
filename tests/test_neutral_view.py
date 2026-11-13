@@ -378,7 +378,7 @@ def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F8
 
     lattice.place(matched, HashEmbedder().model_version)
     new = str(idea(matched, "Something new"))
-    for path in ("/trails", "/echoes", "/threads", "/apart", "/tree", "/crossroads", f"/crossroads/{new}"):
+    for path in ("/trails", "/echoes", "/threads", "/apart", "/tree", "/grid", "/crossroads", f"/crossroads/{new}"):
         assert request(served, "GET", path)[0] == 303 and request(served, "GET", path)[1]["Location"] == "/login"
     _, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")
     cookie = headers["Set-Cookie"].split(";")[0]
@@ -390,6 +390,7 @@ def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F8
     assert "<h1>Echoes</h1>" in request(served, "GET", "/echoes?kind=tension&gap=week", cookie=cookie)[2]
     assert "<h1>Threads</h1>" in request(served, "GET", "/threads", cookie=cookie)[2]
     assert "<h1>Apart</h1>" in request(served, "GET", "/apart?page=2", cookie=cookie)[2]
+    assert "<h1>Grid</h1>" in request(served, "GET", "/grid", cookie=cookie)[2]
     assert new in [s[0] for s in sky_data(request(served, "GET", "/tree", cookie=cookie)[2])["stars"]]
     assert request(served, "GET", "/trails?at=nope", cookie=cookie)[0] == 404
     assert request(served, "GET", "/crossroads/nope", cookie=cookie)[0] == 404
@@ -467,6 +468,8 @@ def test_a_thread_is_a_neighbourhood_said_in_more_than_one_conversation(matched,
     assert "1 thread:" in page and "<b>Broken builds as signal</b>" in row.split("</summary>")[0]   # the first said
     assert "3 cards · 2 conversations · over 1 hour" in row and row.count("<circle") == 2            # a knot in each
     assert f'href="/trails?at={build}"' in row and f'href="/trails?at={new}"' in row
+    lit = ",".join(str(i) for i in (build, coffee, new))                    # its cards, lit on the sky or the tree
+    assert f'href="/sky?lit={lit}"' in row and f'href="/tree?lit={lit}"' in row
     listed = row.split("<ol>")[1]
     assert listed.index("Broken builds") < listed.index("coffee order") < listed.index("Something new")
     as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
@@ -498,3 +501,55 @@ def test_the_tree_stands_a_neighbourhood_in_for_each_lens(matched, admin):  # no
     hidden = {s[0]: s[2] for s in demo["stars"]}
     assert hidden[build] == hidden[coffee] == [] and demo["links"] == before["links"]   # on no lens, unlinked
     assert "coffee order" not in json.dumps(demo)                          # and blank
+
+
+
+def test_the_sky_says_when_each_card_was_first_said_for_replay(matched, admin):  # noqa: F811
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    lattice.place(matched, HashEmbedder().model_version)
+    new = idea(matched, "Something new")
+    first = table(matched, "SELECT first_said FROM pub.cards WHERE idea_id = %s", new)[0][0]
+    star = {s[0]: s for s in sky_data(as_app(admin, web.sky))["stars"]}[str(new)]
+    assert star[8] == int(first.timestamp())
+
+
+def test_a_grid_cell_is_a_neighbourhood_drawn_as_the_sky_places_it(matched, admin):  # noqa: F811
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    lattice.place(matched, HashEmbedder().model_version)
+    build, coffee, new = (idea(matched, t) for t in (
+        "Broken builds as signal", "The coffee order is the real meeting.", "Something new"))
+    assert "0 cells" in as_app(admin, web.grid)                  # the fixture's pair is too few for a cell
+    for a, b in ((build, coffee), (coffee, new), (build, new)):
+        judged(matched, a, b, "related")
+    page = as_app(admin, web.grid)
+    cell = page.split("<section>")[1]
+    assert "1 cell." in page and cell.count("<circle") == 3 and cell.count("<line") == 3   # its cards and connections
+    assert "3 cards" in cell and all(f'href="/crossroads/{i}"' in cell for i in (build, coffee, new))
+    assert 'href="/sky?lit=' in cell and 'href="/tree?lit=' in cell
+    as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
+                                         VALUES ('idea_sensitive', %s, '{"sensitive": true}')""", (new,)))
+    assert "0 cells" in as_app(admin, web.grid, True)             # demo mode: a sensitive card is in no cell
+
+
+def test_crossroads_shows_where_its_doors_are_on_the_map(matched, admin):  # noqa: F811
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    build, new = (idea(matched, t) for t in ("Broken builds as signal", "Something new"))
+    judged(matched, build, new, "related")
+    lattice.place(matched, HashEmbedder().model_version)
+    page = as_app(admin, web.crossroads, str(build))
+    assert '<svg class="rose"' in page and f'<a href="#d{new}"><line class="like"' in page   # a ray to the door
+    door = page.split(f'id="d{new}"')[1].split("</a>")[0]
+    assert '<svg class="way"' in door                                                # and an arrow on the door
+
+
+def test_an_echo_arc_is_drawn_in_its_turn(matched, admin):  # noqa: F811
+    build, new = (idea(matched, t) for t in ("Broken builds as signal", "Something new"))
+    judged(matched, build, new, "related")
+    page = as_app(admin, web.echoes)
+    assert page.count("<path pathLength") == page.count('<li id="e') >= 1 and 'style="--d: 0"' in page

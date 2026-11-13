@@ -29,7 +29,14 @@ svg path { fill: none; stroke: var(--plain); stroke-opacity: .3; stroke-width: 1
 svg path.elaborates { stroke: var(--elaborates); stroke-opacity: .5; }
 svg path.supports { stroke: var(--supports); stroke-opacity: .7; }
 svg path.tension { stroke: var(--tension); stroke-opacity: .9; stroke-width: 1.5; }
-svg a:hover path, svg a:focus path { stroke-opacity: 1; stroke-width: 2.5; }
+svg a:hover path, svg a:focus path, svg path.on { stroke-opacity: 1; stroke-width: 2.5; }
+@media (prefers-reduced-motion: no-preference) {
+  /* The arcs draw themselves, oldest first, each from the earlier thought to the later. */
+  svg path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw .9s ease-out forwards;
+    animation-delay: calc(var(--d) * 4ms); }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+}
+li.on { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 svg a { outline: none; }
 svg .axis, svg line { stroke: var(--line); vector-effect: non-scaling-stroke; }
 svg text { fill: var(--muted); font-size: 11px; }
@@ -71,4 +78,16 @@ li p i { display: block; }
 <header><a href="/"><img src="/icon.svg" alt="" width="24" height="24" style="vertical-align: middle"> Idea Machine</a
 ><a href="/sky">Sky</a><a href="/trails">Trails</a><a href="/echoes">Echoes</a><a href="/threads">Threads</a><a href="/apart">Apart</a><a href="/crossroads">Crossroads</a></header>
 <div id="x">{body}</div>
+<script>
+"use strict";
+// A row and its arc light together: pointing at either shows the other.
+for (const a of document.querySelectorAll('svg a[href^="#e"]')) {
+  const row = document.getElementById(a.getAttribute("href").slice(1)), arc = a.querySelector("path");
+  if (!row) continue;
+  const set = on => { arc.classList.toggle("on", on); row.classList.toggle("on", on); };
+  for (const el of [a, row]) {
+    el.addEventListener("pointerenter", () => set(true)); el.addEventListener("pointerleave", () => set(false));
+  }
+}
+</script>
 </html>

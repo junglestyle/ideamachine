@@ -77,10 +77,19 @@ a synthesis makes it an idea, linked to what it was made from.
   the star's connections, four hops, with less energy each hop. The pulse draws each link as it crosses it, and each
   star it strikes flares and is knocked a few pixels the way the pulse was going, then springs back to its place.
 - A tap lights a star, ringed and named, and keeps what's picked; a tap on the lit star picks it. A tap on nothing
-  puts the lit star out, and another clears what's picked. So a stray tap while panning changes nothing.
+  puts the lit star out, and another clears what's picked. So a stray tap while panning changes nothing. A lit star
+  is a bigger target: a tap within 36 px of it picks it, whatever else is nearer, and a faint circle shows that
+  reach. The same on Trails and the tree.
 - While a star is picked, only the links it reaches are drawn, fainter each hop out; up to eight of the cards it's
   connected to are named; and the rest of the sky dims. Stars aren't draggable, so a drag always pans. With reduced
   motion asked for, nothing animates.
+- **Replay** (2026-11-13). A button plays the archive as it grew, from the first card said to the last, in 45
+  seconds, with a bar to scrub and the day and the count of cards so far. A card is on the sky once it has been
+  said, flaring as it arrives, and a link once both its cards have. It replays when things were said on today's map:
+  where a card sits and what it's connected to are as they are now, which is the caution under Double exposure
+  below. A typed card, with no time said, is always there.
+- **Lit cards.** `/sky?lit=<ids>` lights those cards where they are, as a lens lights its results, and frames them.
+  A thread's row and a grid cell link to it.
 
 ## Trails (`im web`, `/trails`)
 
@@ -126,6 +135,10 @@ A reading view: one card, with the two kinds of neighbor every thought here has.
 - **Up and down, in meaning:** what's like it, said at another time: its connections and lineage first, then its
   nearest by meaning, earlier above and later below, each with how far apart they were said ("41 days earlier").
   A door across isn't repeated here.
+- **Where the doors are on the map** (2026-11-13). Each door has a small arrow: the way its card lies from this
+  one on the sky's map. Under the card a rose draws one ray per door, in that direction, longer for the farther
+  ones, colored as its arm. Direction on the map is semantic neighborhood, not a connection. The doors come in from
+  their sides when the page opens.
 - Every door opens that card's crossroads, and the arrow keys walk. `/crossroads` picks a card at random: nothing
   chooses it ([0007](../decisions/0007-neutral-proposals.md)).
 - "Near by meaning" is an embedding neighbor, named as that, never as a connection
@@ -142,7 +155,8 @@ join two cards said in different conversations.
   the earlier"), and the judge's reason and the structure it named, marked as the judge's (`pub.card_judgments`,
   migration 064).
 - Above the list, every echo is an arc over the archive's time, from the earlier card to the later, colored by kind.
-  An arc links to its row.
+  An arc links to its row, and pointing at either lights the other. The arcs draw themselves when the page opens,
+  oldest first.
 - Newest first, by when the later card was said. Kind (elaborates, supports, tension, analogous) and gap (a week, a
   month) only narrow the list.
 - Embedding neighbors the judge hasn't connected aren't echoes: a shared subject is no connection
@@ -169,6 +183,7 @@ neighborhood that keeps coming back.
   in the order the threads began. Nothing ranks them.
 - A thread is not a lens or a theme: nothing names its subject, and it writes nothing. It's the neighborhood that a
   synthesis would be proposed over, so this view is also where to look at what synthesis would be given.
+- An opened row links to its cards lit on the sky (`/sky?lit=`) and on the tree (`/tree?lit=`).
 - Demo mode: a sensitive card is in no thread.
 
 ## Apart (`im web`, `/apart`)
@@ -206,6 +221,21 @@ the 22 paths, [0013](../decisions/0013-lenses-and-boards.md)), turned in three d
   card it reaches. A tap on nothing puts the lit star out; another clears what's picked. A tap on a sephira or the
   middle of a path lights the cards on it.
 - Demo mode: a sensitive card is in the far sky, blank, with no connections.
+
+## Grid (`im web`, `/grid`)
+
+The plainer Trellis board: a grid of lenses, one to a cell.
+
+- **A stand-in, until lenses exist**, as on the tree: each cell holds a graph neighborhood of at least 3 cards
+  (`lens.neighbourhoods`), named by the first card said in it. On the live archive (2026-11-13): 98 cells.
+- A cell draws its cards as a small constellation: each star where the sky puts its card relative to the others in
+  the cell, in the sky's color, with the connections among them. A star opens its card's crossroads.
+- **Not laid out by hand yet.** A board is lenses placed where I put them
+  ([0013](../decisions/0013-lenses-and-boards.md)); nothing stores a placement, so cells come in the order their
+  neighborhoods began. Nothing ranks them.
+- A cell links to its cards lit on the sky and on the tree. `/tree?lit=<ids>` lights those cards wherever they sit
+  on the tree, until a tap on nothing.
+- Demo mode: a sensitive card is in no cell.
 
 ## Views the data could carry now (ideas, 2026-11-12)
 

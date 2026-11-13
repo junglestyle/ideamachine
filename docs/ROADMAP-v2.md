@@ -74,7 +74,8 @@ drawn through lenses ([0010](decisions/0010-connections-kinds-lenses.md)), and a
   - a conceptual or thematic grid of lenses;
   - the Qabalistic Tree of Life: a correspondence table condensed into definitions, each correspondence a lens
     (1/Kether), on the sephirot and the paths between them. Its shape is drawn already (`/tree`, 2026-11-13),
-    with a neighborhood of connected cards standing in for each lens ([M6 notes](design/m6-emanation.md)).
+    with a neighborhood of connected cards standing in for each lens ([M6 notes](design/m6-emanation.md)). So is
+    the grid (`/grid`), in the order the neighborhoods began, since nothing stores a placement by hand yet.
 - **Removing sensitive elements**, per view and for the MCP connector. Builds on demo mode
   (`im/sensitivity.py`, migration 027), which already tags ideas and themes by category and lets my marks win:
   - offensive: derogatory to a group or a person (demo mode's `racism`, broadened);
