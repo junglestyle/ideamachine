@@ -1,17 +1,20 @@
 """Idea extraction with Claude (docs/decisions/0004-claude-extraction.md).
 
-Each current episode goes out once per model / prompt / privacy policy, and again only if what would be
-sent changed. A payload already read on another episode isn't sent again: its items are reused. Claude returns items anchored to transcript line numbers; they're mapped back to segment
-IDs and to who said them locally. Every request is logged in im.egress_log, and the monthly cap stops the stage
-once the month's spend reaches it (egress.send).
+Each current episode goes out once, and again only if what would be sent changed. Read under another model, prompt
+or policy with the same payload, it's held by the re-read gate (im.reread), its captures staying live, until
+`im reread extract` reads it again. A payload already read on another episode isn't sent again: its items are reused.
+Claude returns items anchored to transcript line numbers; they're mapped back to segment IDs and to who said them
+locally. Every request is logged in im.egress_log, and the monthly cap stops the stage once the month's spend reaches
+it (egress.send).
 """
 
+import dataclasses
 import hashlib
 import json
 import uuid
 from importlib import resources
 
-from im import capture_checks, egress, feedback, llm
+from im import capture_checks, egress, feedback, llm, reread
 from im.config import ExtractConfig
 
 SCHEMA_VERSION = 1
@@ -79,21 +82,61 @@ def prompt_version(model: str, effort: str, system: str = SYSTEM_V5_3, schema: d
     return hashlib.sha256(json.dumps([system, schema, model, effort], sort_keys=True).encode()).hexdigest()[:16]
 
 
-def _pending(conn, model: str, pv: str) -> list:
-    """Current episodes not yet read under this model/prompt/policy, or whose payload changed, except those where I
-    don't speak (`others_only`), which a prompt capturing only my speech can't capture anything in. Newest first."""
-    rows = conn.execute(
-        """SELECT e.episode_id, x.input_hash FROM im.episodes e
-           LEFT JOIN im.extractions x ON x.episode_id = e.episode_id AND x.model = %s
-                AND x.prompt_version = %s AND x.privacy_policy_version = %s
-           WHERE e.current AND e.kind <> 'others_only'
-           ORDER BY e.started_at DESC""", (model, pv, egress.POLICY_VERSION)).fetchall()
-    out = []
-    for eid, done_hash in rows:
-        p = egress.build(conn, eid)
-        if p.sha256 != done_hash:
-            out.append(p)
-    return out
+def _pending(conn, model: str, pv: str) -> tuple[list, list]:
+    """What's due under this model, prompt and policy, newest first, split by the re-read gate: (to read, held).
+
+    To read: current episodes whose payload no read has had (new, or what would be sent changed), and those whose
+    payload another episode's read under this version can be reused for (nothing is sent). Held: those whose payload
+    was read under another version only, as (payload, that read: its episode, model, prompt version, policy and
+    egress id), the latest. Episodes where I don't speak (`others_only`) aren't due: a prompt capturing only my
+    speech can't capture anything in them."""
+    payloads = [egress.build(conn, eid) for (eid,) in conn.execute(
+        """SELECT episode_id FROM im.episodes WHERE current AND kind <> 'others_only'
+           ORDER BY started_at DESC""")]
+    reads: dict[str, list[tuple]] = {}
+    for sha, *read in conn.execute(
+            """SELECT input_hash, episode_id, model, prompt_version, privacy_policy_version, egress_id
+               FROM im.extractions WHERE input_hash = ANY(%s) ORDER BY created_at DESC, episode_id""",
+            ([p.sha256 for p in payloads],)):
+        reads.setdefault(sha, []).append(tuple(read))
+    todo, held = [], []
+    for p in payloads:
+        earlier = reads.get(p.sha256, [])
+        now = [r for r in earlier if r[1:4] == (model, pv, p.policy)]
+        if any(r[0] == p.episode_id for r in now):
+            continue
+        if now or not earlier:
+            todo.append(p)
+        else:
+            held.append((p, earlier[0]))
+    return todo, held
+
+
+def _version(model: str, pv: str, policy: str) -> str:
+    return f"{model} {pv}" + ("" if policy == egress.POLICY_VERSION else f" {policy}")
+
+
+def held_report(conn, held: list, model: str, pv: str) -> dict | None:
+    """The re-read gate's report on held episodes (reread.report): a payload read on two episodes is read once."""
+    last = {p.sha256: read[4] for p, read in reversed(held)}
+    return reread.report("extract", [_version(*read[1:4]) for _, read in held],
+                         _version(model, pv, egress.POLICY_VERSION),
+                         reread.estimate(conn, last.values(), lambda _: model))
+
+
+def _keep_earlier_read(conn, held: list) -> int:
+    """A held episode re-derived with the same payload (a segmentation change, say) takes the captures of the read
+    it's held on, under that read's version, as a reuse does: the earlier captures stay live, and nothing is sent.
+    Returns how many."""
+    n = 0
+    for p, (eid, model, pv, policy, _) in held:
+        if eid == p.episode_id:
+            continue
+        q = dataclasses.replace(p, policy=policy)
+        if reused := _reuse(conn, q, model, pv):
+            _carry_matches(conn, _save(conn, q, model, pv, *reused), reused[1])
+            n += 1
+    return n
 
 
 def _reuse(conn, p: egress.Payload, model: str, pv: str) -> tuple[int, list[dict]] | None:
@@ -231,16 +274,24 @@ def _save(conn, p: egress.Payload, model: str, pv: str, egress_id: int, items: l
 
 def run_stage(conn, client, model: str = ExtractConfig.model, effort: str = ExtractConfig.effort,
               monthly_cap_usd: float = 20.0, limit: int | None = None, system: str = SYSTEM_V5_3,
-              max_tokens: int | None = None, schema: dict = SCHEMA_V5) -> dict:
-    """Read every episode not yet read under this model, prompt and schema, and keep what it captures in
-    im.items."""
+              max_tokens: int | None = None, schema: dict = SCHEMA_V5, held_only: bool = False) -> dict:
+    """Read every episode due under this model, prompt and schema (_pending), at most `limit`, and keep what it
+    captures in im.items. What the re-read gate holds is reported under `held`; with `held_only`, only that is read
+    (`im reread extract`)."""
     pv = prompt_version(model, effort, system, schema)
-    todo = _pending(conn, model, pv)
+    todo, held = _pending(conn, model, pv)
     stats = {"model": model, "prompt_version": pv, "pending": len(todo), "read": 0, "reused": 0, "items": 0,
              "refused": 0, "failed": 0, "cost_usd": 0.0, "stopped": None}
+    if held_only:
+        todo = [p for p, _ in held]
+        stats["pending"] = len(todo)
+    elif kept := _keep_earlier_read(conn, held):
+        stats["held_kept_earlier_read"] = kept
+    done = set()
     for p in todo[:limit] if limit else todo:
         if reused := _reuse(conn, p, model, pv):
             _carry_matches(conn, _save(conn, p, model, pv, *reused), reused[1])
+            done.add(p.episode_id)
             stats["reused"] += 1
             stats["items"] += len(reused[1])
             continue
@@ -260,10 +311,11 @@ def run_stage(conn, client, model: str = ExtractConfig.model, effort: str = Extr
         if a.refused:  # the whole chain declined: record it read, with nothing captured
             stats["refused"] += 1
         _save(conn, p, model, pv, a.egress_id, a.data or [])
+        done.add(p.episode_id)
         stats["items"] += len(a.data or [])
     stats["cost_usd"] = round(stats["cost_usd"], 4)
     stats["spent_this_month_usd"] = round(egress.spent_this_month(conn), 4)
-    return stats
+    return reread.add(stats, held_report(conn, [h for h in held if h[0].episode_id not in done], model, pv))
 
 
 def forgotten_sent(conn) -> list[tuple]:

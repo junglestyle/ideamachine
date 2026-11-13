@@ -8,10 +8,12 @@ below SCREEN_CUT the pair is screened out without asking Terra. Terra types the 
 being the side with the lower id, so its `A>B` is `a>b`.
 
 Every verdict is kept (im.connection_verdicts, migration 059), so a pair is asked again only when its text as shown
-or the judge's method changes. A connection (supports, elaborates, tension, related or same) replaces whatever stood
-in for the pair, with its kind (supports, elaborates or tension) as a suggestion; any other verdict (none, unsure, a
-refusal, screened) removes the pair's stand-in and any earlier judgment's connection, and lattice.relate doesn't
-write the pair again. `same` is also logged for my review (im.merge_review, `judged_same`), never merged by itself.
+changes. A pair judged by another method (a new prompt, model, effort, screen question or cut) with the same text is
+held by the re-read gate (im.reread), its verdict standing, until `im reread connect` asks it again. A connection
+(supports, elaborates, tension, related or same) replaces whatever stood in for the pair, with its kind (supports,
+elaborates or tension) as a suggestion; any other verdict (none, unsure, a refusal, screened) removes the pair's
+stand-in and any earlier judgment's connection, and lattice.relate doesn't write the pair again. `same` is also
+logged for my review (im.merge_review, `judged_same`), never merged by itself.
 """
 
 import hashlib
@@ -19,7 +21,7 @@ import json
 
 import numpy as np
 
-from im import citations, egress, jev, llm, themes
+from im import citations, egress, jev, llm, reread, themes
 from im.config import Config, ModelConfig
 
 FLOOR, K = 0.65, 10   # nominated: cosine >= FLOOR, among either side's K nearest. Not in the method: they choose which
@@ -74,7 +76,7 @@ def prompt_version(chat: ModelConfig = Config.connect) -> str:
 
 def method(chat: ModelConfig = Config.connect) -> str:
     """The judge's method, on its verdicts, connections and kinds: Terra's prompt version, model and effort, and the
-    screen (Jev's question and model, and the cut). A change asks every pair again."""
+    screen (Jev's question and model, and the cut). A change holds every pair judged before (the re-read gate)."""
     screen = [jev.MODEL, jev.QUESTIONS["edge"], SCREEN_CUT]
     return f"connect-1:{themes.version(prompt_version(chat), chat.model, chat.effort, screen)}"
 
@@ -145,13 +147,14 @@ def nominate(conn) -> dict[tuple, float]:
     return neighbours([r[0] for r in rows], np.vstack([np.array(json.loads(r[1])) for r in rows]))
 
 
-def _due(conn, nominated: dict, m: str, sides) -> tuple[list[tuple], dict]:
-    """The nominated pairs to ask, as (a, b, text, its hash): never asked first, then those whose text changed, then
-    those another method judged; each the most similar first. And the counts of those not asked."""
+def _due(conn, nominated: dict, m: str, sides) -> tuple[list[tuple], list[tuple], dict]:
+    """The nominated pairs to ask, as (a, b, text, its hash): never asked first, then those whose text changed, each
+    the most similar first. The pairs the re-read gate holds, judged by another method with the same text, as (a, b,
+    text, its hash, that method, its egress id), the most similar first. And the counts of those not asked."""
     mine = set(conn.execute("SELECT a, b FROM im.my_link_events").fetchall())
-    kept = {(a, b): (h, vm) for a, b, h, vm in conn.execute(
-        "SELECT a, b, input_hash, method FROM im.connection_verdicts")}
-    due, counts = [], {"skipped": 0, "already_judged": 0}
+    kept = {(a, b): rest for a, b, *rest in conn.execute(
+        "SELECT a, b, input_hash, method, egress_id FROM im.connection_verdicts")}
+    due, held, counts = [], [], {"skipped": 0, "already_judged": 0}
     for (a, b), similarity in nominated.items():
         if (a, b) in mine:
             counts["skipped"] += 1
@@ -159,11 +162,32 @@ def _due(conn, nominated: dict, m: str, sides) -> tuple[list[tuple], dict]:
         text = pair_text(sides(a), sides(b))
         h = hashlib.sha256(text.encode()).hexdigest()
         old = kept.get((a, b))
-        if old == (h, m):
+        if old and old[:2] == [h, m]:
             counts["already_judged"] += 1
-            continue
-        due.append(((0 if old is None else 1 if old[0] != h else 2, -similarity, str(a), str(b)), (a, b, text, h)))
-    return [pair for _, pair in sorted(due)], counts
+        elif old and old[0] == h:
+            held.append(((-similarity, str(a), str(b)), (a, b, text, h, *old[1:])))
+        else:
+            due.append(((old is not None, -similarity, str(a), str(b)), (a, b, text, h)))
+    return [pair for _, pair in sorted(due)], [pair for _, pair in sorted(held)], counts
+
+
+def held_report(conn, held: list[tuple], screen: jev.Jev | None, chat: ModelConfig) -> dict | None:
+    """The re-read gate's report on held pairs (reread.report). Their last requests: Terra's, and Jev's screen when
+    the current question set has no answer for the pair's text."""
+    if not held:
+        return None
+    qs = jev.question_set(screen, "edge")
+    jevs: dict[str, tuple] = {}
+    for key, asked, egress_id in conn.execute(
+            """SELECT key_sha256, question_set, egress_id FROM im.jev_answers WHERE key_sha256 = ANY(%s)
+               ORDER BY created_at""", ([p[3] for p in held],)):
+        if jevs.get(key, ("", None))[0] != qs:
+            jevs[key] = (asked, egress_id)
+    ids = [p[5] for p in held] + [jevs[p[3]][1] for p in held if p[3] in jevs and jevs[p[3]][0] != qs]
+    jev_model = screen.model if screen else jev.MODEL
+    return reread.report("connect", [p[4] for p in held], method(chat),
+                         reread.estimate(conn, [i for i in ids if i is not None],
+                                         lambda model: jev_model if model.startswith("jev-") else chat.model))
 
 
 def _record(conn, a, b, m: str, v: dict, h: str, segment_ids, egress_id) -> None:
@@ -224,12 +248,8 @@ def _judge(conn, judge, screen, chat: ModelConfig, text: str, h: str, state, seg
             "why": got.data["why"], "belongs": belongs}, got.egress_id
 
 
-def stage(conn, judge, screen: jev.Jev | None, monthly_cap_usd: float = 20.0, limit: int | None = None,
-          chat: ModelConfig = Config.connect) -> dict:
-    """Judge the nominated pairs that are due, at most `limit` of them (0: only count them; `judge` and `screen` may
-    then be None). `judge` is Terra's client ([connect]), `screen` Jev's. A pair whose answer fails is logged and asked
-    again next time; the cap, or a model that can't answer, stops the stage. Connections written are cited."""
-    m = method(chat)
+def _pairs(conn, m: str):
+    """The nominated pairs, the due ones, the held ones and the counts (_due), and how a cluster is shown."""
     nominated = nominate(conn)
     data: dict = {}
 
@@ -238,10 +258,28 @@ def stage(conn, judge, screen: jev.Jev | None, monthly_cap_usd: float = 20.0, li
             data[i] = side_data(conn, i)
         return data[i]
 
-    due, counts = _due(conn, nominated, m, sides)
+    return nominated, *_due(conn, nominated, m, sides), sides
+
+
+def held(conn, chat: ModelConfig = Config.connect) -> dict | None:
+    """What the re-read gate holds (held_report), sending and writing nothing."""
+    return held_report(conn, _pairs(conn, method(chat))[2], None, chat)
+
+
+def stage(conn, judge, screen: jev.Jev | None, monthly_cap_usd: float = 20.0, limit: int | None = None,
+          chat: ModelConfig = Config.connect, held_only: bool = False) -> dict:
+    """Judge the nominated pairs that are due, at most `limit` of them (0: only count them; `judge` and `screen` may
+    then be None). `judge` is Terra's client ([connect]), `screen` Jev's. A pair whose answer fails is logged and asked
+    again next time; the cap, or a model that can't answer, stops the stage. Connections written are cited. What the
+    re-read gate holds is reported under `held`; with `held_only`, only that is asked (`im reread connect`)."""
+    m = method(chat)
+    nominated, due, kept, counts, sides = _pairs(conn, m)
+    if held_only:
+        due = [p[:4] for p in kept]
     stats = {"method": m, "nominated": len(nominated), **counts, "due": len(due), "asked": 0, "screened": 0,
              "judged": 0, "connected": {}, "none": 0, "unsure": 0, "refused": 0, "failed": 0,
              "cost_usd": {"jev": 0.0, "terra": 0.0}, "stopped": None}
+    done = set()
     for a, b, text, h in due[:limit]:
         segment_ids = egress.segments_of(conn, [a, b])
         try:
@@ -256,6 +294,7 @@ def stage(conn, judge, screen: jev.Jev | None, monthly_cap_usd: float = 20.0, li
             stats["failed"] += 1
             continue
         _record(conn, a, b, m, v, h, segment_ids, egress_id)
+        done.add((a, b))
         label = v["verdict"]
         stats["judged"] += label != "screened"
         if label in CONNECTED:
@@ -265,4 +304,4 @@ def stage(conn, judge, screen: jev.Jev | None, monthly_cap_usd: float = 20.0, li
     with conn.transaction():
         citations.cite(conn)
     stats["cost_usd"] = {k: round(c, 6) for k, c in stats["cost_usd"].items()}
-    return stats
+    return reread.add(stats, held_report(conn, [p for p in kept if p[:2] not in done], screen, chat))

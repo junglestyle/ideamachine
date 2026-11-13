@@ -271,18 +271,19 @@ def test_im_run_goes_on_without_claude(pipe, cfg, stream, monkeypatch, capsys):
     assert out["route"]["waiting_for_claude"] == 8   # the ninth is only other people talking: routed without Claude
 
 
-def test_pending_reports_what_would_be_resent(pipe, cfg, stream, monkeypatch, capsys):
+def test_pending_reports_what_would_be_resent_and_what_the_gate_holds(pipe, cfg, stream, monkeypatch, capsys):
     from im import cli
 
     run(pipe, cfg, stream)
     extract.run_stage(pipe, FakeClaude())
     monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
     cli.main(["pending", "--expect-none-resent"])
-    assert json.loads(capsys.readouterr().out)["already_extracted_would_resend"] == 0
-    cli.main(["pending", "--prompt", "v5.2"])   # what another prompt would read, and what those reads cost
     out = json.loads(capsys.readouterr().out)
-    assert out["episodes_to_extract"] == 8 and out["already_extracted_would_resend"] == 0
-    assert out["their_last_reads_cost_usd"] > 0
+    assert out["already_extracted_would_resend"] == 0 and out["held"] == {}
+    cli.main(["pending", "--prompt", "v5.2"])   # another prompt holds what was read, and says what it would cost
+    out = json.loads(capsys.readouterr().out)
+    assert out["episodes_to_extract"] == 0 and out["already_extracted_would_resend"] == 0
+    assert out["held"]["extract"]["held"] == 8 and out["held"]["extract"]["estimated_usd"] > 0
     monkeypatch.setenv("TZ", "Asia/Tokyo")  # a machine in another time zone renders different payloads
     time.tzset()
     try:

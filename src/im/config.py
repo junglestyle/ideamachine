@@ -45,7 +45,7 @@ class ExtractConfig:
     enabled: bool = True
     model: str = "claude-opus-5-5"
     effort: str = "medium"
-    prompt: str = "v5.3"                 # extract.LIVE; a new prompt re-reads every episode, so trial it first
+    prompt: str = "v5.3"                 # extract.LIVE; a new one reads new speech, the rest waits for `im reread`
     monthly_cap_usd: float = 20.0        # every paid request stops once the month's egress spend reaches this
     max_episodes_per_run: int | None = None
     max_tokens: int | None = None        # a request's output budget, reasoning included (None: llm.MAX_TOKENS)
@@ -54,9 +54,9 @@ class ExtractConfig:
 @dataclass(frozen=True)
 class ModelConfig:
     """The model a stage asks, and its effort: [match], [themes], [digest], [connect]. Both go into the stage's version:
-    a change re-asks what that stage keys on its version (every idea that fits no theme, every pair the connection
-    judge has judged); the matcher and the digest use it from then on. `max_tokens`, a request's output budget, isn't
-    in the version (None: the stage's own)."""
+    what that stage did under the old one (the ideas that fit no theme, the pairs the connection judge has judged) is
+    held until `im reread` (im.reread); the matcher and the digest use it from then on. `max_tokens`, a request's
+    output budget, isn't in the version (None: the stage's own)."""
     model: str = "claude-opus-5-5"
     effort: str = "low"
     max_tokens: int | None = None

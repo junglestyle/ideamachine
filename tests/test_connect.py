@@ -48,11 +48,11 @@ def terra(answer=lambda text: "related"):
     return llm.OpenRouter(post=post), sent
 
 
-def judge(conn, belongs=lambda state: 0.9, answer=lambda text: "related", limit=None):
-    """One run of the judge: its stats, what Jev was sent, and what Terra was."""
+def judge(conn, belongs=lambda state: 0.9, answer=lambda text: "related", limit=None, held_only=False):
+    """One run of the judge: its stats, what Jev was sent, and what Terra was. `held_only`: `im reread connect`."""
     jev_client, jev_sent = screen(belongs)
     terra_client, terra_sent = terra(answer)
-    return connect.stage(conn, terra_client, jev_client, limit=limit), jev_sent, terra_sent
+    return connect.stage(conn, terra_client, jev_client, limit=limit, held_only=held_only), jev_sent, terra_sent
 
 
 def idea(conn, word: str):
@@ -161,7 +161,7 @@ def test_a_pair_jev_screens_out_never_reaches_terra_and_loses_its_stand_in_for_g
     assert_invariants(nearby)
 
 
-def test_a_pair_is_asked_once_until_its_text_or_the_method_changes(nearby, monkeypatch):
+def test_a_pair_is_asked_once_until_its_text_changes_or_i_approve_a_new_method(nearby, monkeypatch):
     first, _, _ = judge(nearby)
     assert first["connected"] == {"related": first["nominated"]}
     assert set(methods(nearby).values()) == {connect.method()}   # every stand-in replaced, the judge's too
@@ -174,16 +174,19 @@ def test_a_pair_is_asked_once_until_its_text_or_the_method_changes(nearby, monke
     involved = sum(coffee in p for p in verdicts(nearby))
     assert third["due"] == third["asked"] == len(jev_sent) == len(terra_sent) == involved
     assert all("Whoever orders the coffee" in t for t in terra_sent)
-    monkeypatch.setattr(connect, "SCREEN_CUT", 0.5)   # a new method: every pair again (Jev's answers are kept)
-    fourth, jev_sent, terra_sent = judge(nearby)
-    assert fourth["due"] == len(terra_sent) == first["nominated"] and not jev_sent
+    monkeypatch.setattr(connect, "SCREEN_CUT", 0.5)   # a new method: every pair held, until I approve it
+    held, jev_sent, terra_sent = judge(nearby)
+    assert held["due"] == 0 and held["held"]["held"] == first["nominated"] and not jev_sent and not terra_sent
+    fourth, jev_sent, terra_sent = judge(nearby, held_only=True)   # Jev's answers are kept
+    assert fourth["due"] == len(terra_sent) == first["nominated"] and not jev_sent and "held" not in fourth
     assert set(table(nearby, "SELECT DISTINCT method FROM im.connection_verdicts")) == {(connect.method(),)}
 
 
 def test_none_unsure_and_a_refusal_remove_the_connection_and_relate_doesnt_restore_it(nearby, monkeypatch):
     judge(nearby)   # Terra connects every pair
     monkeypatch.setattr(connect, "SCREEN_CUT", 0.5)
-    out, _, _ = judge(nearby, answer=lambda t: None if "coffee" in t else "unsure" if "grape" in t else "none")
+    out, _, _ = judge(nearby, answer=lambda t: None if "coffee" in t else "unsure" if "grape" in t else "none",
+                      held_only=True)
     assert out["refused"] > 0 and out["unsure"] > 0 and out["none"] > 0 and out["connected"] == {}
     assert out["refused"] + out["unsure"] + out["none"] == out["judged"] == every_pair(nearby)
     assert methods(nearby) == {}
@@ -220,7 +223,7 @@ def test_kinds_are_written_with_their_direction_and_same_goes_to_my_merge_review
     review = "SELECT idea_ids, item_id, method FROM im.merge_review WHERE kind = 'judged_same'"
     assert table(nearby, review) == [(list(same), None, connect.method())]
     monkeypatch.setattr(connect, "SCREEN_CUT", 0.5)
-    judge(nearby, answer=answer)   # asked again: the kinds are the new method's, and same is logged once
+    judge(nearby, answer=answer, held_only=True)   # asked again: the kinds are the new method's, and same once
     assert set(table(nearby, "SELECT DISTINCT method FROM im.connection_kinds")) == {(connect.method(),)}
     assert len(table(nearby, review)) == 1
     assert_invariants(nearby)

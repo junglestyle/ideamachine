@@ -29,6 +29,11 @@ What the pipeline keeps true, whatever the stage:
   is logged with the segment IDs it carried and what it cost. Every paid request goes one way, `im.egress.send`: it
   checks the monthly cap, sends, and logs before reading the answer, so a reply that can't be read is still logged
   and counted, and fails as one item. A model with no known price isn't sent to.
+- **A version change never re-sends unasked.** A stage whose version changes (a prompt, schema, model, effort,
+  policy, question set, cut or method) sends new work, and work whose own input changed, under the new one. What it
+  did under the old one with the same input is held, its result live, and reported with its count and the logged
+  cost of its last requests (`im run`, `im pending`), until `im reread STAGE` sends it (`im.reread`; install.md,
+  "The re-read gate"). A new paid stage that keys its work on a version splits it the same way.
 
 ## Dependencies
 

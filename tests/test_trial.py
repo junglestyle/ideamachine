@@ -33,7 +33,7 @@ def test_an_answer_that_doesnt_keep_to_the_schema_is_paid_for_and_counts_toward_
 
 
 def test_the_live_prompt_keeps_its_version():
-    # Every extraction since the rebuild is filed under this; a different one would re-read every episode.
+    # Every extraction since the rebuild is filed under this; a different one would hold every episode for a re-read.
     assert extract.prompt_version("claude-opus-5-5", "medium") == "2fee34df8c9f5502" == \
         extract.prompt_version("claude-opus-5-5", "medium", extract.PROMPTS["v5.3"], extract.SCHEMA_V5)
 
