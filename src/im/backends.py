@@ -4,7 +4,7 @@
 - `laya`: Laya on CPU. Failed the first eval (docs/decisions/0002); kept for comparison.
 - `logreg`: logistic regression over sentence embeddings, trained on my labels: the baseline.
 
-Heavy imports (torch, laya, sentence-transformers, scikit-learn) happen
+Heavy imports (torch, laya, scikit-learn) happen
 inside the classes, so the rest of `im` runs without the `models` extra.
 """
 
@@ -223,29 +223,6 @@ class Embedder(Protocol):
     model_version: str
 
     def embed(self, texts: list[str]) -> np.ndarray: ...  # unit-length rows
-
-
-class SentenceEmbedder:
-    """A small local sentence-embedding model. Long transcripts are embedded in word
-    windows and mean-pooled, since the model reads 512 tokens at most."""
-
-    def __init__(self, model: str = "BAAI/bge-small-en-v1.5", window_words: int = 250):
-        self.model, self.window_words = model, window_words
-        self.model_version = f"{model};window={window_words};mean"
-        self._st = None
-
-    def embed(self, texts: list[str]) -> np.ndarray:
-        if self._st is None:
-            from sentence_transformers import SentenceTransformer
-
-            self._st = SentenceTransformer(self.model, device="cpu")
-        rows = []
-        for text in texts:
-            words = text.split()
-            chunks = [" ".join(words[i:i + self.window_words]) for i in range(0, max(len(words), 1), self.window_words)]
-            v = self._st.encode(chunks, normalize_embeddings=True).mean(axis=0)
-            rows.append(v / np.linalg.norm(v))
-        return np.vstack(rows)
 
 
 def _vec(v) -> str:

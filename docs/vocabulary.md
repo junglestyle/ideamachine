@@ -204,8 +204,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Register.** How something is said, such as a joke or irony, as against what it says. **Status:** meant for a
   judging pass after extraction, not built (ROADMAP-v2 §5 q10-11).
 - **Note-to-self cue.** An explicit spoken instruction, "note to self", to keep the thought that follows. Extraction
-  captures what follows it (`extract.SYSTEM_V5_3`), the router sends the episode to review
-  (`router.NOTE_TO_SELF`), and the line, with my next ones, goes on the attention queue when I said it.
+  captures what follows it (`extract.SYSTEM_V5_3`), the router sends the episode to review, and the line, with my
+  next ones, goes on the attention queue when I said it (`attention.NOTE_TO_SELF` finds it for both).
 
 ## Observations and clusters
 

@@ -10,11 +10,10 @@ import httpx2
 import pytest
 
 from im import egress, extract, feedback, importer, router
+from im.fixtures import iso
 
-from helpers import assert_invariants, episodes_with_text, run, table
-from test_label import script
+from helpers import HashEmbedder, assert_invariants, episodes_with_text, run, script, table
 from test_pipeline import COFFEE, CORRECTIONS, SECRET, V3_IDENTITY
-from test_triage import fixtures_iso
 
 class FakeClaude:
     """Answers with the items `respond(payload_text)` returns, and records every request."""
@@ -44,7 +43,7 @@ def coffee_item(text):
 
 
 def test_payload_pseudonymizes_speakers_and_numbers_lines(pipe, cfg, stream):
-    stream.conversations["c-conv"].taps = [fixtures_iso(20)]
+    stream.conversations["c-conv"].taps = [iso(20)]
     stream.write(stream.dir)
     run(pipe, cfg, stream)
     (eid,) = episodes_with_text(pipe, COFFEE)
@@ -204,7 +203,7 @@ def test_forgetting_purges_items_and_payloads_but_reports_what_was_sent(pipe, cf
 
 
 def test_router_routes_on_captures_taps_and_notes_and_respects_discards(pipe, cfg, stream):
-    stream.conversations["c-forget"].taps = [fixtures_iso(14408)]
+    stream.conversations["c-forget"].taps = [iso(14408)]
     stream.write(stream.dir)
     run(pipe, cfg, stream)
     first = router.run_stage(pipe)
@@ -333,14 +332,13 @@ def test_a_reply_that_fails_is_logged_and_counted_and_the_next_episodes_are_read
 
 def test_im_run_goes_on_past_a_reply_that_fails_to_the_stages_after_extraction(pipe, cfg, stream, monkeypatch,
                                                                                capsys):
-    from im import backends, cli
-    from test_triage import HashEmbedder
+    from im import cli, lattice
 
     run(pipe, cfg, stream)
     monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: pipe.info.dsn + " password=" + pipe.info.password)
     monkeypatch.setattr(cli.db, "stream_dir", lambda: stream.dir)
     monkeypatch.setattr(anthropic, "Anthropic", lambda: FailsOn("coffee", "no text"))
-    monkeypatch.setattr(backends, "SentenceEmbedder", lambda model: HashEmbedder())
+    monkeypatch.setattr(lattice, "SentenceEmbedder", lambda model: HashEmbedder())
     cli.main(["run"])
     out = json.loads(capsys.readouterr().out)
     assert (out["extract"]["read"], out["extract"]["failed"]) == (7, 1)

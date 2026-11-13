@@ -10,9 +10,8 @@ import pytest
 from im import config, connect, edge_audit, jev, lattice, llm, themes
 from im.config import Config, ConnectConfig
 
-from helpers import assert_invariants, run, table
+from helpers import HashEmbedder, assert_invariants, run, table
 from test_lattice import JUDGED
-from test_triage import HashEmbedder
 
 TERRA = "openai/gpt-6.1-terra"
 

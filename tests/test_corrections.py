@@ -8,11 +8,10 @@ import pytest
 from im import extract, lattice, themes
 from im.fixtures import _me
 
-from helpers import run, table
+from helpers import HashEmbedder, run, table
 from test_extract import FakeClaude
 from test_lattice import FakeMatcher, items_for
 from test_themes import FakeThemer
-from test_triage import HashEmbedder
 
 
 def event(admin, kind, idea_id, payload):

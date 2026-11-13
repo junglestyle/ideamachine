@@ -7,11 +7,11 @@ from types import SimpleNamespace
 
 from im import analogy_spike, connect, edge_audit, egress, probe_audit
 
+from helpers import HashEmbedder
 from test_edge_audit import NAMED, fill, named_clusters  # noqa: F401 (fixture)
 from test_lattice import seeded  # noqa: F401 (fixture)
 from test_probe_audit import every_pair, fake_jev
 from test_probe_audit import fill as fill_probe
-from test_triage import HashEmbedder
 
 class FakeChat:
     """Answers any audit's question, naming Bob in its reasoning if it was shown him, as a model would; and records

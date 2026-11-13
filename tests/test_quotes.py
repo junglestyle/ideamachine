@@ -2,9 +2,9 @@
 
 from im import extract, lattice, observations, quotes
 
-from helpers import run, table
+from helpers import HashEmbedder, run, table
 from test_extract import FakeClaude
-from test_lattice import FakeMatcher, HashEmbedder, _star_the_lora_capture, seeded  # noqa: F401 (fixture)
+from test_lattice import FakeMatcher, _star_the_lora_capture, seeded  # noqa: F401 (fixture)
 
 LINES = [("s1", "So I was saying, uh, the garden thing."),
          ("s2", "the garden sensors could report soil moisture over LoRa."),

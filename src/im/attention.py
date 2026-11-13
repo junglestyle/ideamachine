@@ -1,7 +1,7 @@
 """The attention queue: what I asked to look at again, by tapping the pendant or saying "note to self".
 
 Found in code, never by a model (migration 066). A tap is a time Hearsay lists for a conversation
-(`im.source_conversations.taps`); a note is a line of mine that the router's `NOTE_TO_SELF` matches. An item marks lines
+(`im.source_conversations.taps`); a note is a line of mine that `NOTE_TO_SELF` matches. An item marks lines
 and changes nothing about them: extraction, captures and cards go on as if it weren't there, and removing an item
 (`im queue remove`) only marks it removed, for good.
 
@@ -18,14 +18,14 @@ A tap Hearsay stops listing keeps its item, as last anchored. Removed items are 
 outlives any correction. Items hang off segments, not episodes, so re-segmentation doesn't touch them.
 """
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-
-from im.router import NOTE_TO_SELF
 
 SCHEMA_VERSION = 1
 STAGE_VERSION = "attention/1"
 TAP_WINDOW = timedelta(seconds=30)    # what a tap keeps either side of it (Hearsay's README)
+NOTE_TO_SELF = re.compile(r"\bnote to (my)?self\b", re.IGNORECASE)   # a note-to-self cue, in one of my lines
 NOTE_LINES = 3                        # my lines after a note's own that it marks...
 NOTE_SECONDS = timedelta(minutes=2)   # ...if they start within this of it
 CONTEXT = timedelta(seconds=30)       # everyone's lines shown either side of what an item marks

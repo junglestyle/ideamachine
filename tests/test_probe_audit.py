@@ -11,10 +11,9 @@ import pytest
 
 from im import egress, jev, llm, probe_audit
 
-from helpers import system_of
+from helpers import HashEmbedder, system_of
 from test_edge_audit import lattice_with_clusters  # noqa: F401 (fixture)
 from test_lattice import seeded  # noqa: F401 (fixture)
-from test_triage import HashEmbedder
 
 SHARED = "an agent keeps the option that cannot fail badly"
 

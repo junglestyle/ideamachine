@@ -8,16 +8,10 @@ import pytest
 from im import label, pipeline, projects
 from im.config import Config, SegmentConfig
 
-from helpers import episodes_with_text, run, table
+from helpers import episodes_with_text, run, script, table
 from test_pipeline import BACKUP, COFFEE, CORRECTIONS, HOSTING, SECRET
 
 ANSWERS = {"boundaries": "ok", "is_self_thinking": False, "kind": "chatter", "project": None, "keep_score": 2}
-
-
-def script(*lines):
-    """A `read` that answers prompts in order, and a `write` that records output."""
-    it, out = iter(lines), []
-    return (lambda prompt="": next(it)), out.append, out
 
 
 def label_text(pipe, text, **answers):

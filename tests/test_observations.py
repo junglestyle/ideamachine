@@ -2,11 +2,10 @@
 
 from im import extract, lattice, observations
 
-from helpers import assert_invariants, run, segment_of, table
+from helpers import HashEmbedder, assert_invariants, run, segment_of, table
 from test_carry import DATABASE, capture, current_items, retranscribe
 from test_extract import FakeClaude
 from test_lattice import FakeMatcher, items_for, seeded  # noqa: F401
-from test_triage import HashEmbedder
 
 LORA = "Idea: the garden sensors could report soil moisture over LoRa."
 

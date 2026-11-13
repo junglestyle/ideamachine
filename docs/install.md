@@ -195,7 +195,7 @@ Then, outside that transaction:
 
 - **Attention queue** (`src/im/attention.py`, code only, before anything is sent). Each pendant tap Hearsay lists
   becomes an item marking my lines from 30 s before it to 30 s after, and each line of mine where I say "note to
-  self" (the router's `NOTE_TO_SELF`) one marking that line and my next ones, up to three within two minutes. Items
+  self" (`attention.NOTE_TO_SELF`) one marking that line and my next ones, up to three within two minutes. Items
   already there are re-anchored to the current lines: a tap's item is keyed by its time, so it's the same item
   after a conversation is split or merged; a note's by its line, so when a re-transcription replaces that line, the
   new one takes the item over if it descends from the old one and still says "note to self" (else the item stays,

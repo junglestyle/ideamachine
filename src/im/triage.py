@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from im import projects
+from im.egress import _part_of_day
 
 SCHEMA_VERSION = 1
 STAGE_VERSION = "triage/1"
@@ -110,11 +111,6 @@ def render(conn, episode_ids) -> list[EpisodeState]:
                         + " (a tap means: keep what I said around then).")
         out.append(EpisodeState(eid, "\n".join(lines[eid]), context, tuple(taps.get(eid, ()))))
     return out
-
-
-def _part_of_day(hour: int) -> str:
-    return ("night" if hour < 5 else "morning" if hour < 12 else "afternoon" if hour < 17
-            else "evening" if hour < 22 else "night")
 
 
 @dataclass(frozen=True)

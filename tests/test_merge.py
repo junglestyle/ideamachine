@@ -7,10 +7,9 @@ import pytest
 
 from im import extract, fixtures, lattice
 
-from helpers import assert_invariants, run, table
+from helpers import HashEmbedder, assert_invariants, run, table
 from test_extract import FakeClaude
 from test_lattice import FakeMatcher, items_for, lat_setup
-from test_triage import HashEmbedder
 
 EVENT = "INSERT INTO pub.feedback_events (kind, idea_id, other_idea_id, payload, source) VALUES (%s, %s, %s, %s, 'cli')"
 

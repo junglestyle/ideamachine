@@ -8,9 +8,9 @@ import pytest
 
 from im import digest, lattice, observations
 
-from helpers import assert_invariants, table
+from helpers import HashEmbedder, assert_invariants, table
 from test_digest import WEEK, FakeDigester
-from test_lattice import FakeMatcher, HashEmbedder
+from test_lattice import FakeMatcher
 from test_review import as_web_role
 
 ADD = "INSERT INTO pub.feedback_events (at, kind, idea_id, payload, source) VALUES (%s, 'idea_add', %s, %s, %s)"
