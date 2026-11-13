@@ -13,7 +13,9 @@ set -a; . ./.env; set +a
 uv sync --extra models          # CPU-only torch, Laya, sentence-transformers, scikit-learn
 uv run im migrate                 # im schema
 uv run im load-fixtures           # a synthetic Hearsay stream in $IM_STREAM_DIR (dev/stream)
-uv run im run                     # import + segment + extract ideas with Claude + route; idempotent
+uv run im run                     # import + segment + queue taps and notes to self + extract ideas with Claude + route; idempotent
+uv run im queue                   # the attention queue: what I tapped the pendant for or called a note to self, with its lines, newest first
+uv run im queue remove 3          # take item #3 off the queue (only marks it removed; nothing else changes)
 uv run im pending                 # what the next run would send, and what the re-read gate holds per stage, with its estimated cost; sends nothing
 uv run im reread extract --limit 20   # approve held re-reads: 20 episodes read again under the current prompt (0: only the count and estimate)
 uv run im ideas                   # what Claude captured; --review to keep or discard each item
@@ -169,13 +171,24 @@ One REPEATABLE READ transaction:
    a `forgotten.json` span.
 2. **Purge.** Delete everything made from a forgotten segment: every episode (current or retired) that contains
    one; every label, idea, digest, verdict and observation made from one; the feedback events on captures of it, even
-   once the capture is gone; and the classifiers trained on those labels.
+   once the capture is gone; and the classifiers trained on those labels. A note to self whose line is forgotten
+   leaves the attention queue, and every other item there loses the forgotten lines it marked.
 3. **Segment.** Re-segment conversations whose membership changed, or whose episodes are stale or missing.
    Episodes are content-addressed (`uuid5(stage_version, input_hash)`), so unchanged episodes aren't touched,
    ones that no longer come out are retired (`current = false`), and new ones are inserted.
 
 Then, outside that transaction:
 
+- **Attention queue** (`src/im/attention.py`, code only, before anything is sent). Each pendant tap Hearsay lists
+  becomes an item marking my lines from 30 s before it to 30 s after, and each line of mine where I say "note to
+  self" (the router's `NOTE_TO_SELF`) one marking that line and my next ones, up to three within two minutes. Items
+  already there are re-anchored to the current lines: a tap's item is keyed by its time, so it's the same item
+  after a conversation is split or merged; a note's by its line, so when a re-transcription replaces that line, the
+  new one takes the item over if it descends from the old one and still says "note to self" (else the item stays,
+  as first heard). Re-segmenting touches no item, and a second run changes nothing. An item changes nothing about
+  the speech: extraction, captures and routing go on as if it weren't there. `im queue remove` marks one removed,
+  for good: a later run never brings it back. There's no `im reset --stage` for it, since the removals are mine and
+  the anchors are re-derived every run.
 - **Triage.** Each configured backend (none by default; see [decisions/0004](decisions/0004-claude-extraction.md)) answers the triage questions for
   current episodes whose rendered input it hasn't answered yet, newest first, committing in small batches. If
   Ollama is down or the GPU is busy, the run notes it and goes on.

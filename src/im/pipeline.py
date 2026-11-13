@@ -32,8 +32,8 @@ def _finish_run(conn, run_id: int, stats: dict) -> None:
 
 def _purge_tombstoned(conn) -> tuple[set[str], int]:
     """Delete everything that holds a forgotten segment (ROADMAP §3.4): every episode (current or retired), label,
-    idea, digest, verdict, observation and feedback event made from it, and the classifiers trained on its labels.
-    Labels are human input, and this is the only thing that deletes them."""
+    idea, digest, verdict, observation and feedback event made from it, and the classifiers trained on its labels; and
+    take it out of the attention queue. Labels are human input, and this is the only thing that deletes them."""
     labels = [r[0] for r in conn.execute(
         """DELETE FROM im.labels l WHERE EXISTS (
              SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(l.segment_ids))
@@ -65,6 +65,14 @@ def _purge_tombstoned(conn) -> tuple[set[str], int]:
     # again. The connection it wrote stays until then.
     conn.execute("""DELETE FROM im.connection_verdicts v WHERE EXISTS (
                       SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(v.segment_ids))""")
+    # An attention item is my request, not derived from what was said: one whose own "note to self" is forgotten goes,
+    # and every other loses only the forgotten lines it marked (migration 066).
+    conn.execute("""DELETE FROM im.attention_items a WHERE EXISTS (
+                      SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = a.cue_segment_id)""")
+    conn.execute("""UPDATE im.attention_items a SET segment_ids = ARRAY(
+                      SELECT u.seg FROM unnest(a.segment_ids) WITH ORDINALITY AS u(seg, n)
+                      WHERE NOT EXISTS (SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = u.seg) ORDER BY u.n)
+                    WHERE EXISTS (SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(a.segment_ids))""")
     citations.uncite_missing(conn)   # an edge loses the forgotten observations it cited
     # What was sent can't be recalled, but the local copy of the text goes; the segment IDs stay so
     # `im forgotten --sent` can say what went out.

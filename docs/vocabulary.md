@@ -1,6 +1,6 @@
 # Vocabulary
 
-_As of 2026-11-12. What each term in Idea Machine is, where it's stored, and what it isn't. Definitions say what a
+_As of 2026-11-13. What each term in Idea Machine is, where it's stored, and what it isn't. Definitions say what a
 thing is. Where it matters, they keep three things apart: the thing, how it's stored, and how it came about. Status
 (what's built, what's planned) goes in a trailing **Status** note, and history is left to the decisions. Words that
 mean two things, or two words that mean one, are listed at the end, each with the one meaning to use._
@@ -78,7 +78,16 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Speaker label.** The display name on a segment: `me`, a name, `anon A` or `unknown` (002:27).
 - **Tap.** A press on the pendant, recorded as a time (`source_conversations.taps`, 005:1-2). An episode's taps are
   those within 30 s of it (`triage.py`). To extraction a tap is a prompt cue: "A tap usually means I wanted something
-  kept: look closely at what I said around that time" (`extract.SYSTEM_V5_3`). _Not_ tapping a star on the sky.
+  kept: look closely at what I said around that time" (`extract.SYSTEM_V5_3`). A tap also puts my lines around it on
+  the attention queue. _Not_ tapping a star on the sky.
+- **Attention queue (attention item).** What I asked to look at again, by a tap or a note-to-self cue: one item each
+  (`im.attention_items`, 066; `attention.py`). An item marks lines: for a tap my lines from 30 s before it to 30 s
+  after, in every conversation that lists it; for a note its line and my next lines, up to three within two minutes.
+  Both are found in code, never by a model. An item changes nothing else: the speech is extracted, captured and
+  routed as if it weren't there, and removing it (`im queue remove`) only marks it removed, for good. A tap's item
+  is keyed by the tap's time and a note's by its line, which a re-transcription hands on through supersession, so
+  each is one item whatever is corrected. _Not_ the router's review queue (`im review`), and _not_ capture review
+  (`im ideas --review`).
 - **Places.** The places I named for a conversation, with their times (013:3-5).
 - **Affect, arousal.** Affect is the stream's container for measures of how I sounded. Arousal is the measure in it:
   how animated I sounded, about 0 to 1, from the audio alone, meaning tone of voice and not sentiment (013:7-9).
@@ -195,8 +204,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Register.** How something is said, such as a joke or irony, as against what it says. **Status:** meant for a
   judging pass after extraction, not built (ROADMAP-v2 §5 q10-11).
 - **Note-to-self cue.** An explicit spoken instruction, "note to self", to keep the thought that follows. Extraction
-  captures what follows it (`extract.SYSTEM_V5_3`), and the router sends the episode to review
-  (`router.NOTE_TO_SELF`).
+  captures what follows it (`extract.SYSTEM_V5_3`), the router sends the episode to review
+  (`router.NOTE_TO_SELF`), and the line, with my next ones, goes on the attention queue when I said it.
 
 ## Observations and clusters
 
@@ -656,6 +665,9 @@ Each role decides one thing. The model behind it can change, so models are liste
   stored, or linked by me.
 - **Analogy, analogy lens.** An analogy is a correspondence between ideas. An analogy lens is the query I keep for
   it.
+- **Attention queue, review queue.** The attention queue holds what I asked for myself, a tap or a note to self, as
+  the lines it marks (`im queue`). The review queue is the router's: episodes it sent me, for any of its reasons,
+  captures included (`im review`).
 
 ## Overloaded or drifting terms
 
