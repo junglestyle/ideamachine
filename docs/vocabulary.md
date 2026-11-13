@@ -289,10 +289,11 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   and reading say (`im.ideas.statement`). It's written once, by the matcher, falling back to the gist when it reads as
   said (`lattice.match_stage`), and it's kept as `claude_statement`; it changes only when I correct it, so it's a
   stable anchor for retrieval. My latest correction overrides it.
-- **My note.** My latest `idea_note` on a cluster (`my_note`, 011:23-24).
+- **My note.** My latest `idea_note` on a cluster (`my_note`, 011:23-24), written by `im idea edit --note`.
 - **Archive elaboration.** What the ChatGPT archive developed around one of its seeded ideas, in the archived
   database (`im.ideas.notes`, 008:12). In the live database `notes` holds only the note I typed adding an idea (023).
-- **Correction.** An `idea_correct` event that replaces a cluster's title or statement (011).
+- **Correction.** An `idea_correct` event that replaces a cluster's title or statement (011), or reverts one with an
+  empty value. `im idea edit` writes it (`im.idea`, source `cli`); Lattice did until 2026-11-11.
 - **Feedback event.** A recorded action or judgment of mine (`pub.feedback_events`, 008:88-98). `source` says where I
   made it: `cli` or `emanation`, `merge` for what a merge carried to the cluster kept (`merge.MERGED`), and `lattice`
   or `mcp` for Lattice's, until 2026-11-11. Where events disagree, my latest is the one with the highest `event_id`;

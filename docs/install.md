@@ -43,6 +43,8 @@ uv run im merges --limit 0       # the merge screen: likely duplicate clusters, 
 uv run im merges --top 50        # Jev asks same_v2 about every pair not answered for its current text, then the top 50
 uv run im merge KEEP OTHER        # merge cluster OTHER into KEEP (full ids): its captures, observations and connections move; KEEP's title and statement stay
 uv run im merge --distinct A B    # mark two clusters as distinct points: im merges stops listing them
+uv run im idea show ID           # a card (full id or unique prefix): its text, whether I corrected it, its quotes, and the text of the clusters merged into it
+uv run im idea edit ID --statement "..."   # correct a card's --title, --statement or --note; '' reverts to Claude's
 uv run im themes                  # themes; im themes pin|unpin|reject <name>, im themes rename <name> <new name>
 uv run im load-fixtures --scenario edited   # the same stream after every kind of correction and a forget
 uv run im run
@@ -117,6 +119,14 @@ about KEEP's new neighbors on its own. My links on OTHER count for KEEP, and how
 wasn't kept. KEEP's title, statement and note stay; OTHER's, as shown, are printed and kept in `im.idea_merges`, which
 records what moved. OTHER is no card and no matcher candidate from then on, and a `merge_review` row whose clusters
 are now one is resolved. It refuses the same id twice, an unknown id, and a cluster already merged away.
+
+`im idea edit ID` corrects a card, as Lattice did: one `idea_correct` event with only the fields given (`--title`,
+`--statement`) and an `idea_note` for `--note`, source `cli`, printing the card before and after. An empty value
+reverts to Claude's original (no note, for the note). A title takes at most 120 characters, a statement and a note
+1000. It takes a full id or a unique prefix, and refuses an unknown id, a cluster merged away (naming the one it's
+part of now), and an edit with no field. Every stage that reads the card's text sees the change as changed input on
+the next run, not a version change, so the re-read gate doesn't hold it. After a merge, `im idea show KEEP` prints
+the title and statement each merged cluster had, to fold its detail into KEEP's with `im idea edit`.
 
 `im merges` is the merge screen (B9m). Its pairs are the open `merge_review` rows (`duplicate`, `judged_same`) and
 the pairs the connection judge nominates (one definition of near), both still cards, leaving out pairs I unlinked

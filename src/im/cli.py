@@ -652,6 +652,18 @@ def cmd_merges(args) -> None:
         print(merge.listing(rows, stats, args.top))
 
 
+def cmd_idea(args) -> None:
+    """One card: show its text, quotes and what was merged into it, or correct its title, statement or note."""
+    from im import idea
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        try:
+            print(idea.show(conn, args.id) if args.action == "show"
+                  else idea.edit(conn, args.id, args.title, args.statement, args.note))
+        except ValueError as e:
+            raise SystemExit(f"im idea {args.action}: {e}") from None
+
+
 def cmd_ideas(args) -> None:
     from im import extract
 
@@ -1016,6 +1028,18 @@ def main(argv=None) -> None:
     ms.add_argument("--top", type=int, default=20, help="how many pairs to print (default 20)")
     ms.add_argument("--limit", type=int, help="ask Jev about at most this many pairs this time (0: send nothing)")
     ms.set_defaults(func=cmd_merges)
+    ie = sub.add_parser("idea", help="one card: show it, or correct its title, statement or note")
+    iea = ie.add_subparsers(dest="action", required=True, metavar="action")
+    ish = iea.add_parser("show", help="its text, whether I corrected it, its quotes, and the text of the clusters "
+                         "merged into it")
+    ish.add_argument("id", help="the cluster's id or a unique prefix")
+    ied = iea.add_parser("edit", help="correct it: only the fields given change; an empty value reverts to Claude's "
+                         "(no note, for the note)")
+    ied.add_argument("id", help="the cluster's id or a unique prefix")
+    ied.add_argument("--title", help="at most 120 characters")
+    ied.add_argument("--statement", help="at most 1000 characters")
+    ied.add_argument("--note", help="my note, at most 1000 characters")
+    ie.set_defaults(func=cmd_idea)
     th = sub.add_parser("themes", help="list themes; pin, unpin, rename or reject one")
     th.add_argument("action", nargs="?", default="list", choices=["list", "pin", "unpin", "rename", "reject"])
     th.add_argument("theme", nargs="?", help="theme name (or its start), or id prefix")
