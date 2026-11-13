@@ -131,6 +131,7 @@ const REACHED = [.75, .3, .16, .08];   // a link's opacity by how many hops out 
 const FADE = [1, 1, .85, .65, .5], UNLIT = .45;   // a star's brightness by its hops, and beyond reach
 const KNOCK = 10, LOSS = .68, SPRING = 260, DAMP = 150;   // px at the first hop, kept per hop, ms a swing, ms to settle
 let ripple = null, near = null;
+let lit = null;   // a star tapped once: ringed and named, not yet picked
 function reach(s) {
   const depth = new Map([[s.i, 0]]), edges = [];
   let rim = [s.i], far = 0;
@@ -224,17 +225,22 @@ function draw(now) {
     if (struck && d === 0) { a = 1; r *= 1.25; }
     else if (struck && d === 1) { a = Math.max(a, .9); r *= 1.15; }
     else if (near && !D.rel) a *= struck ? FADE[d] : UNLIT;
+    if (s === lit) { a = 1; r *= 1.2; }
     g.globalAlpha = Math.min(a, 1); g.drawImage(s.img, x - r * REACH, y - r * REACH, 2 * r * REACH, 2 * r * REACH);
   }
   g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
   const labelled = D.rel ? S.filter(s => s.rel > 0).sort((a, b) => b.rel - a.rel).slice(0, 9) : [];
   if (selected && drawn >= 1) for (const j of selected.next.slice(0, NAMED)) if (!labelled.includes(S[j])) labelled.push(S[j]);
   if (selected && !labelled.includes(selected)) labelled.push(selected);
+  if (lit) {
+    g.strokeStyle = "rgba(255, 255, 255, .7)"; g.lineWidth = 1; g.beginPath(); g.arc(sx(lit), sy(lit), 11, 0, 6.283); g.stroke();
+    if (!labelled.includes(lit)) labelled.push(lit);
+  }
   g.font = "12px system-ui, sans-serif"; g.textBaseline = "middle";
   for (const s of labelled) {
     const t = s.title.length > 42 ? s.title.slice(0, 40) + "…" : s.title;
     g.fillStyle = s === selected ? "#ffffff" : "rgba(232, 234, 242, .8)";
-    g.fillText(t, sx(s) + 8, sy(s));
+    g.fillText(t, sx(s) + (s === lit ? 15 : 8), sy(s));
   }
 }
 // The sky twinkles at 30 frames a second while the page is in view, and draws every frame while a ripple runs or
@@ -270,6 +276,15 @@ function select(s, tapped) {
     document.getElementById("lens").href = "/sky?seed=" + s.id;
   }
   redraw();
+}
+
+// The first tap on a star lights it, and keeps what's picked; a tap on the lit star picks it. A tap on nothing puts
+// the lit star out, and another clears what's picked. So a stray tap while panning never changes the selection.
+function tap(s) {
+  if (s && s !== lit) { lit = s; redraw(); }
+  else if (s) { lit = null; select(s, true); }
+  else if (lit) { lit = null; redraw(); }
+  else select(null);
 }
 
 function hit(px, py) {
@@ -311,7 +326,7 @@ c.addEventListener("pointermove", e => {
 const up = e => {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
-  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") select(hit(e.clientX, e.clientY), true);
+  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") tap(hit(e.clientX, e.clientY));
   down = null;
 };
 c.addEventListener("pointerup", up);
@@ -323,6 +338,7 @@ addEventListener("resize", resize);
 // A lens lights the map in place: the page fetches only its relevance (/sky/lens), and the address and history
 // follow, so back returns to the sky as it was. If the fetch fails, the link loads the page as before.
 function show() {
+  lit = null;
   for (const s of S) s.rel = D.rel ? (D.rel[s.id] || 0) : 1;
   document.getElementById("home").hidden = !D.seed;
   const lit = D.rel ? S.filter(s => s.rel >= .25) : S;

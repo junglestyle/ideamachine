@@ -1,9 +1,9 @@
 <!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Trails</title>
 <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#0b0d14">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#070910">
 <style>
-:root { --bg: #0b0d14; --fg: #e8eaf2; --muted: #9aa0b4; --panel: rgba(20, 23, 34, .92); --accent: #9db8ff;
+:root { --bg: #070910; --fg: #e8eaf2; --muted: #9aa0b4; --panel: rgba(20, 23, 34, .92); --accent: #9db8ff;
   --trail: #ffecc8; --line: rgba(255, 255, 255, .09); --strip: 76px; --side: 21rem; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
   font: 15px/1.45 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
@@ -18,7 +18,7 @@ nav { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 16px; dis
 nav > * { background: var(--panel); border-radius: 6px; }
 nav a { padding: 4px 10px; }
 #strip { position: fixed; left: 0; right: 0; bottom: 0; height: calc(var(--strip) + env(safe-area-inset-bottom));
-  background: linear-gradient(transparent, rgba(11, 13, 20, .96) 30%); touch-action: none; cursor: ew-resize; }
+  background: linear-gradient(transparent, rgba(7, 9, 16, .96) 30%); touch-action: none; cursor: ew-resize; }
 #strip canvas { display: block; width: 100%; height: var(--strip); }
 #side { position: fixed; top: max(12px, env(safe-area-inset-top)); right: 16px; width: var(--side);
   max-height: calc(100vh - var(--strip) - 40px); background: var(--panel); border-radius: 10px; display: flex;
@@ -103,21 +103,64 @@ let W = 0, H = 0, dpr = 1, cam = {x: 0, y: 0, k: 200}, goal = null;
 let cur = 0, stop = null, drawn = 1, playing = false, all = false, follow = true, started = 0, raf = 0;
 const GHOSTS = 5;   // how many earlier conversations stay as fading afterimages
 
-const HUES = 48, SPRITE = 64, sprites = [];
-function sprite(hue) {
-  const h = Math.round(hue / (360 / HUES)) % HUES;
-  if (!sprites[h]) {
-    const sp = document.createElement("canvas"), R = SPRITE / 2; sp.width = sp.height = SPRITE;
-    const q = sp.getContext("2d"), grad = q.createRadialGradient(R, R, 0, R, R, R), color = h * (360 / HUES);
-    grad.addColorStop(0, `hsla(${color}, 55%, 84%, 1)`);
-    grad.addColorStop(.4, `hsla(${color}, 55%, 75%, .85)`);
-    grad.addColorStop(1, `hsla(${color}, 55%, 70%, 0)`);
-    q.fillStyle = grad; q.fillRect(0, 0, SPRITE, SPRITE);
-    sprites[h] = sp;
+// Stars as the sky draws them: a white core, a faint halo of its color, and, when a trail lights it, four spikes.
+const HUES = 48, SPRITE = 128, REACH = 7, sprites = new Map();
+function sprite(hue, sharp) {
+  const h = Math.round(hue / (360 / HUES)) % HUES, key = h * 2 + (sharp ? 1 : 0);
+  if (!sprites.has(key)) {
+    const sp = document.createElement("canvas"), R = SPRITE / 2, core = R / REACH * 1.2; sp.width = sp.height = SPRITE;
+    const q = sp.getContext("2d"), color = h * (360 / HUES);
+    q.globalCompositeOperation = "lighter";
+    const halo = q.createRadialGradient(R, R, 0, R, R, R);
+    halo.addColorStop(0, `hsla(${color}, 60%, 70%, .22)`); halo.addColorStop(.3, `hsla(${color}, 60%, 62%, .06)`);
+    halo.addColorStop(1, `hsla(${color}, 60%, 55%, 0)`); q.fillStyle = halo; q.fillRect(0, 0, SPRITE, SPRITE);
+    const point = q.createRadialGradient(R, R, 0, R, R, core * 1.3);
+    point.addColorStop(0, `hsla(${color}, 50%, 98%, 1)`); point.addColorStop(.45, `hsla(${color}, 60%, 88%, .85)`);
+    point.addColorStop(1, `hsla(${color}, 65%, 72%, 0)`); q.fillStyle = point; q.fillRect(0, 0, SPRITE, SPRITE);
+    if (sharp) for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      const reach = R * .9, spike = q.createLinearGradient(R - dx * reach, R - dy * reach, R + dx * reach, R + dy * reach);
+      spike.addColorStop(0, `hsla(${color}, 70%, 85%, 0)`); spike.addColorStop(.5, `hsla(${color}, 70%, 92%, .55)`);
+      spike.addColorStop(1, `hsla(${color}, 70%, 85%, 0)`); q.fillStyle = spike;
+      q.fillRect(R - (dx ? reach : 1.2), R - (dy ? reach : 1.2), dx ? 2 * reach : 2.4, dy ? 2 * reach : 2.4);
+    }
+    sprites.set(key, sp);
   }
-  return sprites[h];
+  return sprites.get(key);
 }
-for (const s of S) s.img = sprite(s.hue);
+for (const s of S) { s.img = sprite(s.hue, false); s.sharp = sprite(s.hue, true); s.dx = s.dy = 0; }
+
+// The haze behind the stars is the stars themselves, blurred, as on the sky: summed once over the map's extent and
+// stretched with the camera.
+const HAZE = 160, haze = document.createElement("canvas"), hz = {x: 0, y: 0, w: 1, h: 1};
+if (S.length) {
+  const xs = S.map(s => s.x), ys = S.map(s => s.y), x0 = Math.min(...xs), y0 = Math.min(...ys);
+  const wide = Math.max(Math.max(...xs) - x0, Math.max(...ys) - y0, .05), pad = wide * .3;
+  Object.assign(hz, {x: x0 - pad, y: y0 - pad, w: wide + 2 * pad, h: wide + 2 * pad});
+  haze.width = haze.height = HAZE;
+  const sum = new Float32Array(HAZE * HAZE * 3), sigma = HAZE * .028, reach = Math.ceil(4.5 * sigma);
+  for (const s of S) {
+    const cx = (s.x - hz.x) / hz.w * HAZE, cy = (s.y - hz.y) / hz.h * HAZE, h = s.hue / 60;
+    const rgb = [0, 4, 2].map(n => 1 - .6 * Math.max(0, Math.min(1, 2 - Math.abs((h + n) % 6 - 3))));
+    for (let y = Math.max(0, Math.floor(cy - reach)); y <= Math.min(HAZE - 1, cy + reach); y++)
+      for (let x = Math.max(0, Math.floor(cx - reach)); x <= Math.min(HAZE - 1, cx + reach); x++) {
+        const w = .6 * Math.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * sigma * sigma)), at = (y * HAZE + x) * 3;
+        sum[at] += w * rgb[0]; sum[at + 1] += w * rgb[1]; sum[at + 2] += w * rgb[2];
+      }
+  }
+  const q = haze.getContext("2d"), px = q.createImageData(HAZE, HAZE), full = 14;
+  for (let i = 0; i < HAZE * HAZE; i++) {
+    const r = sum[3 * i], gr = sum[3 * i + 1], b = sum[3 * i + 2], top = Math.max(r, gr, b, 1e-6);
+    px.data[4 * i] = 255 * r / top; px.data[4 * i + 1] = 255 * gr / top; px.data[4 * i + 2] = 255 * b / top;
+    px.data[4 * i + 3] = 255 * .22 * top / (top + full);
+  }
+  q.putImageData(px, 0, 0);
+}
+
+// As a trail is drawn, its head is a pulse: each stop it reaches flares and is knocked the way the trail was going,
+// then springs back to its place, as a tapped star's neighbors do on the sky.
+const KNOCK = 9, SPRING = 260, DAMP = 150, FLARE = 420, SETTLE = 900, still = matchMedia("(prefers-reduced-motion: reduce)");
+let pulsed = -1e9;   // when the trail now being drawn set off
+let glint = null;    // a star tapped once: ringed and named, not yet picked
 
 const narrow = () => W <= 760;
 // The part of the window the map is seen through: beside the list, above the strip.
@@ -152,8 +195,23 @@ const WARM = a => `rgba(255, 236, 200, ${a.toFixed(3)})`;
 
 function draw() {
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g.fillStyle = "#0b0d14"; g.fillRect(0, 0, W, H);
-  const grow = Math.min(2.2, .75 + .25 * Math.sqrt(cam.k / 200)), now = C[cur];
+  g.globalCompositeOperation = "source-over";
+  g.fillStyle = "#070910"; g.fillRect(0, 0, W, H);
+  const grow = Math.min(2.2, .75 + .25 * Math.sqrt(cam.k / 200)) * Math.max(.6, Math.min(1, Math.min(W, H) / 800)), now = C[cur];
+  g.globalCompositeOperation = "lighter";
+  g.drawImage(haze, (hz.x - cam.x) * cam.k + W / 2, (hz.y - cam.y) * cam.k + H / 2, hz.w * cam.k, hz.h * cam.k);
+  // The pulse: how hard each stop of the trail being drawn flares, and how far it's knocked, since the head got there.
+  const flare = new Map(), since0 = performance.now() - pulsed;
+  for (const s of S) s.dx = s.dy = 0;
+  if (now && !still.matches && now.path.length > 1 && since0 < drawTime(now) + SETTLE) now.stops.forEach((k, i) => {
+    const since = since0 - i * SAMPLES / (now.path.length - 1) * drawTime(now);
+    if (since <= 0 || since > SETTLE) return;
+    flare.set(k.s, Math.max(flare.get(k.s) || 0, Math.exp(-since / FLARE)));
+    if (!i) return;
+    const a = now.path[i * SAMPLES - 1], b = now.path[i * SAMPLES], len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const far = KNOCK * Math.exp(-since / DAMP) * Math.sin(6.283 * since / SPRING);
+    k.s.dx += (b[0] - a[0]) / len * far; k.s.dy += (b[1] - a[1]) / len * far;
+  });
   if (all) {
     g.lineWidth = 1; g.strokeStyle = "rgba(170, 180, 215, .06)";
     for (const conv of C) {
@@ -181,13 +239,22 @@ function draw() {
   for (const s of S) {
     const x = sx(s.x), y = sy(s.y);
     if (x < -40 || y < -40 || x > W + 40 || y > H + 40) continue;
-    const l = lit.get(s) || 0, r = RADIUS[s.size] * grow * (1 + .5 * l), halo = r * (2 + 1.2 * l + 2.6 * (heat.get(s) || 0));
-    g.globalAlpha = .2 + .8 * l; g.drawImage(s.img, x - halo, y - halo, 2 * halo, 2 * halo);
+    const l = s === glint ? 1 : lit.get(s) || 0, f = flare.get(s) || 0, warm = heat.get(s) || 0;
+    const r = RADIUS[s.size] * grow * (1 + .35 * l) * (1 + .7 * f) * REACH, px = x + s.dx, py = y + s.dy;
+    if (warm) {   // how loud my voice was there: a wider glow
+      const wide = r * (1.4 + 1.6 * warm); g.globalAlpha = .5 * warm; g.drawImage(s.img, px - wide, py - wide, 2 * wide, 2 * wide);
+    }
+    g.globalAlpha = Math.min(1, .3 + .7 * l + f); g.drawImage(l > .6 ? s.sharp : s.img, px - r, py - r, 2 * r, 2 * r);
   }
-  g.globalAlpha = 1;
+  g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
   if (!now) return;
   if (drawn < 1 && now.path.length > 1) {   // the head of the trail as it's drawn
-    const [hx, hy] = now.path[Math.floor(drawn * (now.path.length - 1))];
+    const at = Math.floor(drawn * (now.path.length - 1)), [hx, hy] = now.path[at];
+    g.lineCap = "round";
+    for (let i = Math.max(1, at - 9); i <= at; i++) {   // a short bright tail behind it
+      g.strokeStyle = `rgba(255, 255, 255, ${(.08 * (i - at + 10)).toFixed(2)})`; g.lineWidth = 1 + .25 * (i - at + 10);
+      g.beginPath(); g.moveTo(sx(now.path[i - 1][0]), sy(now.path[i - 1][1])); g.lineTo(sx(now.path[i][0]), sy(now.path[i][1])); g.stroke();
+    }
     g.fillStyle = "#fff"; g.beginPath(); g.arc(sx(hx), sy(hy), 3, 0, 7); g.fill();
   }
   const reached = drawn * (now.path.length - 1), seen = new Set(), many = now.stops.length > 16;
@@ -213,7 +280,7 @@ function draw() {
   const label = (text, x, y, bold) => {
     const t = text.length > 44 ? text.slice(0, 42) + "…" : text, edge = narrow() ? W - 8 : side.offsetLeft - 8;
     g.font = "12px system-ui, sans-serif"; g.fillStyle = bold ? "#fff" : "rgba(232, 234, 242, .82)";
-    g.lineWidth = 3; g.strokeStyle = "rgba(11, 13, 20, .85)"; g.lineJoin = "round";
+    g.lineWidth = 3; g.strokeStyle = "rgba(7, 9, 16, .85)"; g.lineJoin = "round";
     if (x + g.measureText(t).width > edge && x > W / 3) {   // no room to its right: the title goes to its left
       g.textAlign = "right"; g.strokeText(t, x - 30, y); g.fillText(t, x - 30, y); g.textAlign = "left";
     } else { g.strokeText(t, x, y); g.fillText(t, x, y); }
@@ -230,11 +297,16 @@ function draw() {
     seen.add(k.s);
     if (!many || ends || near) {
       g.font = "600 11px system-ui, sans-serif"; g.fillStyle = WARM(.95);
-      g.lineWidth = 3; g.strokeStyle = "rgba(11, 13, 20, .85)"; g.strokeText(String(i + 1), x + 8, y - 9);
+      g.lineWidth = 3; g.strokeStyle = "rgba(7, 9, 16, .85)"; g.strokeText(String(i + 1), x + 8, y - 9);
       g.fillText(String(i + 1), x + 8, y - 9);
     }
     if (named) label(k.s.title || "hidden", x + 8 + 7 * String(i + 1).length + 4, y - 9, stop === i);
   });
+  if (glint) {   // tapped once: ringed and named; a second tap goes to its conversation
+    const x = sx(glint.x), y = sy(glint.y);
+    g.strokeStyle = "rgba(255, 255, 255, .7)"; g.lineWidth = 1; g.beginPath(); g.arc(x, y, 11, 0, 7); g.stroke();
+    label(glint.title || "hidden", x + 15, y, false);
+  }
 }
 
 // The strip: one column per conversation, in order, a block per stop in its star's hue, dim where the stop returns to
@@ -326,7 +398,8 @@ function show(i, picked, instant) {
     goal = frame(conv.stops.map(k => k.s).concat(conv.stops.length < 3 ? ghosts : []), span * .22);
     if (instant) { cam = goal; goal = null; }
   }
-  drawn = instant || conv.stops.length < 2 ? 1 : 0; started = performance.now();
+  drawn = instant || conv.stops.length < 2 ? 1 : 0; started = performance.now(); glint = null;
+  if (!drawn) pulsed = started;
   tick();
 }
 const drawTime = conv => Math.min(4200, 500 + 380 * (conv.stops.length - 1));
@@ -344,6 +417,7 @@ function step(t) {
     else more = true;
   }
   if (drawn < 1) { drawn = Math.min(1, (t - started) / drawTime(conv)); more = more || drawn < 1; }
+  if (!still.matches && performance.now() - pulsed < drawTime(conv) + SETTLE) more = true;   // the stops are still settling
   draw();
   if (playing) {
     const hold = conv.stops.length < 2 ? 650 : drawTime(conv) + 900;
@@ -389,6 +463,15 @@ function pick(s) {   // a star tapped: its stop on this trail, or else the lates
   play(false); show(conv, C[conv].stops.findIndex(k => k.s === s));
 }
 
+// A tap on one of this trail's stops picks it. A tap on any other star only lights it, and a second tap goes to its
+// conversation, so a stray tap while panning never leaves the trail. A tap on nothing puts the lit star out.
+function tap(s) {
+  if (s && s !== glint && !C[cur].stops.some(k => k.s === s)) { glint = s; redraw(); }
+  else if (s) { glint = null; pick(s); }
+  else if (glint) { glint = null; redraw(); }
+  else pick(null);
+}
+
 const pointers = new Map();
 let down = null, pinch = null;
 c.addEventListener("pointerdown", e => {
@@ -413,7 +496,7 @@ c.addEventListener("pointermove", e => {
 const up = e => {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
-  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") pick(hit(e.clientX, e.clientY));
+  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") tap(hit(e.clientX, e.clientY));
   down = null;
 };
 c.addEventListener("pointerup", up);
