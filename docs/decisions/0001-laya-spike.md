@@ -1,6 +1,7 @@
 # 0001: Laya spike
 
-_2026-10-01. Status: Laya passes the spike; checkpoint and router choice wait for real labels._
+_2026-10-01. Status: retired 2026-11-13 ([0014](0014-retire-routing.md)). Laya passed the spike; checkpoint and
+router choice waited for real labels._
 
 ## Question
 

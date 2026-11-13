@@ -30,9 +30,10 @@ beside it how far two cheaper models' labels can stand in for mine.
    requests go out under now. Never stratified by any model's score. The ChatGPT archive's captures (49) have no
    lines to show, so they're left out and counted (`archive_skipped`). A capture whose episode's transcript changed
    since it was read is passed over and counted. The key gives the spread of the sample and of all live captures by
-   episode kind (monologue, conversation) and by the episode's route and route reasons (router v3). Each item shows
-   up to 8 lines before its first cited line and 3 after its last (as the extractor was sent them), the cited
-   lines, the quote and the gist. The sheet sends nothing.
+   episode kind (monologue, conversation); keys drawn before routing was retired also give it by the episode's route
+   and route reasons (router v3; [decision 0014](../decisions/0014-retire-routing.md)). Each item shows up to 8 lines
+   before its first cited line and 3 after its last (as the extractor was sent them), the cited lines, the quote and
+   the gist. The sheet sends nothing.
 3. **Independent model drafts.** `draft --model M` asks M about every item: the rubric as the system prompt, one
    item as the message, nothing else, so no draft sees another or my marks. Each gives a label and a one-line
    reason. Every request goes through the egress log under the monthly cap; a rerun asks only what's missing, and an

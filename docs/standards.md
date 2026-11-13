@@ -17,13 +17,11 @@ What the pipeline keeps true, whatever the stage:
 - **Derived is re-derivable.** Every derived row carries `schema_version`, `stage_version` (code or heuristic),
   `input_hash`, and `model`, `model_version` and `prompt_version` where they apply. Every stage supports
   `im reset --stage X`.
-- **Human labels aren't derived.** They live in their own table, anchored to segment IDs, not episode IDs, so they
-  survive re-derivation. When a segment is superseded, its labels follow the supersession links to the current
-  segments, so a correction never orphans a label.
-- **Traceability.** Every episode, label, span, link and synthesized object stores the `segment_id`s it came from.
-- **Cheap models route, never drop.** Triage writes labels and a route. No stage deletes or hides segments: "noise"
-  is a label, not a filter.
-- **Eval before trust.** An automated tier drives nothing until it beats its exit threshold on the hand-labeled set.
+- **My input isn't derived.** What I decide (verdicts, feedback events, the attention queue's items and removals) is
+  kept apart from derived rows and anchored to segment IDs, not episode IDs, so re-derivation never loses it.
+- **Traceability.** Every episode, span, link and synthesized object stores the `segment_id`s it came from.
+- **No stage drops speech.** No stage deletes or hides segments: forgetting is the only delete.
+- **Eval before trust.** An automated tier drives nothing until it passes its benchmark on a set I marked by hand.
 - **Egress is a logged, versioned policy.** What goes to Claude is decided by `im.egress.POLICY_VERSION` (policy B:
   everyone's words, speakers pseudonymized; [decision 0004](decisions/0004-claude-extraction.md)), and every request
   is logged with the segment IDs it carried and what it cost. Every paid request goes one way, `im.egress.send`: it
@@ -54,9 +52,10 @@ What the pipeline keeps true, whatever the stage:
 ## Testing
 
 - The behaviors worth a test: a correction re-derives only the episodes it touches, a second run changes nothing,
-  forgetting leaves no text or derived row (and reports what was already sent), labels survive corrections and
-  resets, the stream is only read, unknown formats and speakers fail closed, `lattice_app` can only read `pub` and
-  append feedback, `im_reader` can only read `pub`, and the monthly cap stops extraction, scoring and the digest.
+  forgetting leaves no text or derived row (and reports what was already sent), my verdicts follow their captures
+  through corrections, the stream is only read, unknown formats and speakers fail closed, `lattice_app` can only
+  read `pub` and append feedback, `im_reader` can only read `pub`, and the monthly cap stops extraction, scoring and
+  the digest.
 - Tests run on synthetic streams from `im.fixtures` and never read the real one. Each gets a fresh `im_test`
   database; the code refuses a dev admin URL that isn't localhost or a local socket, in any DSN form. Each runs
   without the developer's `IM_*`, `ANTHROPIC_*`, `CORRAL_*`, OpenRouter and Typesafe variables
@@ -64,10 +63,10 @@ What the pipeline keeps true, whatever the stage:
 
 ## Running it
 
-- `make check` is the whole suite or nothing: it fails unless the database env vars from `.env.example` are set and
-  the `models` extra is installed (`uv sync --extra models`), as in CI. Plain `uv run pytest` is for quick runs:
-  without the env vars the database tests skip, and without the extra the logreg tests do. Setup and configuration
-  live in [install.md](install.md), deployment in [deploy.md](deploy.md) and `install/nas.sh`.
+- `make check` is the whole suite or nothing: it fails unless the database env vars from `.env.example` are set, as
+  in CI. Plain `uv run pytest` is for quick runs: without the env vars the database tests skip. No test needs the
+  `models` extra: the tests embed with a hash. Setup and configuration live in [install.md](install.md), deployment
+  in [deploy.md](deploy.md) and `install/nas.sh`.
 
 ## Docs
 
@@ -91,8 +90,9 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
 - Versions and pins: `pyproject.toml` says `0.0.0`, and at the commits `v1` and `v1.1` tag it said `0.1.0`, so
   neither tag matches the manifest's version.
 - Versions and pins: CI doesn't fail a `vX.Y.Z` tag that doesn't match `pyproject.toml`'s version. No job checks it.
-- Privacy: 14 files, among them `install/compose.yaml`, `dev/pull-stream.sh` and `src/im/backends.py`, name the
-  workstation's hostname, and [deploy.md](deploy.md) (line 14) names the NAS's tailnet host, `truenas`.
+- Privacy: 14 files, among them `install/compose.yaml`, `dev/pull-stream.sh` and
+  `src/im/sql/im/040_segment_names.sql`, name the workstation's hostname, and [deploy.md](deploy.md) (line 14) names
+  the NAS's tailnet host, `truenas`.
 - Privacy: the workstation's layout is committed: `%h/data/code/ideamachine` in
   `dev/systemd/ideamachine-run.service` (lines 10-11) and `~/data/code/lattice` in [ROADMAP.md](ROADMAP.md) (line 149).
 - Privacy: the NAS layout (`/mnt/fast/ideamachine/...`) is committed, and nothing here overrides the org rule for it, as
@@ -129,23 +129,21 @@ Where Idea Machine doesn't follow the org standards yet. These are debt to pay d
 - Python typing: 165 of the package's 280 functions lack an annotation on a parameter or the return, e.g. every `conn`.
 - Python data modeling: `im.fixtures.Conversation` is a mutable `@dataclass`.
 - Python data modeling: no closed set is a `StrEnum` tested against its column's `CHECK`. Among those Python compares,
-  branches on or parses from outside: digest point kinds (`digest.KINDS`), match
-  decisions (`lattice.py` lines 35 and 258), routes (`router.py` lines 30 and 52), verdicts (`feedback.ITEM_KINDS`,
-  `cli.py` line 369), speaker kinds (`importer.py` line 86) and sensitivity categories (`sensitivity.CATEGORIES`).
+  branches on or parses from outside: digest point kinds (`digest.KINDS`), match decisions (`lattice.py` lines 35 and
+  258), verdicts (`feedback.ITEM_KINDS`, `cli.py` line 369), speaker kinds (`importer.py` line 86) and sensitivity
+  categories (`sensitivity.CATEGORIES`).
 - Python testing: 14 of the 21 test files are named for a module (`test_extract.py`, `test_lattice.py`,
-  `test_triage.py`...), not a behavior.
-- Python dependencies: `laya==0.3.23` is pinned exactly without a comment naming the break.
+  `test_weight.py`...), not a behavior.
 - Shell: `dev/init/10-roles.sh`, `dev/pull-stream.sh` and `dev/systemd/install.sh` start with `#!/bin/bash`.
 - Shell: `install/lib.sh` doesn't start with `# shellcheck shell=bash`.
 - Shell: `dev/init/10-roles.sh` sets up the database but fails on a re-run (`CREATE ROLE`, line 5), and
   `install/move-to-nas.sh`'s header doesn't say whether it's safe to re-run.
 - Shell: `make check` doesn't run shellcheck, which reports 19 findings.
 - SQL: `pipeline.run` sets `REPEATABLE READ` on the connection, so the later stages of `im run` inherit it.
-- SQL: some table names aren't plural nouns: `im.ingest_state` (001), `im.triage` (004), `im.egress_log` (007),
+- SQL: some table names aren't plural nouns: `im.ingest_state` (001), `im.egress_log` (007),
   `im.feedback_applied` (009), `im.idea_sensitivity` and `im.theme_sensitivity` (027).
 - SQL: these closed sets have no `CHECK`: `im.episodes.kind` (001, line 30), `im.source_segments.speaker_kind` and
   `speaker_basis` (002, lines 24 and 27), `im.source_supersessions.method` (002, line 52; its comment omits `rekey`,
-  which `importer.py` line 212 writes), `im.triage.backend` (004, line 8; its comment says `laya | fallback`, but the
-  backends are `laya`, `llm` and `logreg`) and `im.routes.triage_backend` (006, line 7), `im.items.kind` (007, line
-  31), `im.idea_themes.origin` (008, line 78), `pub.feedback_events.source` (008, line 97), and the `categories` of
-  `im.idea_sensitivity` and `im.theme_sensitivity` (027, lines 9 and 17).
+  which `importer.py` line 212 writes), `im.items.kind` (007, line 31), `im.idea_themes.origin` (008, line 78),
+  `pub.feedback_events.source` (008, line 97), and the `categories` of `im.idea_sensitivity` and
+  `im.theme_sensitivity` (027, lines 9 and 17).

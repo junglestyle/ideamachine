@@ -23,16 +23,16 @@ def run_cli(pipe, stream, monkeypatch, capsys):
 def test_a_run_records_every_stage_and_its_warnings(pipe, run_cli):
     out = run_cli()
     (stats, finished) = table(pipe, "SELECT stats, finished_at IS NOT NULL FROM im.runs WHERE command = 'run'")[0]
-    assert finished and "extract" in stats and "route" in stats and stats["monthly_cap_usd"] == 20.0
+    assert finished and "extract" in stats and "weight" in stats and stats["monthly_cap_usd"] == 20.0
     assert "run_id" not in out
     assert "error" not in stats and stats["extract"]["stopped"].startswith("Claude unavailable")
     assert stats["connect"]["stopped"].startswith("the connection judge can't run")   # no OpenRouter or Jev key
 
 
 def test_a_failed_stage_is_recorded_with_what_ran_before_it(pipe, run_cli, monkeypatch):
-    def boom(conn):
+    def boom(conn, cfg):
         raise RuntimeError("disk full")
-    monkeypatch.setattr("im.router.run_stage", boom)
+    monkeypatch.setattr("im.weight.stage", boom)
     with pytest.raises(RuntimeError):
         run_cli()
     (stats,) = table(pipe, "SELECT stats FROM im.runs WHERE command = 'run'")[0]

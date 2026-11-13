@@ -29,8 +29,8 @@ jobs:
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - name: Create the pipeline role
         run: psql "$IM_DEV_ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE ROLE im_pipeline LOGIN PASSWORD 'ci-pipeline'"
-      - name: Install (CPU-only torch, scikit-learn; no model weights are downloaded)
-        run: uv sync --frozen --extra models
+      - name: Install (without the models extra, which no test needs)
+        run: uv sync --frozen
       - name: Check
         run: make check
   standards:

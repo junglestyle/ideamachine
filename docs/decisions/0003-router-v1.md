@@ -1,6 +1,6 @@
 # 0003: Router v1: cautious, my signals first
 
-_2026-10-05. Status: in use._
+_2026-10-05. Status: retired 2026-11-13 ([0014](0014-retire-routing.md))._
 
 ## Context
 

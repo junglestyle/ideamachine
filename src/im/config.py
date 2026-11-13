@@ -25,22 +25,6 @@ class SegmentConfig:
 
 
 @dataclass(frozen=True)
-class TriageConfig:
-    backends: tuple[str, ...] = ()         # run by `im run`: llm | laya | logreg (logreg once trained)
-    llm_model: str = "gpt-oss:20b"         # an Ollama model
-    llm_url: str = "http://localhost:11434"
-    llm_think: str | None = "low"          # reasoning effort for models that think; None to leave it off
-    llm_num_ctx: int = 16384
-
-    laya_checkpoint: str = "english"     # english | multilingual | typed-decisions
-    laya_max_len: int = 4096             # tokens of state; longer episodes are truncated (and say so).
-                                         # Memory grows steeply with length on CPU: ~5 GB at 4k, ~8 GB at 7k.
-    threads: int | None = None           # torch CPU threads; None = torch's default
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
-    max_episodes_per_run: int | None = None   # bound a run's time; the rest wait for the next run
-
-
-@dataclass(frozen=True)
 class ExtractConfig:
     enabled: bool = True
     model: str = "claude-opus-5-5"
@@ -113,7 +97,6 @@ RETIRED_EXTRACT = ("interests",)
 @dataclass(frozen=True)
 class Config:
     segment: SegmentConfig = SegmentConfig()
-    triage: TriageConfig = TriageConfig()
     extract: ExtractConfig = ExtractConfig()
     lattice: LatticeConfig = LatticeConfig()
     match: ModelConfig = ModelConfig()          # the lattice's matcher
@@ -130,9 +113,8 @@ def load() -> Config:
         return Config()
     with open(path, "rb") as f:
         data = tomllib.load(f)
-    triage = data.get("triage", {})
-    if "backends" in triage:
-        triage["backends"] = tuple(triage["backends"])
+    if "triage" in data:   # the triage backends, retired with V1's routing, labels and evals: ignored until deleted
+        print(f"[triage]: retired with routing; delete it from {path}", file=sys.stderr)
     egress = {k: tuple(v) if isinstance(v, list) else v for k, v in data.get("egress", {}).items()
               if k not in RETIRED_EGRESS}
     if retired := [k for k in RETIRED_EGRESS if k in data.get("egress", {})]:
@@ -144,6 +126,6 @@ def load() -> Config:
               file=sys.stderr)
     models = {k: ModelConfig(**data.get(k, {})) for k in ("match", "themes", "digest")}
     models["connect"] = ConnectConfig(**data.get("connect", {}))
-    return Config(segment=SegmentConfig(**data.get("segment", {})), triage=TriageConfig(**triage),
+    return Config(segment=SegmentConfig(**data.get("segment", {})),
                   extract=ExtractConfig(**extract), lattice=LatticeConfig(**data.get("lattice", {})),
                   weight=WeightConfig(**data.get("weight", {})), egress=EgressConfig(**egress), **models)

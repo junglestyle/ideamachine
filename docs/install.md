@@ -10,10 +10,10 @@ plans are in [ROADMAP.md](ROADMAP.md).
 cp .env.example .env              # pick passwords; .env is gitignored
 podman compose up -d              # Postgres 16 + pgvector on 127.0.0.1:55432 (docker compose works too)
 set -a; . ./.env; set +a
-uv sync --extra models          # CPU-only torch, Laya, sentence-transformers, scikit-learn
+uv sync --extra models          # CPU-only torch and sentence-transformers: the lattice's embeddings
 uv run im migrate                 # im schema
 uv run im load-fixtures           # a synthetic Hearsay stream in $IM_STREAM_DIR (dev/stream)
-uv run im run                     # import + segment + queue taps and notes to self + extract ideas with Claude + route; idempotent
+uv run im run                     # import + segment + queue taps and notes to self + extract ideas with Claude + match; idempotent
 uv run im queue                   # the attention queue: what I tapped the pendant for or called a note to self, with its lines, newest first
 uv run im queue remove 3          # take item #3 off the queue (only marks it removed; nothing else changes)
 uv run im pending                 # what the next run would send, and what the re-read gate holds per stage, with its estimated cost; sends nothing
@@ -56,16 +56,9 @@ uv run im load-fixtures --scenario edited   # the same stream after every kind o
 uv run im run
 uv run im check                   # invariant queries
 uv run im show <episode-prefix>
-uv run im reset --stage segment   # drop episodes; the next run rebuilds them (labels are kept)
-uv run im project add garden -d "Garden sensors" -a lora
-uv run im label                   # label episodes in the terminal; --status for progress
-uv run im train                   # fit the logreg baseline on my labels
-uv run im eval --llm              # accuracy and reliability per question, per backend, plus the router's precision
-uv run im review                  # work through what the router sent me (pendant taps and notes to self first)
-uv run im reset --stage triage    # drop triage rows; the next run re-triages
-make check                        # the whole suite; fails without the IM_* env vars or the models extra
-uv run pytest                     # a quick run: without them the database or logreg tests skip instead
-IM_TEST_MODELS=1 uv run pytest    # also load the real Laya model
+uv run im reset --stage segment   # drop episodes; the next run rebuilds them
+make check                        # the whole suite; fails without the IM_* env vars
+uv run pytest                     # a quick run: without them the database tests skip instead
 ```
 
 Settings are env vars:
@@ -84,11 +77,10 @@ Settings are env vars:
   fresh `im_test` database and stream directory, and none of the other settings here.
 
 `IM_CONFIG` can name a TOML file that overrides the defaults in `src/im/config.py`. An unknown key in a section
-stops the run, except a retired one, which is ignored with a warning until it's deleted: `[extract] interests` (with
-prompts `v1` to `v4`, decision 0012) and `[egress] names`, `public_names` and `my_names` (with policy C, decision
-0008). Every segmentation value goes into the episodes' `stage_version`, so changing one re-derives episodes
-on the next run. Triage rows record the model, its weights revision and a hash of the questions, so a model or
-question change re-triages.
+stops the run, except a retired one, which is ignored with a warning until it's deleted: `[triage]` (with routing,
+decision 0014), `[extract] interests` (with prompts `v1` to `v4`, decision 0012) and `[egress] names`,
+`public_names` and `my_names` (with policy C, decision 0008). Every segmentation value goes into the episodes'
+`stage_version`, so changing one re-derives episodes on the next run.
 
 Every stage that asks a chat model takes its model and effort from the file:
 
@@ -184,9 +176,9 @@ One REPEATABLE READ transaction:
    `utterance_id` when the transcript is the same, by time overlap otherwise. Then purge everything that overlaps
    a `forgotten.json` span.
 2. **Purge.** Delete everything made from a forgotten segment: every episode (current or retired) that contains
-   one; every label, idea, digest, verdict and observation made from one; the feedback events on captures of it, even
-   once the capture is gone; and the classifiers trained on those labels. A note to self whose line is forgotten
-   leaves the attention queue, and every other item there loses the forgotten lines it marked.
+   one; every idea, digest, verdict and observation made from one; and the feedback events on captures of it, even
+   once the capture is gone. A note to self whose line is forgotten leaves the attention queue, and every other item
+   there loses the forgotten lines it marked.
 3. **Segment.** Re-segment conversations whose membership changed, or whose episodes are stale or missing.
    Episodes are content-addressed (`uuid5(stage_version, input_hash)`), so unchanged episodes aren't touched,
    ones that no longer come out are retired (`current = false`), and new ones are inserted.
@@ -200,12 +192,9 @@ Then, outside that transaction:
   after a conversation is split or merged; a note's by its line, so when a re-transcription replaces that line, the
   new one takes the item over if it descends from the old one and still says "note to self" (else the item stays,
   as first heard). Re-segmenting touches no item, and a second run changes nothing. An item changes nothing about
-  the speech: extraction, captures and routing go on as if it weren't there. `im queue remove` marks one removed,
+  the speech: extraction, captures and cards go on as if it weren't there. `im queue remove` marks one removed,
   for good: a later run never brings it back. There's no `im reset --stage` for it, since the removals are mine and
   the anchors are re-derived every run.
-- **Triage.** Each configured backend (none by default; see [decisions/0004](decisions/0004-claude-extraction.md)) answers the triage questions for
-  current episodes whose rendered input it hasn't answered yet, newest first, committing in small batches. If
-  Ollama is down or the GPU is busy, the run notes it and goes on.
 - **Extraction** ([decisions/0004](decisions/0004-claude-extraction.md)). Claude reads each current episode where I
   speak whose payload no read has had: new speech, and speech whose payload changed (re-transcribed, a tap added),
   newest first. A payload already read on another episode under the same version is reused, sending nothing. An
@@ -234,9 +223,6 @@ Then, outside that transaction:
   the observation it re-captures, or starts one. Each cluster is weighed (`[weight]` in `im.toml`), and up to 10
   candidates a week, the most recently said first, are proposed to me to keep as canonical or pinned. `im tune knob=value ...` previews a change to
   those settings, writing nothing, and prints the `[weight]` block to paste.
-- **Route.** The router sends to review whatever I tapped or called a note to self, and any episode where Claude
-  captured something I haven't discarded; the rest is auto-filed (`src/im/router.py`; v1 used the local LLM's flags instead, see
-  [decisions/0003-router-v1.md](decisions/0003-router-v1.md)).
 
 Every stage that asks a model (extraction, matching, themes, sensitivity, the digest, the connection judge) stops,
 saying why in its stats, when the month's spend reaches `extract.monthly_cap_usd`, when the API can't answer now, or
@@ -263,7 +249,7 @@ a Jev question set, a cut, a method. When one changes, each stage that would sen
 
 The gated stages are extraction (`extract`), the themes filer (`themes`), sensitivity (`sensitivity`), the
 connection judge (`connect`) and the merge screen (`merges`). The matcher never asks about a capture twice whatever
-its version, the digest writes each week once, and triage runs locally, so none of them has anything to hold.
+its version, and the digest writes each week once, so neither has anything to hold.
 
 `im run`'s stats and `im pending` show, under `held` for each stage with held work, how many, from which version(s)
 to which, `estimated_usd` and how it was estimated, and the command that approves it. The estimate is the logged

@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from im import config, db, fixtures, label, migrate, pipeline, projects, reread, triage
+from im import config, db, fixtures, migrate, pipeline, reread
 from im.checks import run_checks
 from im.show import show
 
@@ -20,42 +20,6 @@ def cmd_migrate(args) -> None:
 
 def cmd_load_fixtures(args) -> None:
     _print(fixtures.write(Path(args.dir) if args.dir else db.stream_dir(), args.scenario))
-
-
-def _backends(conn, cfg, names):
-    """The configured triage backends that can run. logreg waits until it's trained."""
-    from im import backends
-
-    out, notes = [], []
-    for name in names:
-        if name == "laya":
-            out.append(backends.LayaBackend(cfg.triage.laya_checkpoint, cfg.triage.laya_max_len, cfg.triage.threads))
-        elif name == "llm":
-            try:
-                out.append(_llm(cfg))
-            except OSError as e:
-                notes.append(f"llm unavailable, will retry next run: {e}")
-        elif name == "logreg":
-            try:
-                out.append(backends.LogregBackend(conn, _embedder(cfg)))
-            except LookupError as e:
-                notes.append(str(e))
-        else:
-            raise SystemExit(f"unknown triage backend {name!r}")
-    return out, notes
-
-
-def _llm(cfg):
-    from im.backends import LLMBackend
-
-    t = cfg.triage
-    return LLMBackend(t.llm_model, t.llm_url, t.llm_think, t.llm_num_ctx)
-
-
-def _embedder(cfg):
-    from im.lattice import SentenceEmbedder
-
-    return SentenceEmbedder(cfg.triage.embedding_model)
 
 
 def cmd_run(args) -> None:
@@ -91,22 +55,13 @@ def _run_stages(conn, cfg) -> dict:
 
         # Before extraction and matching, so captures I discarded stay out of the lattice.
         stats["feedback"] = feedback.apply_item_feedback(conn)
-        if cfg.triage.backends:
-            run_backends, notes = _backends(conn, cfg, cfg.triage.backends)
-            stats["triage"] = []
-            for b in run_backends:
-                try:
-                    stats["triage"].append(triage.run_stage(conn, b, cfg.triage.max_episodes_per_run))
-                except OSError as e:  # e.g. Ollama down, or the GPU busy with Hearsay's transcription
-                    notes.append(f"{b.name} unavailable, will retry next run: {e}")
-            stats["triage_notes"] = notes
         if cfg.extract.enabled:
             stats["extract"] = _extract(conn, cfg)
         from im import quotes
 
         # After extraction, before anything reads a new capture's segments (verdicts, observations, matching).
         stats["quotes"] = quotes.place_stage(conn)
-        # After extraction (the new items exist) and before matching and routing (a carried discard counts).
+        # After extraction (the new items exist) and before matching (a carried discard counts).
         stats["verdicts_carried"] = feedback.carry_verdicts(conn)
         from im import observations
 
@@ -122,9 +77,6 @@ def _run_stages(conn, cfg) -> dict:
         from im import weight
 
         stats["weight"] = weight.stage(conn, cfg.weight)   # after matching: weight reads the clusters
-        from im import router
-
-        stats["route"] = router.run_stage(conn)
     except Exception as e:   # keep what's known so far, including run_id, for the record
         e.stats = stats
         raise
@@ -728,9 +680,15 @@ def cmd_ideas(args) -> None:
         print(f"{shown} shown ({len(rows)} captured on current episodes)")
 
 
-def _review_items(conn, extract, read=input, write=print) -> int:
-    from im.label import _choose
+def _choose(read, write, prompt: str, options: dict):
+    while True:
+        got = read(prompt).strip().lower()
+        if got in options:
+            return options[got]
+        write(f"  one of: {', '.join(options)}")
 
+
+def _review_items(conn, extract, read=input, write=print) -> int:
     n = 0
     for item_id, who, quote, gist, _, at, _ in extract.review_items(conn):
         write("\n" + "─" * 72)
@@ -761,36 +719,6 @@ def cmd_forgotten(args) -> None:
         print(f"{seg}  forgotten {forgotten_at:%Y-%m-%d}, sent {n}x, first {first_sent:%Y-%m-%d %H:%M}")
 
 
-def cmd_train(args) -> None:
-    from im import backends
-
-    cfg = config.load()
-    with db.connect(db.pipeline_dsn()) as conn:
-        try:
-            _print(backends.train(conn, _embedder(cfg), args.C))
-        except ValueError as e:
-            raise SystemExit(str(e)) from None
-
-
-def cmd_eval(args) -> None:
-    from im import evaluate
-
-    cfg = config.load()
-    with db.connect(db.pipeline_dsn()) as conn:
-        from im.backends import LayaBackend, exact_labels
-
-        only = [eid for _, eid, _ in exact_labels(conn)]
-        if args.llm:  # make sure every labeled episode has the backend's answers to score
-            triage.run_stage(conn, _llm(cfg), only=only)
-        if args.laya:
-            b = LayaBackend(cfg.triage.laya_checkpoint, cfg.triage.laya_max_len, cfg.triage.threads)
-            triage.run_stage(conn, b, only=only)
-        try:
-            print(evaluate.report(evaluate.evaluate(conn, _embedder(cfg), args.k)))
-        except ValueError as e:
-            raise SystemExit(str(e)) from None
-
-
 def cmd_reset(args) -> None:
     with db.connect(db.pipeline_dsn()) as conn:
         _print(pipeline.reset(conn, args.stage))
@@ -799,35 +727,6 @@ def cmd_reset(args) -> None:
 def cmd_show(args) -> None:
     with db.connect(db.pipeline_dsn()) as conn:
         print(show(conn, args.episode))
-
-
-def cmd_label(args) -> None:
-    with db.connect(db.pipeline_dsn()) as conn:
-        if args.status:
-            print(label.status(conn))
-            return
-        try:
-            review = tuple(args.review.split("=", 1)) if args.review else None
-            if review and (len(review) != 2 or review[0] not in label.QUESTION_FIELDS):
-                raise SystemExit(f"--review takes question=answer, e.g. kind=idea; questions: {', '.join(label.QUESTION_FIELDS)}")
-            n = label.session(conn, review=review)
-        except (KeyboardInterrupt, EOFError):
-            n = None  # each label is saved as it's confirmed, so nothing is lost
-        print("\n" + label.status(conn) if n is None else f"saved {n}\n" + label.status(conn))
-
-
-def cmd_review(args) -> None:
-    from im import router
-
-    with db.connect(db.pipeline_dsn()) as conn:
-        if args.status:
-            print(f"{len(router.review_queue(conn))} episodes waiting for review")
-            return
-        try:
-            n = label.routed_session(conn)
-        except (KeyboardInterrupt, EOFError):
-            n = None
-        print(f"\n{'' if n is None else f'reviewed {n}; '}{len(router.review_queue(conn))} still waiting")
 
 
 def cmd_queue(args) -> None:
@@ -843,18 +742,6 @@ def cmd_queue(args) -> None:
             print(f"removed #{args.id}")
             return
         print(attention.listing(attention.open_items(conn)))
-
-
-def cmd_project(args) -> None:
-    with db.connect(db.pipeline_dsn()) as conn:
-        try:
-            if args.action == "add":
-                print(projects.add(conn, args.slug, args.description, args.alias or []))
-            elif args.action == "retire":
-                projects.retire(conn, args.slug)
-            print(projects.listing(conn))
-        except ValueError as e:
-            raise SystemExit(str(e)) from None
 
 
 def cmd_check(args) -> None:
@@ -875,27 +762,13 @@ def main(argv=None) -> None:
                    help="base, or base plus every correction and a forget")
     f.set_defaults(func=cmd_load_fixtures)
     sub.add_parser("run", help="import and segment, queue taps and notes to self, then send new speech to Claude to "
-                   "extract, match, file, score, tag and digest it (and triage, if a backend is set); idempotent"
-                   ).set_defaults(func=cmd_run)
-    t = sub.add_parser("train", help="train the logreg baseline on my exact labels")
-    t.add_argument("-C", type=float, default=1.0, help="inverse regularization strength")
-    t.set_defaults(func=cmd_train)
-    ev = sub.add_parser("eval", help="per-question accuracy and reliability for each backend, on my labels")
-    ev.add_argument("-k", type=int, default=5, help="folds for logreg's and calibration's cross-validation")
-    ev.add_argument("--llm", action="store_true", help="first triage any labeled episode the LLM hasn't answered")
-    ev.add_argument("--laya", action="store_true", help="first triage any labeled episode Laya hasn't answered")
-    ev.set_defaults(func=cmd_eval)
+                   "extract, match, file, score, tag and digest it; idempotent").set_defaults(func=cmd_run)
     r = sub.add_parser("reset", help="drop a stage's derived rows so the next run rebuilds them")
     r.add_argument("--stage", required=True, choices=pipeline.STAGES)
     r.set_defaults(func=cmd_reset)
     s = sub.add_parser("show", help="print an episode")
     s.add_argument("episode", help="episode id or unique prefix")
     s.set_defaults(func=cmd_show)
-    lb = sub.add_parser("label", help="label episodes with my answers to the triage questions")
-    lb.add_argument("--status", action="store_true", help="show labeling progress and exit")
-    lb.add_argument("--review", metavar="QUESTION=ANSWER",
-                    help="re-label episodes whose latest label has this answer, e.g. kind=idea or project=none")
-    lb.set_defaults(func=cmd_label)
     pe = sub.add_parser("pending", help="what the next run would send, and what the re-read gate holds per stage, "
                         "without sending anything")
     pe.add_argument("--expect-none-resent", action="store_true",
@@ -1111,24 +984,11 @@ def main(argv=None) -> None:
     fg = sub.add_parser("forgotten", help="forgotten segments that had already been sent to Claude")
     fg.add_argument("--sent", action="store_true", required=True)
     fg.set_defaults(func=cmd_forgotten)
-    rv = sub.add_parser("review", help="work through the episodes the router sent me")
-    rv.add_argument("--status", action="store_true", help="show how many are waiting and exit")
-    rv.set_defaults(func=cmd_review)
     qu = sub.add_parser("queue", help="the attention queue: what I tapped the pendant for or called a note to self, "
                         "with its lines, newest first; remove ID takes one off (and changes nothing else)")
     qu.add_argument("action", nargs="?", default="list", choices=["list", "remove"])
     qu.add_argument("id", nargs="?", type=int, help="remove: the item's id, as listed")
     qu.set_defaults(func=cmd_queue)
-    pr = sub.add_parser("project", help="the projects registry")
-    pa = pr.add_subparsers(dest="action", required=True, metavar="action")
-    a = pa.add_parser("add", help="add a project, or update its description and add aliases")
-    a.add_argument("slug")
-    a.add_argument("--description", "-d")
-    a.add_argument("--alias", "-a", action="append")
-    r2 = pa.add_parser("retire", help="hide a project from labeling (labels keep it)")
-    r2.add_argument("slug")
-    pa.add_parser("list")
-    pr.set_defaults(func=cmd_project)
     sub.add_parser("check", help="run invariant queries; exit 1 on failure").set_defaults(func=cmd_check)
     wb = sub.add_parser("web", help="serve the neutral view (every cluster, newest first, no score)")
     wb.add_argument("--host", default="127.0.0.1")

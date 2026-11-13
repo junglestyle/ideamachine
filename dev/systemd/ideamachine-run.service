@@ -1,4 +1,4 @@
-# One Idea Machine run: copy Hearsay's stream from the NAS, then import, segment, extract and route.
+# One Idea Machine run: copy Hearsay's stream from the NAS, then import, segment, extract and match.
 # Started hourly by ideamachine-run.timer. Logs: journalctl --user -u ideamachine-run
 [Unit]
 Description=Idea Machine: pull the stream and run

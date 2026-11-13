@@ -30,17 +30,10 @@ def _finish_run(conn, run_id: int, stats: dict) -> None:
                  (json.dumps(stats), run_id))
 
 
-def _purge_tombstoned(conn) -> tuple[set[str], int]:
-    """Delete everything that holds a forgotten segment (ROADMAP §3.4): every episode (current or retired), label,
-    idea, digest, verdict, observation and feedback event made from it, and the classifiers trained on its labels; and
-    take it out of the attention queue. Labels are human input, and this is the only thing that deletes them."""
-    labels = [r[0] for r in conn.execute(
-        """DELETE FROM im.labels l WHERE EXISTS (
-             SELECT 1 FROM im.source_tombstones t WHERE t.segment_id = ANY(l.segment_ids))
-           RETURNING label_id""")]
-    # A classifier trained on a forgotten label learned from that speech: it goes, and triage falls back to the
-    # latest one trained without it (or `im train` makes a new one).
-    conn.execute("DELETE FROM im.classifiers WHERE label_ids && %s::bigint[]", (labels,))
+def _purge_tombstoned(conn) -> set[str]:
+    """Delete everything that holds a forgotten segment (ROADMAP §3.4): every episode (current or retired), idea,
+    digest, verdict, observation and feedback event made from it; and take it out of the attention queue. Returns
+    the conversations whose episodes went."""
     # An idea created from forgotten speech goes, with its feedback events (they cascade), found by the speech it
     # holds even once its capture is gone (migration 041), and so does every cluster merged into it (060), whose
     # captures had moved there. Ideas that merely had forgotten evidence keep their other evidence; that evidence row
@@ -84,7 +77,7 @@ def _purge_tombstoned(conn) -> tuple[set[str], int]:
                          JOIN im.source_tombstones t USING (segment_id)
                          WHERE es.episode_id = e.episode_id)
            RETURNING session_id""").fetchall()
-    return {r[0] for r in rows}, len(labels)
+    return {r[0] for r in rows}
 
 
 def _sessions_needing_work(conn, stage_version: str) -> set[str]:
@@ -150,17 +143,16 @@ def run(conn: psycopg.Connection, cfg: Config, stream_dir: Path) -> dict:
         conn.execute("SELECT pg_advisory_xact_lock(hashtext('im.run'))")
         run_id = _start_run(conn, "run")
         sessions, stats = import_stream(conn, stream_dir)
-        purged, labels_purged = _purge_tombstoned(conn)
+        purged = _purge_tombstoned(conn)
         sessions |= purged
         sessions |= _sessions_needing_work(conn, cfg.segment.stage_version)
-        stats |= {"stage_version": cfg.segment.stage_version, "sessions_with_purges": len(purged),
-                  "labels_purged": labels_purged}
+        stats |= {"stage_version": cfg.segment.stage_version, "sessions_with_purges": len(purged)}
         stats |= _resegment(conn, cfg, sessions)
         _finish_run(conn, run_id, stats)
     return stats | {"run_id": run_id}   # im run records the later stages on the same row
 
 
-STAGES = ("segment", "triage", "extract", "route")
+STAGES = ("segment", "extract")
 
 
 def reset(conn: psycopg.Connection, stage: str) -> dict:
@@ -170,17 +162,12 @@ def reset(conn: psycopg.Connection, stage: str) -> dict:
     with conn.transaction():
         conn.execute("SELECT pg_advisory_xact_lock(hashtext('im.run'))")
         run_id = _start_run(conn, f"reset --stage {stage}")
-        if stage == "segment":  # triage rows hang off episodes and go with them
-            stats = {"triage_deleted": conn.execute("SELECT count(*) FROM im.triage").fetchone()[0],
-                     "episodes_deleted": conn.execute("DELETE FROM im.episodes").rowcount}
-        elif stage == "triage":
-            stats = {"triage_deleted": conn.execute("DELETE FROM im.triage").rowcount}
-        elif stage == "extract":  # routes read items, so they go too. The egress log and feedback events stay, and
-            # so do the archive's captures (no episode): the next run reads the stream, not the ChatGPT export.
-            stats = {"routes_deleted": conn.execute("DELETE FROM im.routes").rowcount,
-                     "items_deleted": conn.execute("DELETE FROM im.items WHERE episode_id IS NOT NULL").rowcount,
-                     "extractions_deleted": conn.execute("DELETE FROM im.extractions").rowcount}
+        if stage == "segment":
+            stats = {"episodes_deleted": conn.execute("DELETE FROM im.episodes").rowcount}
         else:
-            stats = {"routes_deleted": conn.execute("DELETE FROM im.routes").rowcount}
+            # The egress log and feedback events stay, and so do the archive's captures (no episode): the next run
+            # reads the stream, not the ChatGPT export.
+            stats = {"items_deleted": conn.execute("DELETE FROM im.items WHERE episode_id IS NOT NULL").rowcount,
+                     "extractions_deleted": conn.execute("DELETE FROM im.extractions").rowcount}
         _finish_run(conn, run_id, stats)
     return stats

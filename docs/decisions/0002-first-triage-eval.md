@@ -1,6 +1,7 @@
 # 0002: First triage eval: nothing beats the base rates
 
-_2026-10-01. Status: superseded in part. Chosen: option 1 (a local LLM), plus context in the state. See the follow-up at the end._
+_2026-10-01. Status: superseded in part, then retired 2026-11-13 ([0014](0014-retire-routing.md)). Chosen: option 1
+(a local LLM), plus context in the state. See the follow-up at the end._
 
 ## Data
 
