@@ -3,7 +3,7 @@
 -- A moment is the same row timed by the capture's own first cited segment; anything that isn't speech keeps the time
 -- its observation says.
 CREATE VIEW pub.card_moments AS
-SELECT e.idea_id, e.item_id, e.observation_id, e.speaker, e.quote, e.conversation_id, e.source,
+SELECT e.idea_id, e.item_id, e.observation_id, e.speaker, e.quote, e.conversation_id, e.source, e.arousal,
        coalesce((SELECT min(s.started_at) FROM im.items i
                  JOIN im.source_segments s ON s.segment_id = ANY(i.source_segment_ids)
                  WHERE i.item_id = e.item_id AND e.source = 'speech'), e.said_at) AS said_at

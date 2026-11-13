@@ -1,6 +1,7 @@
 """The neutral view (decision 0007): every cluster past the gates, newest first, no score, no verdict filter."""
 
 import http.client
+import uuid
 import threading
 from http.server import ThreadingHTTPServer
 
@@ -257,9 +258,12 @@ def test_a_trail_is_a_conversations_moments_in_the_order_said(matched, admin):  
     ids = [s[0] for s in data["stars"]]
     assert ids == [s[0] for s in sky_data(as_app(admin, web.sky))["stars"]]   # the sky's map, star for star
     # Both captures of the one episode share its start in pub.card_evidence; a moment is timed by its own lines.
-    assert [(ids[star], conv, who) for star, conv, _, who in data["moments"]] == [
+    assert [(ids[star], conv, who) for star, conv, _, who, _ in data["moments"]] == [
         (build, 0, 0), (coffee, 0, 2), (new, 1, 0)]
     assert data["moments"][0][2] < data["moments"][1][2]
+    assert [m[4] for m in data["moments"]] == [-1, -1, 0.72]           # the arousal in my voice, where measured
+    judged(matched, uuid.UUID(new), uuid.UUID(build), "tension")       # a connection: what a stop can return to
+    assert [*sorted((ids.index(build), ids.index(new))), "tension"] in sky_data(as_app(admin, web.trails))["links"]
     assert "c-conv" not in as_app(admin, web.trails)                   # a conversation is a number, never its id
     assert sky_data(as_app(admin, web.trails, new))["at"] == new
     assert as_app(admin, web.trails, "00000000-0000-0000-0000-000000000000") is None
@@ -275,6 +279,8 @@ def test_a_crossroads_has_doors_across_its_conversation_and_to_what_is_like_it(m
     assert coffee not in like                                   # a door across isn't repeated among what's like it
     signal, grape = table(matched, "SELECT a::text, b::text FROM pub.card_links")[0]
     assert f'href="/crossroads/{grape}"><small>connected' in as_app(admin, web.crossroads, signal)
+    judged(matched, idea(matched, "Something new"), uuid.UUID(build), "tension")   # a kind names the door
+    assert "<small>tension · 1 hour later</small><b>Something new" in as_app(admin, web.crossroads, build)
     assert "Did you see the build broke again?" in page and "anon A" not in page
     back = as_app(admin, web.crossroads, coffee).split('<section class="left">')[1].split("<main>")[0]
     assert f'href="/crossroads/{build}"' in back and "moments earlier" in back

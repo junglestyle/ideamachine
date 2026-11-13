@@ -32,6 +32,9 @@ nav a { padding: 4px 10px; }
 #stops i { font-style: normal; color: var(--trail); font-variant-numeric: tabular-nums; text-align: right; }
 #stops small { grid-column: 2; color: var(--muted); }
 #stops small a { margin-left: 10px; }
+#stops u { display: inline-block; height: 3px; margin-right: 8px; vertical-align: middle; border-radius: 2px;
+  background: var(--trail); opacity: .75; text-decoration: none; }
+#stops .back { grid-column: 2; font-size: 12.5px; line-height: 1.35; margin-top: 2px; }
 #stops .gap { display: block; padding: 0 14px 0 calc(1.6rem + 20px); color: var(--muted); font-size: 12px;
   cursor: default; }
 #stops .gap:hover { background: none; }
@@ -58,27 +61,36 @@ nav a { padding: 4px 10px; }
 // order they were said. Positions are today's (the pipeline's): a trail shows when things were said, not where they
 // sat on the map at the time. Nothing here ranks anything: conversations come in the order they happened.
 const D = JSON.parse(document.getElementById("d").textContent);
-const S = D.stars.map(([id, x, y, size, title, facts]) => ({id, x, y: -y, size, title, facts, convs: []}));
+const S = D.stars.map(([id, x, y, size, title, facts]) => ({id, x, y: -y, size, title, facts, convs: [], links: []}));
+for (const [a, b, kinds] of D.links) { S[a].links.push({to: S[b], kinds}); S[b].links.push({to: S[a], kinds}); }
 const RADIUS = [1.6, 2.6, 3.6, 4.8];   // observation, candidate, pinned idea, canonical idea: as on the sky
 const mx = S.reduce((a, s) => a + s.x, 0) / (S.length || 1), my = S.reduce((a, s) => a + s.y, 0) / (S.length || 1);
 for (const s of S) s.hue = Math.round((Math.atan2(s.y - my, s.x - mx) * 180 / Math.PI + 360) % 360);   // the sky's hue
 
 // Conversations, in the order each began. A stop is one moment: a star, when, and who said it.
 const C = [];
-for (const [star, conv, t, who] of D.moments) {
+for (const [star, conv, t, who, heat] of D.moments) {
   const c = C[conv] || (C[conv] = {n: conv, stops: []});
-  c.stops.push({s: S[star], t, who});
-  if (!S[star].convs.includes(conv)) S[star].convs.push(conv);
+  c.stops.push({s: S[star], t, who, heat});
+  if (!S[star].convs.includes(conv)) { S[star].convs.push(conv); }
+  if (S[star].first === undefined) { S[star].first = t; S[star].firstConv = conv; }   // moments come in time order
+}
+// A stop returns to a card when it's connected to one first said earlier, in another conversation: an echo, seen
+// from the later side. A stop with none is new ground as far as the connections know.
+for (const c of C) for (const k of c.stops) {
+  k.back = k.s.links.filter(l => l.to.first !== undefined && l.to.first < k.t && l.to.firstConv !== c.n && k.s.firstConv === c.n)
+    .sort((a, b) => b.to.first - a.to.first);
 }
 const SAMPLES = 14;   // points drawn between two stops
-for (const c of C) {   // the trail: a smooth curve through the stops (Catmull-Rom), as points in map coordinates
+for (const c of C) {   // the trail: a smooth curve through the stops, as points in map coordinates
   const p = c.stops.map(k => k.s), path = [];
   for (let i = 0; i + 1 < p.length; i++) {
     const a = p[Math.max(i - 1, 0)], b = p[i], d = p[i + 1], e = p[Math.min(i + 2, p.length - 1)];
-    for (let j = 0; j < SAMPLES; j++) {
+    const T = .3, m0x = T * (d.x - a.x), m0y = T * (d.y - a.y), m1x = T * (e.x - b.x), m1y = T * (e.y - b.y);
+    for (let j = 0; j < SAMPLES; j++) {   // a cardinal spline: gentle, so a trail doesn't swing wide of its stops
       const u = j / SAMPLES, u2 = u * u, u3 = u2 * u;
-      path.push([.5 * (2 * b.x + (d.x - a.x) * u + (2 * a.x - 5 * b.x + 4 * d.x - e.x) * u2 + (3 * b.x - a.x - 3 * d.x + e.x) * u3),
-                 .5 * (2 * b.y + (d.y - a.y) * u + (2 * a.y - 5 * b.y + 4 * d.y - e.y) * u2 + (3 * b.y - a.y - 3 * d.y + e.y) * u3)]);
+      const h0 = 2 * u3 - 3 * u2 + 1, h1 = u3 - 2 * u2 + u, h2 = -2 * u3 + 3 * u2, h3 = u3 - u2;
+      path.push([h0 * b.x + h1 * m0x + h2 * d.x + h3 * m1x, h0 * b.y + h1 * m0y + h2 * d.y + h3 * m1y]);
     }
   }
   if (p.length) path.push([p[p.length - 1].x, p[p.length - 1].y]);
@@ -130,7 +142,7 @@ function trail(conv, upto, style, width) {
   const CHUNK = 7;   // a trail brightens toward its end, so its direction reads without arrowheads
   for (let i = 0; i < n; i += CHUNK) {
     const j = Math.min(i + CHUNK, n);
-    g.strokeStyle = style(.3 + .7 * j / (p.length - 1));
+    g.strokeStyle = style(.16 + .84 * Math.pow(j / (p.length - 1), 1.5));
     g.beginPath(); g.moveTo(sx(p[i][0]), sy(p[i][1]));
     for (let k = i + 1; k <= j; k++) g.lineTo(sx(p[k][0]), sy(p[k][1]));
     g.stroke();
@@ -151,21 +163,25 @@ function draw() {
       g.stroke();
     }
   }
-  const lit = new Map();   // star -> how brightly a trail lights it
+  const lit = new Map(), heat = new Map();   // star -> how brightly a trail lights it; how loud my voice was there
   for (let back = Math.min(GHOSTS, cur); back >= 1; back--) {
     const conv = C[cur - back], fade = Math.pow(.62, back);
     trail(conv, 1, a => `rgba(170, 180, 215, ${(.5 * fade * a).toFixed(3)})`, 1.2);
     for (const k of conv.stops) lit.set(k.s, Math.max(lit.get(k.s) || 0, .25 + .5 * fade));
   }
   if (now) {
-    trail(now, drawn, WARM, 1.8);
+    trail(now, drawn, WARM, now.stops.length > 16 ? 1.3 : 1.8);
     const reached = drawn * (now.path.length - 1);
-    now.stops.forEach((k, i) => { if (i * SAMPLES <= reached + .5) lit.set(k.s, 1); });
+    now.stops.forEach((k, i) => {
+      if (i * SAMPLES > reached + .5) return;
+      lit.set(k.s, 1);
+      if (k.heat >= 0) heat.set(k.s, Math.max(heat.get(k.s) || 0, k.heat));
+    });
   }
   for (const s of S) {
     const x = sx(s.x), y = sy(s.y);
     if (x < -40 || y < -40 || x > W + 40 || y > H + 40) continue;
-    const l = lit.get(s) || 0, r = RADIUS[s.size] * grow * (1 + .5 * l), halo = r * (2 + 1.2 * l);
+    const l = lit.get(s) || 0, r = RADIUS[s.size] * grow * (1 + .5 * l), halo = r * (2 + 1.2 * l + 2.6 * (heat.get(s) || 0));
     g.globalAlpha = .2 + .8 * l; g.drawImage(s.img, x - halo, y - halo, 2 * halo, 2 * halo);
   }
   g.globalAlpha = 1;
@@ -174,29 +190,56 @@ function draw() {
     const [hx, hy] = now.path[Math.floor(drawn * (now.path.length - 1))];
     g.fillStyle = "#fff"; g.beginPath(); g.arc(sx(hx), sy(hy), 3, 0, 7); g.fill();
   }
-  // Each stop's number, and the title of the stop picked (or of the first and last).
-  g.textBaseline = "middle";
-  const reached = drawn * (now.path.length - 1), seen = new Set();
-  now.stops.forEach((k, i) => {
-    if (i * SAMPLES > reached + .5 || seen.has(k.s)) return;
-    seen.add(k.s);
-    const x = sx(k.s.x), y = sy(k.s.y), named = stop === i || (stop === null && (i === 0 || i === now.stops.length - 1));
-    g.font = "600 11px system-ui, sans-serif"; g.fillStyle = WARM(.95);
-    g.fillText(String(i + 1), x + 8, y - 9);
-    if (stop === i) { g.strokeStyle = "#fff"; g.lineWidth = 1.2; g.beginPath(); g.arc(x, y, 11, 0, 7); g.stroke(); }
-    if (named) {
-      const title = k.s.title || "hidden", t = title.length > 44 ? title.slice(0, 42) + "…" : title;
-      g.font = "12px system-ui, sans-serif"; g.fillStyle = stop === i ? "#fff" : "rgba(232, 234, 242, .82)";
-      const left = x + 8 + 7 * String(i + 1).length + 4, edge = narrow() ? W - 8 : side.offsetLeft - 8;
-      if (left + g.measureText(t).width > edge && x > W / 3) {   // no room to its right: the title goes to its left
-        g.textAlign = "right"; g.fillText(t, x - 10, y - 9); g.textAlign = "left";
-      } else g.fillText(t, left, y - 9);
+  const reached = drawn * (now.path.length - 1), seen = new Set(), many = now.stops.length > 16;
+  if (stop !== null && now.stops[stop]) {
+    const k = now.stops[stop];
+    g.setLineDash([3, 4]); g.lineWidth = 1; g.strokeStyle = "rgba(157, 184, 255, .8)";
+    for (const l of k.back) {   // what it returns to: said earlier, in another conversation
+      g.beginPath(); g.moveTo(sx(k.s.x), sy(k.s.y)); g.lineTo(sx(l.to.x), sy(l.to.y)); g.stroke();
+      g.globalAlpha = 1; const r = 9; g.drawImage(l.to.img, sx(l.to.x) - r, sy(l.to.y) - r, 2 * r, 2 * r);
     }
+    g.setLineDash([]);
+    g.lineWidth = 2.4; g.strokeStyle = "#fff"; g.lineJoin = g.lineCap = "round";   // the legs in and out
+    const from = Math.max(0, (stop - 1) * SAMPLES), to = Math.min(now.path.length - 1, (stop + 1) * SAMPLES, Math.floor(reached));
+    if (to > from) {
+      g.beginPath(); g.moveTo(sx(now.path[from][0]), sy(now.path[from][1]));
+      for (let i = from + 1; i <= to; i++) g.lineTo(sx(now.path[i][0]), sy(now.path[i][1]));
+      g.stroke();
+    }
+  }
+  // Each stop's number (on a long trail, only around the stop picked and at its ends), and the picked stop's title
+  // with its neighbors', or the first and last.
+  g.textBaseline = "middle";
+  const label = (text, x, y, bold) => {
+    const t = text.length > 44 ? text.slice(0, 42) + "…" : text, edge = narrow() ? W - 8 : side.offsetLeft - 8;
+    g.font = "12px system-ui, sans-serif"; g.fillStyle = bold ? "#fff" : "rgba(232, 234, 242, .82)";
+    g.lineWidth = 3; g.strokeStyle = "rgba(11, 13, 20, .85)"; g.lineJoin = "round";
+    if (x + g.measureText(t).width > edge && x > W / 3) {   // no room to its right: the title goes to its left
+      g.textAlign = "right"; g.strokeText(t, x - 30, y); g.fillText(t, x - 30, y); g.textAlign = "left";
+    } else { g.strokeText(t, x, y); g.fillText(t, x, y); }
+  };
+  now.stops.forEach((k, i) => {
+    if (i * SAMPLES > reached + .5) return;
+    const x = sx(k.s.x), y = sy(k.s.y), ends = i === 0 || i === now.stops.length - 1;
+    const near = stop !== null && Math.abs(i - stop) <= 1, named = stop === null ? ends : near;
+    if (k.back.length && !seen.has(k.s)) {   // a return: a ring
+      g.strokeStyle = "rgba(157, 184, 255, .9)"; g.lineWidth = 1; g.beginPath(); g.arc(x, y, 7, 0, 7); g.stroke();
+    }
+    if (stop === i) { g.strokeStyle = "#fff"; g.lineWidth = 1.4; g.beginPath(); g.arc(x, y, 11, 0, 7); g.stroke(); }
+    if (seen.has(k.s) && stop !== i) return;
+    seen.add(k.s);
+    if (!many || ends || near) {
+      g.font = "600 11px system-ui, sans-serif"; g.fillStyle = WARM(.95);
+      g.lineWidth = 3; g.strokeStyle = "rgba(11, 13, 20, .85)"; g.strokeText(String(i + 1), x + 8, y - 9);
+      g.fillText(String(i + 1), x + 8, y - 9);
+    }
+    if (named) label(k.s.title || "hidden", x + 8 + 7 * String(i + 1).length + 4, y - 9, stop === i);
   });
 }
 
-// The strip: one column per conversation, in order, a block per stop in its star's hue. So it shows at a glance how
-// much each conversation held and which parts of the map it visited; months are marked where they begin.
+// The strip: one column per conversation, in order, a block per stop in its star's hue, dim where the stop returns to
+// something said before. So it shows at a glance how much each conversation held, which parts of the map it visited
+// and how much of it was new ground; months are marked where they begin.
 const fmtMonth = new Intl.DateTimeFormat(undefined, {month: "short", year: "2-digit"});
 function drawStrip() {
   if (!C.length) return;
@@ -213,7 +256,7 @@ function drawStrip() {
       if (x - lastLabel > 52) { sg.fillStyle = "#9aa0b4"; sg.fillText(m, x + 4, 1); lastLabel = x; }
     }
     conv.stops.forEach((k, j) => {
-      sg.fillStyle = `hsla(${k.s.hue}, 55%, ${i === cur ? 82 : 62}%, ${i === cur ? 1 : .75})`;
+      sg.fillStyle = `hsla(${k.s.hue}, 55%, ${i === cur ? 80 : 62}%, ${k.back.length ? .38 : i === cur ? 1 : .8})`;
       sg.fillRect(x, h - 4 - (j + 1) * unit, Math.max(col - (col > 3 ? 1 : 0), 1), Math.max(unit - (unit > 3 ? 1 : 0), 1));
     });
   });
@@ -225,7 +268,7 @@ const fmtDay = new Intl.DateTimeFormat(undefined, {weekday: "short", day: "numer
 const fmtTime = new Intl.DateTimeFormat(undefined, {hour: "2-digit", minute: "2-digit"});
 const WHO = ["", "me (diarization)", "not me"];
 function gap(seconds) {
-  for (const [size, name] of [[86400, "day"], [3600, "hour"], [60, "minute"]]) {
+  for (const [size, name] of [[86400 * 30.4, "month"], [86400, "day"], [3600, "hour"], [60, "minute"]]) {
     if (seconds >= size) { const n = Math.round(seconds / size); return `${n} ${name}${n === 1 ? "" : "s"}`; }
   }
   return "";
@@ -233,10 +276,11 @@ function gap(seconds) {
 function list() {
   const conv = C[cur], first = conv.stops[0].t * 1000, last = conv.stops[conv.stops.length - 1].t * 1000;
   document.getElementById("when").textContent = fmtDay.format(first);
-  const places = new Set(conv.stops.map(k => k.s)).size;
+  const places = new Set(conv.stops.map(k => k.s)).size, back = conv.stops.filter(k => k.back.length).length;
   document.getElementById("what").textContent = `${fmtTime.format(first)}` + (last - first >= 60000 ? `–${fmtTime.format(last)}` : "")
     + ` · ${conv.stops.length} thought${conv.stops.length === 1 ? "" : "s"}`
-    + (places < conv.stops.length ? ` at ${places} places` : "") + ` · conversation ${cur + 1} of ${C.length}`;
+    + (places < conv.stops.length ? ` at ${places} places` : "") + (back ? ` · ${back} return${back === 1 ? "" : "s"}` : "")
+    + ` · conversation ${cur + 1} of ${C.length}`;
   const ol = document.getElementById("stops"); ol.textContent = "";
   conv.stops.forEach((k, i) => {
     if (i && k.t - conv.stops[i - 1].t >= 600) {   // a pause worth showing: ten minutes or more
@@ -250,7 +294,18 @@ function list() {
     for (const [name, href] of [["card", "/idea/" + k.s.id], ["crossroads", "/crossroads/" + k.s.id]]) {
       const a = document.createElement("a"); a.textContent = name; a.href = href; small.append(a);
     }
-    li.dataset.stop = i; li.append(n, t, small); ol.append(li);
+    if (k.heat >= 0) {   // how loud my voice was: a fact about the voice, not about the thought
+      const bar = document.createElement("u"); bar.style.width = Math.round(6 + 34 * k.heat) + "px";
+      bar.title = "arousal in my voice"; small.prepend(bar);
+    }
+    li.dataset.stop = i; li.append(n, t, small);
+    for (const l of k.back.slice(0, 2)) {
+      const back = document.createElement("a"); back.className = "back"; back.href = "/crossroads/" + l.to.id;
+      back.textContent = `↺ ${gap(k.t - l.to.first) || "moments"} after “${l.to.title || "hidden"}”` + (l.kinds ? ` · ${l.kinds}` : "");
+      li.append(back);
+    }
+    if (k.back.length > 2) { const more = document.createElement("small"); more.textContent = `and ${k.back.length - 2} more`; li.append(more); }
+    ol.append(li);
   });
 }
 function mark() {

@@ -218,7 +218,9 @@ WHO = {"me": 0, "me_diar": 1, "not_me": 2}
 def trails(conn, at: str | None = None, demo: bool = False) -> str | None:
     """The sky's map, drawn through time (docs/design/m6-emanation.md, Trails): every card where the sky puts it, and
     every moment (pub.card_moments: a card, said in a conversation at a time), so the page can draw each conversation
-    as the trail it took across the map. Conversations are sent as numbers, never their ids. `at` opens the page on a
+    as the trail it took across the map. A moment carries the arousal in my voice, where it was measured (a fact about
+    the voice, 048), and the connections come too, so a stop can say what it returns to: a card it's connected to,
+    first said earlier in another conversation. Conversations are sent as numbers, never their ids. `at` opens the page on a
     card's conversation; None if that card isn't on the map. In demo mode a sensitive card keeps its star, blank, and
     has no moments, so a trail passes it by."""
     v = _views(demo)
@@ -230,12 +232,15 @@ def trails(conn, at: str | None = None, demo: bool = False) -> str | None:
     stars = [[str(r["idea_id"]), round(float(r["x"]), 4), round(float(r["y"]), 4),
               SIZES[r["maturity"]] + (r["kept_as"] == "canonical"), r["title"] or "", _facts(r)] for r in rows]
     conversations: dict[str, int] = {}
-    moments = [[index[i], conversations.setdefault(c, len(conversations)), int(t.timestamp()), WHO.get(who, 2)]
-               for i, c, t, who in conn.execute(
-                   f"""SELECT idea_id::text, conversation_id, said_at, speaker FROM {v}card_moments
+    moments = [[index[i], conversations.setdefault(c, len(conversations)), int(t.timestamp()), WHO.get(who, 2),
+                -1 if heat is None else round(min(max(float(heat), 0.0), 1.0), 2)]
+               for i, c, t, who, heat in conn.execute(
+                   f"""SELECT idea_id::text, conversation_id, said_at, speaker, arousal FROM {v}card_moments
                        WHERE conversation_id IS NOT NULL AND said_at IS NOT NULL
                        ORDER BY said_at, conversation_id, item_id, observation_id""") if i in index]
-    data = json.dumps({"stars": stars, "moments": moments, "at": at}, separators=(",", ":"))
+    links = sorted((*sorted((index[a], index[b])), ", ".join(kinds)) for a, b, kinds in conn.execute(
+        "SELECT a::text, b::text, kinds FROM pub.card_links") if a in index and b in index and a != b)
+    data = json.dumps({"stars": stars, "moments": moments, "links": links, "at": at}, separators=(",", ":"))
     return _TRAILS.replace("{data}", data.replace("</", "<\\/"))
 
 
@@ -294,7 +299,9 @@ def crossroads(conn, idea_id: str, demo: bool = False) -> str | None:
                 found.append((said[k], f"{_apart(said[k]['said_at'], m['said_at'])} {'earlier' if step < 0 else 'later'}"
                                        ", same conversation"))
     # Up and down: connections and lineage first, then the nearest by meaning, each once.
-    like = _rows(conn, f"""SELECT c.idea_id, c.title, c.first_said, 'connected' AS why, 2::real AS similarity
+    like = _rows(conn, f"""SELECT c.idea_id, c.title, c.first_said,
+                                  coalesce(nullif(array_to_string(l.kinds, ', '), ''), 'connected') AS why,
+                                  2::real AS similarity
                            FROM pub.card_links l
                            JOIN {v}cards c ON c.idea_id = CASE WHEN l.a = %s THEN l.b ELSE l.a END
                            WHERE %s IN (l.a, l.b) {shown}

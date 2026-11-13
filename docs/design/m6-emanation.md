@@ -87,6 +87,15 @@ edge; a trail shows the order.
 - Step through conversations (arrow keys, or drag along the strip), or play them in order. The list names each stop
   with its time and who said it. Tapping a star goes to the latest conversation that passed through it.
   `/trails?at=<id>` opens on a card's conversation.
+- **Returns and new ground.** A stop returns to a card when it's connected to one first said earlier, in another
+  conversation: an echo seen from the later side. It gets a ring; the list says what it returns to and how long
+  after; picking it draws a dashed line back; and its block on the strip is dim, so a column's bright blocks are that
+  conversation's new ground, as far as the connections know.
+- **Heat.** A lit stop glows wider the more arousal Hearsay measured in my voice (048), and the list shows it as a
+  bar. A fact about the voice, never a judgment of the thought. On the live archive 1,002 of 1,046 speech moments
+  have one, spread from 0.1 to 0.8.
+- On a trail of more than 16 stops the numbers show only at its ends and around the stop picked, whose legs in and
+  out are drawn bright. Live conversations run to 82 stops.
 - Nothing ranks: conversations come in the order they happened, and stars keep the sky's size and hue.
 - Positions are today's. A trail says when things were said, never where they sat on the map at the time, which is
   the same caution as double exposure below.
@@ -129,16 +138,11 @@ join two cards said in different conversations.
 
 None of these needs lenses, so none waits for M5. Each reads only what `pub` already has.
 
-- **New ground.** For each conversation, how far its moments landed from everything said before it (the distance to
-  the nearest earlier star, by embedding, not the 2D map). The seismograph below, at its simplest: a line under
-  Trails' strip. Call a peak a conversation that went somewhere new, not a discovery.
 - **The loom.** Conversations as rows, the map's neighborhoods as columns, a mark where a conversation touched one.
   Trails' strip with the second axis opened out. It needs neighborhoods with names, so it wants subject lenses, or a
   clustering of the map that a model titles once.
-- **Two voices.** Trails with the not-me moments drawn apart (hollow), and a count of how often a trail's turn to a
-  new part of the map was someone else's line. Where other people take me.
-- **Heat.** Arousal is a fact about my voice (048), not a judgment of the thought. A trail could carry it as the
-  warmth of each stop. To check on the real archive first: how many moments have one, and whether it varies.
+- **Two voices.** Trails with the not-me moments drawn apart, to show where other people take me. Nothing to draw
+  yet: every moment on the live archive is mine (1,026 by voice, 69 by diarization; 2026-11-13).
 - **Negative space, once `im connect` has run:** pairs the screen passed and Terra answered `none` for, drawn as
   the dashed links above.
 
