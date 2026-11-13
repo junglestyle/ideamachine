@@ -76,7 +76,7 @@ a synthesis makes it an idea, linked to what it was made from.
 The sky's map, drawn through time. The sky shows where a thought sits and nothing of when it was said beyond a soft
 edge; a trail shows the order.
 
-- A **moment** is one capture as it was said: a card, a conversation, a time (`pub.card_moments`, migration 062). It's
+- A **moment** is one capture as it was said: a card, a conversation, a time (`pub.card_moments`, migration 063). It's
   timed by the capture's own first cited line, where `pub.card_evidence` gives every capture of an episode the
   episode's start.
 - A **trail** is one conversation's moments in order, drawn as a curve from star to star that brightens toward its
@@ -106,14 +106,29 @@ A reading view: one card, with the two kinds of neighbor every thought here has.
 - "Near by meaning" is an embedding neighbor, named as that, never as a connection
   ([0010](../decisions/0010-connections-kinds-lenses.md)).
 
+## Echoes (`im web`, `/echoes`)
+
+What I came back to. Almost every capture founds its own cluster (1,049 of 1,065 cards were said in one
+conversation, 2026-11-13), so recurrence doesn't show as a cluster said twice. It shows as connections: of 1,015, 511
+join two cards said in different conversations.
+
+- An **echo** is a connection between two cards with no conversation in common. The earlier is shown beside the
+  later, with how far apart they were first said, the connection's kinds and their direction ("the later elaborates
+  the earlier"), and the judge's reason and the structure it named, marked as the judge's (`pub.card_judgments`,
+  migration 064).
+- Above the list, every echo is an arc over the archive's time, from the earlier card to the later, colored by kind.
+  An arc links to its row.
+- Newest first, by when the later card was said. Kind (elaborates, supports, tension, analogous) and gap (a week, a
+  month) only narrow the list.
+- Embedding neighbors the judge hasn't connected aren't echoes: a shared subject is no connection
+  ([0010](../decisions/0010-connections-kinds-lenses.md)). Asking for every card's neighbors would also take minutes:
+  `pub.card_neighbours` takes 0.3 s a card on the live archive.
+- Demo mode leaves out a pair with a sensitive card.
+
 ## Views the data could carry now (ideas, 2026-11-12)
 
 None of these needs lenses, so none waits for M5. Each reads only what `pub` already has.
 
-- **Echoes.** Pairs that are near by meaning and far apart in time: what I came back to months later without the
-  matcher calling it the same point. A list ordered by the gap alone, each pair side by side with both quotes. Since
-  almost every capture founded its own cluster, this is where recurrence shows today. It's also a cheap feed for
-  `im merges` and for connections worth proposing.
 - **New ground.** For each conversation, how far its moments landed from everything said before it (the distance to
   the nearest earlier star, by embedding, not the 2D map). The seismograph below, at its simplest: a line under
   Trails' strip. Call a peak a conversation that went somewhere new, not a discovery.

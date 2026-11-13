@@ -308,7 +308,7 @@ def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F8
 
     lattice.place(matched, HashEmbedder().model_version)
     new = str(idea(matched, "Something new"))
-    for path in ("/trails", "/crossroads", f"/crossroads/{new}"):
+    for path in ("/trails", "/echoes", "/crossroads", f"/crossroads/{new}"):
         assert request(served, "GET", path)[0] == 303 and request(served, "GET", path)[1]["Location"] == "/login"
     _, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")
     cookie = headers["Set-Cookie"].split(";")[0]
@@ -317,5 +317,45 @@ def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F8
     assert status == 303 and headers["Location"].startswith("/crossroads/")       # somewhere, at random
     assert "Something new" in request(served, "GET", headers["Location"], cookie=cookie)[2]
     assert request(served, "GET", f"/crossroads/{new}", cookie=cookie)[0] == 200
+    assert "<h1>Echoes</h1>" in request(served, "GET", "/echoes?kind=tension&gap=week", cookie=cookie)[2]
     assert request(served, "GET", "/trails?at=nope", cookie=cookie)[0] == 404
     assert request(served, "GET", "/crossroads/nope", cookie=cookie)[0] == 404
+
+
+def judged(conn, a, b, verdict, direction=None, why="Because.", analogy=""):
+    """As the connection judge records a pair (connect._record): its verdict, and a connection with its kind."""
+    a, b, flip = min(a, b), max(a, b), a > b
+    direction = {"a>b": "b>a", "b>a": "a>b"}.get(direction, direction) if flip else direction
+    conn.execute("""INSERT INTO im.connection_verdicts (a, b, verdict, direction, analogy, why, belongs, method,
+                                                        input_hash) VALUES (%s, %s, %s, %s, %s, %s, .9, 'connect-t', 'h')""",
+                 (a, b, verdict, direction, analogy, why))
+    if verdict != "none":
+        conn.execute("INSERT INTO im.connections (a, b, method) VALUES (%s, %s, 'connect-t')", (a, b))
+        conn.execute("INSERT INTO im.connection_kinds (a, b, kind, direction, method) VALUES (%s, %s, %s, %s, 'connect-t')",
+                     (a, b, verdict, direction))
+
+
+def test_an_echo_is_a_connection_across_conversations_the_earlier_beside_the_later(matched, admin):  # noqa: F811
+    build, coffee, new = (idea(matched, t) for t in (
+        "Broken builds as signal", "The coffee order is the real meeting.", "Something new"))
+    judged(matched, new, build, "elaborates", "a>b", "The sensors carry the build's idea further.", "a signal nobody reads")
+    judged(matched, build, coffee, "tension")            # said in one conversation: connected, but no echo
+    page = as_app(admin, web.echoes)
+    assert "1 connection between" in page and page.count("<li ") == 1
+    row = page.split("<ol>")[1]
+    assert row.index("Broken builds as signal") < row.index("1 hour") < row.index("Something new")
+    assert "the later elaborates the earlier" in row and 'class="elaborates"' in row
+    assert "The sensors carry the build&#x27;s idea further." in row and "Same structure: a signal nobody reads" in row
+    assert "Did you see the build broke again?" in row and f'href="/crossroads/{new}"' in row
+    assert page.count("<path") == 1                                               # its arc over the archive's time
+    for narrowed in (("tension",), ("all", "week")):                                # filters only narrow
+        assert "0 connections" in as_app(admin, web.echoes, *narrowed)
+    assert "1 connection between" in as_app(admin, web.echoes, "analogy", "nonsense")   # an unknown filter is none
+    # The judge's `none` is kept for views to read, and is no connection.
+    judged(matched, coffee, new, "none")
+    assert as_app(admin, lambda c: c.execute("SELECT count(*) FROM pub.card_judgments WHERE verdict = 'none'"
+                                             ).fetchone()) == (1,)
+    assert as_app(admin, web.echoes).count("<li ") == 1
+    as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
+                                         VALUES ('idea_sensitive', %s, '{"sensitive": true}')""", (new,)))
+    assert "0 connections" in as_app(admin, web.echoes, "all", "any", True)         # demo mode leaves the pair out
