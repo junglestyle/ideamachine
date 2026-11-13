@@ -63,7 +63,9 @@ drawn through lenses ([0010](decisions/0010-connections-kinds-lenses.md)), and a
   17 ms, 30 to 60 fps); and lighting the sky from a card fetches only its relevance (`/sky/lens`) instead of
   reloading the page (at 3,000 cards: 147 ms and 138 KB, against 295 ms and 613 KB). The server's `/sky` took 155 ms
   at 3,000 cards and 1.5 s at 15,000, mostly the cards query and the lens's PageRank; links are now most of a
-  frame's drawing.
+  frame's drawing. Two more read the same cards (2026-11-12): Trails, the map with each conversation as the path it
+  took, and Crossroads, one card with what was said around it and what's like it
+  ([M6 notes](design/m6-emanation.md)).
 - **Trellis: pinned lenses, laid out by hand, for organization.** The stable one, called Lattice v2 in
   [0010](decisions/0010-connections-kinds-lenses.md). Not the Lattice app (removed 2026-11-11). First two:
   - a conceptual or thematic grid of lenses;

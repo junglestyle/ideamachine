@@ -5,6 +5,10 @@ diarization, not me; never a name), in how many conversations, when, its maturit
 No score orders or filters anything. From a card I keep a cluster (canonical or pinned), un-keep it or dismiss it,
 as feedback events, the same kinds Lattice's keep_idea wrote.
 
+Two more pages draw the same cards (docs/design/m6-emanation.md): Trails (`/trails`), the sky's map with each
+conversation as the path it took from thought to thought, and Crossroads (`/crossroads/<id>`), one card with what was
+said around it and what's like it. Both only read.
+
 Demo mode (a toggle, or `im web --demo` for nothing else) reads the `demo` views instead of `pub`'s, so nothing
 sensitive is there to show: the sky keeps a sensitive cluster's star, blank, with its edges, and the lists (the
 feed, a card's quotes and connections) leave it out. Nothing can be kept or dismissed in demo mode.
@@ -107,7 +111,8 @@ def feed(conn, show: str = "candidates", page: int = 0, demo: bool = False) -> s
                            ORDER BY last_seen DESC, idea_id LIMIT %s OFFSET %s""",
                  (list(maturities), PAGE + 1, page * PAGE))
     tabs = " ".join(f'<a href="/?show={k}"{" aria-current=page" if k == show else ""}>{name}</a>'
-                    for k, (_, name) in SHOW.items()) + ' <a href="/sky">sky</a>' \
+                    for k, (_, name) in SHOW.items()) + ' <a href="/sky">sky</a> <a href="/trails">trails</a>' \
+        + ' <a href="/crossroads">crossroads</a>' \
         + f' <a href="/demo?on={0 if demo else 1}">{"leave demo mode" if demo else "demo mode"}</a>'
     cards = "".join(f'<li><a href="/idea/{r["idea_id"]}">{_e(r["title"])}</a><p>{_e(r["statement"])}</p>'
                     f'<small>{_e(_facts(r))}</small></li>' for r in rows[:PAGE])
@@ -141,7 +146,8 @@ def card(conn, idea_id: str, demo: bool = False) -> str | None:
     buttons = "".join(f'<button name="action" value="{a}">{a}</button>' for a in ACTIONS)
     body = [f"<h1>{_e(r['title'])}</h1><p>{_e(r['statement'])}</p><small>{_e(_facts(r))}</small>",
             "" if demo else f'<form method="post" action="/idea/{idea_id}">{buttons}</form>',
-            f'<p><a href="/sky?seed={idea_id}">Light the sky from here</a></p>']
+            f'<p><a href="/sky?seed={idea_id}">Light the sky from here</a> · '
+            f'<a href="/trails?at={idea_id}">Its trail</a> · <a href="/crossroads/{idea_id}">Its crossroads</a></p>']
     if r["my_note"]:
         body.append(f"<h2>My note</h2><p>{_e(r['my_note'])}</p>")
     body.append("<h2>Said</h2><ol>" + "".join(
@@ -205,6 +211,138 @@ def sky_lens(conn, seed: str, demo: bool = False) -> dict | None:
     return {"seed": seed, "rel": _relevance(conn, seed, on_map), "title": on_map[seed] or "Sky"}
 
 
+WHO = {"me": 0, "me_diar": 1, "not_me": 2}
+
+
+def trails(conn, at: str | None = None, demo: bool = False) -> str | None:
+    """The sky's map, drawn through time (docs/design/m6-emanation.md, Trails): every card where the sky puts it, and
+    every moment (pub.card_moments: a card, said in a conversation at a time), so the page can draw each conversation
+    as the trail it took across the map. Conversations are sent as numbers, never their ids. `at` opens the page on a
+    card's conversation; None if that card isn't on the map. In demo mode a sensitive card keeps its star, blank, and
+    has no moments, so a trail passes it by."""
+    v = _views(demo)
+    rows = _rows(conn, f"""SELECT c.*, p.x, p.y FROM {v}cards c JOIN pub.card_positions p USING (idea_id)
+                           ORDER BY c.idea_id""")
+    index = {str(r["idea_id"]): n for n, r in enumerate(rows)}
+    if at is not None and at not in index:
+        return None
+    stars = [[str(r["idea_id"]), round(float(r["x"]), 4), round(float(r["y"]), 4),
+              SIZES[r["maturity"]] + (r["kept_as"] == "canonical"), r["title"] or "", _facts(r)] for r in rows]
+    conversations: dict[str, int] = {}
+    moments = [[index[i], conversations.setdefault(c, len(conversations)), int(t.timestamp()), WHO.get(who, 2)]
+               for i, c, t, who in conn.execute(
+                   f"""SELECT idea_id::text, conversation_id, said_at, speaker FROM {v}card_moments
+                       WHERE conversation_id IS NOT NULL AND said_at IS NOT NULL
+                       ORDER BY said_at, conversation_id, item_id, observation_id""") if i in index]
+    data = json.dumps({"stars": stars, "moments": moments, "at": at}, separators=(",", ":"))
+    return _TRAILS.replace("{data}", data.replace("</", "<\\/"))
+
+
+def _apart(a, b) -> str:
+    """How far apart two times are, in words: "4 minutes", "3 days", "5 months"."""
+    s = abs((a - b).total_seconds())
+    for size, name in ((86400 * 365, "year"), (86400 * 30.4, "month"), (86400, "day"), (3600, "hour"), (60, "minute")):
+        if s >= size:
+            n = round(s / size)
+            return f"{n} {name}{'s' * (n != 1)}"
+    return "moments"
+
+
+def _door(way: str, r: dict, why: str, quotes: dict) -> str:
+    quote = quotes.get(r["idea_id"])
+    return (f'<a class="door" data-way="{way}" href="/crossroads/{r["idea_id"]}"><small>{_e(why)}</small>'
+            f'<b>{_e(r["title"])}</b>' + (f"<q>{_e(quote)}</q>" if quote else "") + "</a>")
+
+
+ECHOES = 4   # how many doors each way in meaning
+
+
+def crossroads(conn, idea_id: str, demo: bool = False) -> str | None:
+    """One card with the two kinds of neighbor it has (docs/design/m6-emanation.md, Crossroads). Across: what was said
+    just before and just after it in its own conversations, usually about something else. Up and down: what's like
+    it, said at another time (its connections, lineage and nearest by meaning, less the doors across), earlier above
+    and later below. Every door leads to that card's own crossroads. Nothing orders a door but time, and likeness within one direction.
+    None if there's no such card; in demo mode a sensitive one says only that it's hidden, and no door leads to one."""
+    v = _views(demo)
+    shown = "AND NOT c.redacted" if demo else ""
+    rows = _rows(conn, f"SELECT * FROM {v}cards WHERE idea_id = %s", (idea_id,))
+    if not rows:
+        return None
+    r = rows[0]
+    if demo and r["redacted"]:
+        return _page("Hidden", f"<h1>Hidden in demo mode</h1><small>{_e(_facts(r))}</small>")
+    # Across: every moment of the conversations this card was said in, in the order said.
+    said = _rows(conn, f"""SELECT m.idea_id, m.conversation_id, m.said_at, m.speaker, m.quote, c.title
+                           FROM {v}card_moments m JOIN {v}cards c USING (idea_id)
+                           WHERE m.conversation_id IN (SELECT conversation_id FROM {v}card_moments WHERE idea_id = %s)
+                             AND m.said_at IS NOT NULL
+                           ORDER BY m.conversation_id, m.said_at, m.item_id, m.observation_id""", (idea_id,))
+    mine = [m for m in said if str(m["idea_id"]) == idea_id]
+    before, after, seen = [], [], {idea_id}
+    for n, m in enumerate(said):
+        if str(m["idea_id"]) != idea_id:
+            continue
+        for found, step in ((before, -1), (after, 1)):
+            k = n + step
+            while 0 <= k < len(said) and said[k]["conversation_id"] == m["conversation_id"] \
+                    and str(said[k]["idea_id"]) == idea_id:
+                k += step
+            if 0 <= k < len(said) and said[k]["conversation_id"] == m["conversation_id"] \
+                    and (step, said[k]["idea_id"]) not in seen:
+                seen.add((step, said[k]["idea_id"]))
+                found.append((said[k], f"{_apart(said[k]['said_at'], m['said_at'])} {'earlier' if step < 0 else 'later'}"
+                                       ", same conversation"))
+    # Up and down: connections and lineage first, then the nearest by meaning, each once.
+    like = _rows(conn, f"""SELECT c.idea_id, c.title, c.first_said, 'connected' AS why, 2::real AS similarity
+                           FROM pub.card_links l
+                           JOIN {v}cards c ON c.idea_id = CASE WHEN l.a = %s THEN l.b ELSE l.a END
+                           WHERE %s IN (l.a, l.b) {shown}
+                           UNION ALL
+                           SELECT c.idea_id, c.title, c.first_said, 'lineage', 2 FROM pub.card_lineage l
+                           JOIN {v}cards c ON c.idea_id = CASE WHEN l.from_id = %s THEN l.to_id ELSE l.from_id END
+                           WHERE %s IN (l.from_id, l.to_id) {shown}
+                           UNION ALL
+                           SELECT c.idea_id, c.title, c.first_said, 'near by meaning', n.similarity
+                           FROM pub.card_neighbours(%s, %s) n JOIN {v}cards c USING (idea_id) WHERE true {shown}
+                           ORDER BY similarity DESC, idea_id""", (idea_id,) * 5 + (4 * ECHOES,))
+    earlier, later, met = [], [], {r["idea_id"]} | {x["idea_id"] for x, _ in before + after}
+    for x in like:
+        if x["idea_id"] in met:
+            continue
+        met.add(x["idea_id"])
+        if r["first_said"] and x["first_said"]:
+            past = x["first_said"] < r["first_said"]
+            why = f"{x['why']} · {_apart(x['first_said'], r['first_said'])} {'earlier' if past else 'later'}"
+        else:
+            past, why = False, x["why"]
+        side = earlier if past else later
+        if len(side) < ECHOES:
+            side.append((x, why))
+    doors = [x["idea_id"] for x, _ in before + after + earlier + later]
+    quotes = dict(conn.execute(f"""SELECT DISTINCT ON (idea_id) idea_id, quote FROM {v}card_moments
+                                   WHERE idea_id = ANY(%s) ORDER BY idea_id, said_at, item_id""", (doors,)).fetchall())
+
+    def arm(way: str, name: str, found: list) -> str:
+        inner = "".join(_door(way, x, why, quotes) for x, why in found) or "<i>nothing</i>"
+        return f'<section class="{way}"><h2>{name}</h2>{inner}</section>'
+
+    here = "".join(f"<blockquote><p>{_e(m['quote'])}</p><small>{_e(SPEAKERS.get(m['speaker'], m['speaker']))} · "
+                   f"{_when(m['said_at'])}</small></blockquote>" for m in mine[:3])
+    body = (arm("up", "Like it, earlier", earlier) + arm("left", "Just before", before)
+            + f'<main><h1>{_e(r["title"])}</h1>{here}<p>{_e(r["statement"])}</p><small>{_e(_facts(r))}</small>'
+              f'<nav><a href="/idea/{idea_id}">Card</a><a href="/trails?at={idea_id}">Its trail</a>'
+              f'<a href="/sky?seed={idea_id}">Light the sky</a><a href="/crossroads">Somewhere else</a></nav></main>'
+            + arm("right", "Just after", after) + arm("down", "Like it, later", later))
+    return _CROSSROADS.replace("{title}", _e(r["title"] or "Crossroads")).replace("{body}", body)
+
+
+def anywhere(conn, demo: bool = False) -> str | None:
+    """A card picked at random, for a crossroads to start from: nothing chooses it (decision 0007)."""
+    row = conn.execute(f"""SELECT idea_id::text FROM {_views(demo)}cards c
+                           WHERE true {"AND NOT c.redacted" if demo else ""} ORDER BY random() LIMIT 1""").fetchone()
+    return row[0] if row else None
+
+
 def act(conn, idea_id: str, action: str) -> None:
     kind, payload = ACTIONS[action]
     conn.execute("INSERT INTO pub.feedback_events (kind, idea_id, payload, source) VALUES (%s, %s, %s, 'emanation')",
@@ -239,6 +377,8 @@ _LOGIN = _page("Log in", '<form method="post" action="/login"><input type="passw
 
 
 _SKY = (files("im") / "sky.html").read_text()
+_TRAILS = (files("im") / "trails.html").read_text()
+_CROSSROADS = (files("im") / "crossroads.html").read_text()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -299,8 +439,15 @@ class Handler(BaseHTTPRequestHandler):
                 got = sky_lens(conn, seed, demo) if _UUID.match(seed) else None
                 return self._send(200, json.dumps(got, separators=(",", ":")), content_type="application/json") \
                     if got else self._send(404, "{}", content_type="application/json")
-            m = re.fullmatch(r"/idea/([0-9a-f-]{36})", url.path)
-            body = card(conn, m[1], demo) if m and _UUID.match(m[1]) else None
+            if url.path == "/trails":
+                at = q.get("at")
+                body = trails(conn, at, demo) if at is None or _UUID.match(at) else None
+                return self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))
+            if url.path == "/crossroads":   # anywhere: a card at random
+                to = anywhere(conn, demo)
+                return self._send(303, headers={"Location": f"/crossroads/{to}" if to else "/"})
+            m = re.fullmatch(r"/(idea|crossroads)/([0-9a-f-]{36})", url.path)
+            body = (card if m[1] == "idea" else crossroads)(conn, m[2], demo) if m and _UUID.match(m[2]) else None
         self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))
 
     def do_POST(self) -> None:

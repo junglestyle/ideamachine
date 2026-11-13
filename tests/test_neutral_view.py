@@ -244,3 +244,78 @@ def test_a_seed_nothing_is_like_lights_only_itself():
 
     assert lens.relevance(Nearby([], [("b", -0.2), ("c", 0.0)]), "a") == {"a": 1.0}
     assert lens.relevance(Nearby([("b", "c", 1.0)], [("b", 0.0)]), "a") == {"a": 1.0}   # linked, but not to the seed
+
+
+def test_a_trail_is_a_conversations_moments_in_the_order_said(matched, admin):  # noqa: F811
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    lattice.place(matched, HashEmbedder().model_version)
+    build, coffee, new = (str(idea(matched, t)) for t in (
+        "Broken builds as signal", "The coffee order is the real meeting.", "Something new"))
+    data = sky_data(as_app(admin, web.trails))
+    ids = [s[0] for s in data["stars"]]
+    assert ids == [s[0] for s in sky_data(as_app(admin, web.sky))["stars"]]   # the sky's map, star for star
+    # Both captures of the one episode share its start in pub.card_evidence; a moment is timed by its own lines.
+    assert [(ids[star], conv, who) for star, conv, _, who in data["moments"]] == [
+        (build, 0, 0), (coffee, 0, 2), (new, 1, 0)]
+    assert data["moments"][0][2] < data["moments"][1][2]
+    assert "c-conv" not in as_app(admin, web.trails)                   # a conversation is a number, never its id
+    assert sky_data(as_app(admin, web.trails, new))["at"] == new
+    assert as_app(admin, web.trails, "00000000-0000-0000-0000-000000000000") is None
+
+
+def test_a_crossroads_has_doors_across_its_conversation_and_to_what_is_like_it(matched, admin):  # noqa: F811
+    build, coffee = (str(idea(matched, t)) for t in ("Broken builds as signal", "The coffee order is the real meeting."))
+    page = as_app(admin, web.crossroads, build)
+    across, like = page.split('<section class="right">')[1].split('<section class="down">')
+    assert f'href="/crossroads/{coffee}"' in across and "moments later, same conversation" in across
+    assert "nothing" in page.split('<section class="left">')[1].split("<main>")[0]   # it opened its conversation
+    assert "Something new" in like and "near by meaning · 1 hour later" in like
+    assert coffee not in like                                   # a door across isn't repeated among what's like it
+    signal, grape = table(matched, "SELECT a::text, b::text FROM pub.card_links")[0]
+    assert f'href="/crossroads/{grape}"><small>connected' in as_app(admin, web.crossroads, signal)
+    assert "Did you see the build broke again?" in page and "anon A" not in page
+    back = as_app(admin, web.crossroads, coffee).split('<section class="left">')[1].split("<main>")[0]
+    assert f'href="/crossroads/{build}"' in back and "moments earlier" in back
+    assert as_app(admin, web.crossroads, "00000000-0000-0000-0000-000000000000") is None
+    assert as_app(admin, web.anywhere) in {r[0] for r in table(matched, "SELECT idea_id::text FROM pub.cards")}
+
+
+def test_demo_mode_keeps_a_sensitive_card_off_every_trail_and_behind_no_door(matched, admin):  # noqa: F811
+    import json
+
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    build, coffee = (str(idea(matched, t)) for t in ("Broken builds as signal", "The coffee order is the real meeting."))
+    as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
+                                         VALUES ('idea_sensitive', %s, %s)""", (coffee, json.dumps({"sensitive": True}))))
+    lattice.place(matched, HashEmbedder().model_version)
+    data = sky_data(as_app(admin, web.trails, None, True))
+    star = [s[0] for s in data["stars"]].index(coffee)
+    assert data["stars"][star][4] == "" and star not in {m[0] for m in data["moments"]}   # its star, blank, on no trail
+    assert coffee not in as_app(admin, web.crossroads, build, True)
+    hidden = as_app(admin, web.crossroads, coffee, True)
+    assert "Hidden in demo mode" in hidden and "coffee" not in hidden
+    for _ in range(20):
+        assert as_app(admin, web.anywhere, True) != coffee
+
+
+def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F811
+    from im import lattice
+    from test_triage import HashEmbedder
+
+    lattice.place(matched, HashEmbedder().model_version)
+    new = str(idea(matched, "Something new"))
+    for path in ("/trails", "/crossroads", f"/crossroads/{new}"):
+        assert request(served, "GET", path)[0] == 303 and request(served, "GET", path)[1]["Location"] == "/login"
+    _, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")
+    cookie = headers["Set-Cookie"].split(";")[0]
+    assert sky_data(request(served, "GET", f"/trails?at={new}", cookie=cookie)[2])["at"] == new
+    status, headers, _ = request(served, "GET", "/crossroads", cookie=cookie)
+    assert status == 303 and headers["Location"].startswith("/crossroads/")       # somewhere, at random
+    assert "Something new" in request(served, "GET", headers["Location"], cookie=cookie)[2]
+    assert request(served, "GET", f"/crossroads/{new}", cookie=cookie)[0] == 200
+    assert request(served, "GET", "/trails?at=nope", cookie=cookie)[0] == 404
+    assert request(served, "GET", "/crossroads/nope", cookie=cookie)[0] == 404

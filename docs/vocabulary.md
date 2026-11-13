@@ -462,6 +462,16 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   - color: its direction from the map's center.
 
   The home sky is the seedless lens.
+- **Moment.** One capture as it was said: a card, the conversation, a time, who said it, and the quote
+  (`pub.card_moments`, 062). Timed by the capture's own first cited segment; anything that isn't speech keeps its
+  observation's time. _Not_ a row of `pub.card_evidence`, which times a speech capture by its episode's start.
+- **Trail, Trails.** A trail is one conversation's moments in the order said, drawn as a path between their stars at
+  stored map positions. Trails is the Emanation view that draws them, one conversation at a time or played in order
+  ([M6 notes] §Trails, `web.trails`, `/trails`). A stop is one moment on a trail.
+- **Crossroads.** The view of one card with its doors: across, the moments just before and after it in its own
+  conversations; up and down, what's like it said at another time (connections, lineage, then embedding neighbors),
+  earlier above, later below ([M6 notes] §Crossroads, `web.crossroads`, `/crossroads/<id>`). A door is a link to
+  another card's crossroads.
 - **Star (on the sky).** The glyph that draws one cluster. _Not_ the `star` event.
 - **Stored map position.** A cluster's 2D coordinates, projected from embeddings by the pipeline and kept stable from
   run to run (015, 038, `lattice.place`). _Not_ a view layout: where a view draws a cluster. The sky draws at stored
