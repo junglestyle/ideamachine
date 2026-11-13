@@ -7,12 +7,40 @@ Theme events are applied by im.themes; idea stars are read straight from the eve
 
 Verdicts are carried forward too (`carry_verdicts`): when the episode an item was on is replaced, and Claude
 captures the same speech again, my verdicts are copied to the new item instead of asking me again.
+
+A dismissal may say why (`DismissReason`, migration 065), and nothing reads why except a count (`dismiss_reasons`,
+`im feedback --reasons`).
 """
 
 import difflib
 import re
+from enum import StrEnum
 
 ITEM_KINDS = {"item_keep": "keep", "item_discard": "discard", "item_star": "star"}
+
+
+class DismissReason(StrEnum):
+    """Why I dismissed a card, when I say: an idea_dismiss's payload `reason` (065's CHECK). Optional: a dismissal
+    without one means only that I dismissed it."""
+    NOT_A_THOUGHT = "not_a_thought"   # not a qualifying thought
+    MISREPRESENTS = "misrepresents"   # misrepresents what I said
+    DUPLICATE = "duplicate"           # duplicates another card; payload `of` may name which
+    NOT_FOR_ME = "not_for_me"         # valid, but I don't want it surfaced
+
+
+def dismiss_reasons(conn) -> dict:
+    """The cards I've dismissed, each counted once, by the latest reason I gave for it; `unknown` where I gave none
+    (a later dismissal without a reason doesn't take one back). A card I never dismissed counts nowhere."""
+    counts = dict(conn.execute(
+        """SELECT coalesce(r.reason, 'unknown'), count(*)
+           FROM (SELECT DISTINCT idea_id FROM pub.feedback_events WHERE kind = 'idea_dismiss') d
+           LEFT JOIN LATERAL (SELECT f.payload->>'reason' AS reason FROM pub.feedback_events f
+                              WHERE f.idea_id = d.idea_id AND f.kind = 'idea_dismiss'
+                                AND f.payload->>'reason' IS NOT NULL
+                              ORDER BY f.event_id DESC LIMIT 1) r ON true
+           GROUP BY 1""").fetchall())
+    return {"dismissed": sum(counts.values())} | {r.value: counts.get(r.value, 0) for r in DismissReason} \
+        | {"unknown": counts.get("unknown", 0)}
 
 
 def _how(payload: dict) -> str:

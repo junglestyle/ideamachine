@@ -297,10 +297,11 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Feedback event.** A recorded action or judgment of mine (`pub.feedback_events`, 008:88-98). `source` says where I
   made it: `cli` or `emanation`, `merge` for what a merge carried to the cluster kept (`merge.MERGED`), and `lattice`
   or `mcp` for Lattice's, until 2026-11-11. Where events disagree, my latest is the one with the highest `event_id`;
-  `at` bounds time windows and orders nothing (SPEC.md:90-92, 043).
+  `at` bounds time windows and orders nothing (SPEC.md:95-97, 043).
   The feedback event kinds, from the CHECK at 031:7-11 and 061:5-9:
-  - on clusters: `idea_keep` (payload `as`: `canonical` or `pinned`), `idea_unkeep`, `idea_dismiss`, `idea_add`,
-    `star`, `unstar`, `link`, `unlink`, `idea_note`, `idea_correct`, `idea_sensitive`, `idea_distinct`;
+  - on clusters: `idea_keep` (payload `as`: `canonical` or `pinned`), `idea_unkeep`, `idea_dismiss` (payload
+    `reason`, optional: see Dismissal reason), `idea_add`, `star`, `unstar`, `link`, `unlink`, `idea_note`,
+    `idea_correct`, `idea_sensitive`, `idea_distinct`;
   - on themes: `pin_theme`, `unpin_theme`, `rename_theme`, `reject_theme`, `merge_theme`, `split_theme`,
     `file_idea`, `unfile_idea`, `theme_sensitive`;
   - legacy, still in the ledger but read by nothing that orders or gates ([0007]): `keep` and `discard` (nothing
@@ -309,6 +310,12 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Keep, unkeep, dismiss.** To keep a cluster is to make it an idea, or to switch how it's kept (`idea_keep`), and to
   unkeep is to undo that (`idea_unkeep`). To dismiss is to turn a cluster proposal down: the cluster stays a
   candidate (`idea_dismiss`, 031:4-5).
+- **Dismissal reason.** Why I dismissed a card, when I say: `idea_dismiss`'s payload `reason` (065,
+  `feedback.DismissReason`). `not_a_thought`: not a qualifying thought; `misrepresents`: it misrepresents what I said;
+  `duplicate`: it duplicates another card, and payload `of` may name which; `not_for_me`: valid, but I don't want it
+  surfaced. A reason is optional: a dismissal without one means only that I dismissed it, and why is unknown. A card I
+  never dismissed says nothing either way. Nothing reads reasons but a count (`im feedback --reasons`: each dismissed
+  card once, by the latest reason I gave for it, `unknown` where I gave none).
 - **Pin.** To keep a cluster as pinned. `star` is the legacy event name for the same action: "a star is a pin"
   ([M2 design]:277, 031:17-18).
 - **Link, unlink.** My action of connecting two clusters, or taking that back. For each pair, my latest decides. A
@@ -811,7 +818,7 @@ ordered by when last said, latest first.
   ([0010]:47), and a lens pin, a cluster included in or excluded from a lens ([0013]).
 - Star: the `star` event, which is a pin (031:17-18). Also the capture verdict `star` (010:3-5), `digest_star`, and
   a cluster drawn on the sky.
-- Dismiss: `idea_dismiss`, `digest_dismiss`, and the outcome `dismissed`.
+- Dismiss: `idea_dismiss` (with an optional reason, 065), `digest_dismiss`, and the outcome `dismissed`.
 
 **Use:** to keep a cluster, a capture verdict, to pin a cluster, theme or lens, and to dismiss a proposal. The action
 is "pin". "Star" is the sky glyph, and also the legacy event name for a pin.

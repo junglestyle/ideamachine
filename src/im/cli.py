@@ -616,6 +616,14 @@ def cmd_lattice(args) -> None:
         _print(lattice.status(conn))
 
 
+def cmd_feedback(args) -> None:
+    """--reasons: the cards I dismissed, counted by the reason I gave (feedback.dismiss_reasons)."""
+    from im import feedback
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        _print(feedback.dismiss_reasons(conn))
+
+
 def cmd_connect(args) -> None:
     """The connection judge, on demand: Jev screens the nominated pairs not judged yet, Terra judges the rest, and
     their verdicts become connections, or remove the pair's stand-in. --limit 0 only counts. `im run` does the same,
@@ -1009,6 +1017,11 @@ def main(argv=None) -> None:
     ic.set_defaults(func=cmd_import_chatgpt)
     sub.add_parser("lattice", help="counts: ideas, evidence, connections, unmatched items").set_defaults(
         func=cmd_lattice)
+    fb = sub.add_parser("feedback", help="summaries of my feedback")
+    fb.add_argument("--reasons", action="store_true", required=True,
+                    help="the cards I dismissed, each counted once by the latest reason I gave; unknown where I gave "
+                    "none")
+    fb.set_defaults(func=cmd_feedback)
     cn = sub.add_parser("connect", help="the connection judge: Jev screens pairs of nearby clusters, Terra judges "
                         "the rest, and its connections replace the embedding stand-ins (sends to Jev and Terra; "
                         "`im run` does this too, at most [connect] max_pairs_per_run pairs a run)")

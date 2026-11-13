@@ -3,7 +3,8 @@
 Every cluster that passed the gates, newest first, each showing what's known about it: who said it (me, me by
 diarization, not me; never a name), in how many conversations, when, its maturity, how I kept it, and its edges.
 No score orders or filters anything. From a card I keep a cluster (canonical or pinned), un-keep it or dismiss it,
-as feedback events, the same kinds Lattice's keep_idea wrote.
+as feedback events, the same kinds Lattice's keep_idea wrote. A dismissal may say why (feedback.DismissReason), a
+choice beside the plain dismiss that's never asked for.
 
 Two more pages draw the same cards (docs/design/m6-emanation.md): Trails (`/trails`), the sky's map with each
 conversation as the path it took from thought to thought, and Crossroads (`/crossroads/<id>`), one card with what was
@@ -36,6 +37,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import psycopg
 
+from im.feedback import DismissReason
+
 DATABASE_ENV = "IM_WEB_DATABASE_URL"
 TOKEN_ENV = "IM_WEB_TOKEN"
 COOKIE = "emanation_session"
@@ -48,6 +51,8 @@ SHOW = {  # which maturities the feed shows, and the tab's name
 }
 ACTIONS = {"canonical": ("idea_keep", '{"as": "canonical"}'), "pinned": ("idea_keep", '{"as": "pinned"}'),
            "unkeep": ("idea_unkeep", "{}"), "dismiss": ("idea_dismiss", "{}")}
+REASONS = {DismissReason.NOT_A_THOUGHT: "not a thought", DismissReason.MISREPRESENTS: "misrepresents what I said",
+           DismissReason.NOT_FOR_ME: "not for me", DismissReason.DUPLICATE: "a duplicate"}   # as a card offers them
 SPEAKERS = {"me": "me", "me_diar": "me (diarization)", "not_me": "not me"}
 # The app's icons and manifest (dev/make_icons.py draws them). Served without a login: a browser fetches the manifest
 # without cookies, and the mark is no secret.
@@ -150,7 +155,7 @@ def card(conn, idea_id: str, demo: bool = False) -> str | None:
                  (idea_id,))
     buttons = "".join(f'<button name="action" value="{a}">{a}</button>' for a in ACTIONS)
     body = [f"<h1>{_e(r['title'])}</h1><p>{_e(r['statement'])}</p><small>{_e(_facts(r))}</small>",
-            "" if demo else f'<form method="post" action="/idea/{idea_id}">{buttons}</form>',
+            "" if demo else f'<form method="post" action="/idea/{idea_id}">{buttons}</form>{_why(idea_id, near)}',
             f'<p><a href="/sky?seed={idea_id}">Light the sky from here</a> · '
             f'<a href="/trails?at={idea_id}">Its trail</a> · <a href="/crossroads/{idea_id}">Its crossroads</a></p>']
     if r["my_note"]:
@@ -168,6 +173,20 @@ def card(conn, idea_id: str, demo: bool = False) -> str | None:
         f'<li><a href="/idea/{x["idea_id"]}">{_e(x["title"])}</a> <small>{x["similarity"]:.2f}</small></li>'
         for x in near) + "</ul>" if near else "")
     return _page(r["title"], "".join(body))
+
+
+def _why(idea_id: str, near: list) -> str:
+    """Dismissing, saying why: folded away beside the plain dismiss, one tap a reason. A duplicate may name which card,
+    from those near by meaning."""
+    form = f'<form method="post" action="/idea/{idea_id}"><input type="hidden" name="action" value="dismiss">'
+    reasons = "".join(f'<button name="reason" value="{x}">{REASONS[x]}</button>'
+                      for x in DismissReason if x != DismissReason.DUPLICATE)
+    which = "".join(f'<option value="{x["idea_id"]}">{_e(x["title"])}</option>' for x in near)
+    which = (f'<select name="of" aria-label="of which card"><option value="">of which? (optional)</option>{which}'
+             "</select>") if near else ""
+    duplicate = f'<button name="reason" value="{DismissReason.DUPLICATE}">{REASONS[DismissReason.DUPLICATE]}</button>'
+    return (f"<details><summary>dismiss, saying why</summary>{form}{reasons}</form>"
+            f"{form}{duplicate}{which}</form></details>")
 
 
 SIZES = {"observation": 0, "candidate": 1, "idea": 2}   # a canonical idea is one bigger than a pinned one
@@ -601,8 +620,17 @@ def anywhere(conn, demo: bool = False) -> str | None:
     return row[0] if row else None
 
 
-def act(conn, idea_id: str, action: str) -> None:
+def act(conn, idea_id: str, action: str, reason: str | None = None, of: str | None = None) -> None:
+    """Write a card action as my feedback event. A dismissal may say why (feedback.DismissReason), and a duplicate
+    which card it duplicates (`of`); neither is asked for. ValueError for a reason on anything but a dismissal, one
+    not in the list, or an `of` that isn't another card on a duplicate."""
     kind, payload = ACTIONS[action]
+    if reason is not None or of is not None:
+        if action != "dismiss" or reason not in DismissReason or of is not None and (
+                reason != DismissReason.DUPLICATE or not _UUID.match(of) or of == idea_id
+                or not conn.execute("SELECT 1 FROM pub.cards WHERE idea_id = %s", (of,)).fetchone()):
+            raise ValueError("not a reason for a dismissal")
+        payload = json.dumps({"reason": reason} | ({"of": of} if of else {}))
     conn.execute("INSERT INTO pub.feedback_events (kind, idea_id, payload, source) VALUES (%s, %s, %s, 'emanation')",
                  (kind, idea_id, payload))
 
@@ -623,7 +651,8 @@ a {{ color: var(--accent); }} small {{ color: var(--muted); }} nav a {{ margin-r
 nav a[aria-current] {{ font-weight: 600; text-decoration: none; color: var(--fg); }}
 ol, ul {{ padding-left: 1.2rem; }} li {{ margin: 0 0 1rem; }} li p {{ margin: .2rem 0; }}
 blockquote {{ margin: 0; padding-left: .8rem; border-left: 3px solid var(--line); }}
-button {{ margin: 0 .4rem .4rem 0; font: inherit; padding: .3rem .8rem; }}
+button {{ margin: 0 .4rem .4rem 0; font: inherit; padding: .3rem .8rem; }} select {{ font: inherit; }}
+summary {{ color: var(--muted); cursor: pointer; margin-bottom: .4rem; }} details button {{ font-size: .9em; }}
 header {{ display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }}
 header a {{ color: var(--fg); text-decoration: none; font-weight: 600; }}
 </style><body><header><a href="/"><img src="/icon.svg" alt="" width="28" height="28" style="vertical-align: middle">
@@ -737,7 +766,10 @@ class Handler(BaseHTTPRequestHandler):
         if self._demo():
             return self._send(403, _page("Demo mode", "Nothing can be kept or dismissed in demo mode."))
         with psycopg.connect(self.dsn, autocommit=True) as conn:
-            act(conn, m[1], form["action"])
+            try:
+                act(conn, m[1], form["action"], form.get("reason"), form.get("of"))
+            except ValueError:
+                return self._send(400, _page("Bad request", "Bad request."))
         self._send(303, headers={"Location": f"/idea/{m[1]}"})
 
 
