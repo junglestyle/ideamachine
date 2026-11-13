@@ -31,7 +31,7 @@ seeded archive.
 ## Speech
 
 What Hearsay heard, as Idea Machine reads it. Hearsay's
-[stream.md](https://github.com/junglestyle/hearsay/blob/main/docs/stream.md) is the contract (ROADMAP §3.1).
+[stream.md](https://github.com/lowmagic/hearsay/blob/main/docs/stream.md) is the contract (ROADMAP §3.1).
 
 - **Stream.** Hearsay's published record of what it heard: `index.json`, one JSONL file per conversation, and
   `forgotten.json` (ROADMAP.md:105). Idea Machine reads it read-only and keeps its own copies (ROADMAP §3.3).

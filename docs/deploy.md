@@ -2,7 +2,7 @@
 
 Idea Machine runs on TrueNAS SCALE next to Hearsay (ROADMAP §1 stack assumptions):
 - Postgres, the pipeline run and the web view run in Docker. The run is a kind on
-  [corral](https://github.com/junglestyle/corral)'s NAS worker: Hearsay enqueues it at the end of its pipeline, once
+  [corral](https://github.com/lowmagic/corral)'s NAS worker: Hearsay enqueues it at the end of its pipeline, once
   the stream has new turns. Set up corral's server and NAS worker (in `/mnt/fast/corral-worker`, deployed from the
   infra repo) before `install/nas.sh`.
 - The data lives in the `fast/ideamachine` dataset, on the NVMe pool, so the spinning disks in `storage` can idle.
@@ -22,7 +22,7 @@ eeyore keeps the dev and test databases.
 On the NAS, as admin:
 
 ```sh
-git clone https://github.com/junglestyle/ideamachine.git /mnt/fast/repos/ideamachine
+git clone https://github.com/lowmagic/ideamachine.git /mnt/fast/repos/ideamachine
 sudo /mnt/fast/repos/ideamachine/install/nas.sh
 ```
 
@@ -67,7 +67,7 @@ deleted. Once everything works from `fast`, the script's last lines are the comm
 On the NAS, as admin:
 
 ```sh
-git clone https://github.com/junglestyle/ideamachine.git /mnt/fast/repos/ideamachine   # if not there yet
+git clone https://github.com/lowmagic/ideamachine.git /mnt/fast/repos/ideamachine   # if not there yet
 sudo /mnt/fast/repos/ideamachine/install/nas.sh
 ```
 

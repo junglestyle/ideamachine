@@ -8,8 +8,8 @@ Read before changing behavior:
 - [V2 roadmap](docs/ROADMAP-v2.md): V2's milestones and benchmarks
 - [Vocabulary](docs/vocabulary.md): what each term means, where it's stored, and which words are overloaded
 - [V1 roadmap](docs/ROADMAP.md): V1's scope, how it imports Hearsay's stream, and phases (frozen; code comments cite it)
-- [Hearsay's stream contract](https://github.com/junglestyle/hearsay/blob/main/docs/stream.md): what Idea Machine reads from Hearsay, and the vocabulary it writes back
-- [Coding standards](docs/standards.md): how the code should read, and the invariants it keeps, on top of the org's [principles](https://github.com/junglestyle/.github/blob/main/PRINCIPLES.md) and standards (`docs/org-standards*.md`)
+- [Hearsay's stream contract](https://github.com/lowmagic/hearsay/blob/main/docs/stream.md): what Idea Machine reads from Hearsay, and the vocabulary it writes back
+- [Coding standards](docs/standards.md): how the code should read, and the invariants it keeps, on top of the org's [principles](https://github.com/lowmagic/.github/blob/main/PRINCIPLES.md) and standards (`docs/org-standards*.md`)
 - [Decisions](docs/decisions/): what was measured and decided, and why
 - [Installing and running](docs/install.md): setup, commands, configuration and how `im run` works
 - [Deploying to the NAS](docs/deploy.md)

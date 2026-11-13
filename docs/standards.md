@@ -3,7 +3,7 @@
 Idea Machine follows the [org standards](org-standards.md) and the org's standards for
 [Python](org-standards-python.md), [SQL](org-standards-sql.md), [containers](org-standards-containers.md) and
 [shell scripts](org-standards-shell.md), unchanged copies of
-[junglestyle's](https://github.com/junglestyle/.github/tree/main/code-standards). `.org-standards` lists the topics it
+[lowmagic's](https://github.com/lowmagic/.github/tree/main/code-standards). `.org-standards` lists the topics it
 copies beyond the general one. This file adds Idea Machine's own rules and examples. Where it differs from an org rule,
 it says so, and it wins.
 
