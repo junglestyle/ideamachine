@@ -88,8 +88,10 @@ storing the index's `open` flag per conversation, which the format already carri
   `decide_item`, `keep_rest`, `compare_pair`, `record_comparison`, `rate_digest_point`) asked me for verdicts and
   ratings that nothing reads.
 - All human input stays feedback events: stars, links, notes, theme edits, and V2's keep (canonical or pinned) /
-  unkeep / dismiss / reject. Old verdict and comparison events stay in the ledger; nothing reads them. A merge is the
-  exception: `im merge` writes its own record (`im.idea_merges`, migration 060), which says what moved.
+  unkeep / dismiss / reject. A dismissal may say why (not a thought, misrepresents what I said, a duplicate, not for
+  me; migration 065); without a reason, why is unknown. Old verdict and comparison events stay in the ledger;
+  nothing reads them. A merge is the exception: `im merge` writes its own record (`im.idea_merges`, migration 060),
+  which says what moved.
 - Where events disagree (a star and an unstar, a link and an unlink, two corrections, two marks), my latest is the
   one that arrived last, the highest `event_id`, in every view. `at` is when an event was made: it bounds windows,
   such as the digest's week, and doesn't order them.

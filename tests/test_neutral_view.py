@@ -1,17 +1,22 @@
 """The neutral view (decision 0007): every cluster past the gates, newest first, no score, no verdict filter."""
 
 import http.client
+import json
+import re
 import uuid
 import threading
 from http.server import ThreadingHTTPServer
 
+import psycopg
 import pytest
 
-from im import web
+from im import web, weight
+from im.config import WeightConfig
+from im.feedback import DismissReason
 
 from helpers import table
 from test_lattice import seeded  # noqa: F401
-from test_weight import idea, matched  # noqa: F401
+from test_weight import idea, matched, proposals  # noqa: F401
 
 TOKEN = "a-long-enough-test-token"
 
@@ -228,6 +233,65 @@ def test_demo_mode_is_a_toggle_and_takes_nothing(served, matched):  # noqa: F811
     demo = cookie + "; " + headers["Set-Cookie"].split(";")[0]
     assert status == 303 and "leave demo mode" in request(served, "GET", "/", cookie=demo)[2]
     assert request(served, "POST", f"/idea/{new}", "action=dismiss", demo)[0] == 403
+    assert request(served, "POST", f"/idea/{new}", "action=dismiss&reason=not_for_me", demo)[0] == 403
+    assert "saying why" not in request(served, "GET", f"/idea/{new}", cookie=demo)[2]
+
+
+def test_a_dismissal_may_say_why_and_each_reason_is_counted(matched, admin, monkeypatch, capsys):  # noqa: F811
+    from im import cli
+
+    unsaid, *said = [str(i) for (i,) in table(matched, "SELECT idea_id FROM pub.cards ORDER BY idea_id")]
+    assert len(said) == len(DismissReason)
+    for card, reason in zip(said, DismissReason):   # a duplicate may name which card it duplicates
+        as_app(admin, web.act, card, "dismiss", reason, unsaid if reason == DismissReason.DUPLICATE else None)
+    as_app(admin, web.act, unsaid, "dismiss")   # no reason: dismissed, exactly as before; why is unknown
+    assert table(matched, """SELECT idea_id::text, payload, source FROM pub.feedback_events
+                             WHERE kind = 'idea_dismiss' ORDER BY event_id""") == [
+        *[(card, {"reason": r} | ({"of": unsaid} if r == "duplicate" else {}), "emanation")
+          for card, r in zip(said, DismissReason)],
+        (unsaid, {}, "emanation")]
+    as_app(admin, web.act, said[0], "dismiss")   # dismissed again without a reason: the reason I gave stands
+    monkeypatch.setattr(cli.db, "pipeline_dsn", lambda: matched.info.dsn + " password=" + matched.info.password)
+    cli.main(["feedback", "--reasons"])
+    assert json.loads(capsys.readouterr().out) == {"dismissed": 5, "not_a_thought": 1, "misrepresents": 1,
+                                                   "duplicate": 1, "not_for_me": 1, "unknown": 1}
+
+
+def test_a_dismissal_closes_its_proposal_with_a_reason_or_without(matched, admin):  # noqa: F811
+    weight.stage(matched, WeightConfig(proposals_per_week=5))
+    (first, _), (second, _) = proposals(matched)
+    as_app(admin, web.act, str(idea(matched, first)), "dismiss", "not_for_me")
+    as_app(admin, web.act, str(idea(matched, second)), "dismiss")
+    assert weight.stage(matched, WeightConfig(proposals_per_week=5))["dismissed"] == 2
+    assert proposals(matched) == [(first, "dismissed"), (second, "dismissed")]
+
+
+def test_a_reason_is_one_of_the_list_and_only_on_a_dismissal(served, matched, admin):  # noqa: F811
+    new, other = str(idea(matched, "Something new")), str(idea(matched, "Broken builds as signal"))
+    _, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")
+    cookie = headers["Set-Cookie"].split(";")[0]
+    page = request(served, "GET", f"/idea/{new}", cookie=cookie)[2]
+    assert "dismiss, saying why" in page and 'value="misrepresents"' in page
+    events = lambda: table(matched, "SELECT count(*) FROM pub.feedback_events")  # noqa: E731
+    before = events()
+    for form in ("action=dismiss&reason=boring", "action=pinned&reason=not_for_me",
+                 f"action=dismiss&reason=not_for_me&of={other}", f"action=dismiss&reason=duplicate&of={new}",
+                 "action=dismiss&reason=duplicate&of=00000000-0000-0000-0000-000000000000",   # not a card
+                 f"action=dismiss&of={other}"):
+        assert request(served, "POST", f"/idea/{new}", form, cookie)[0] == 400, form
+    assert events() == before
+    for payload in ({"reason": "boring"}, {"reason": "not_for_me", "of": other}, {"reason": "duplicate", "of": "x"}):
+        with pytest.raises(psycopg.errors.CheckViolation):   # whoever writes it
+            as_app(admin, lambda c, p: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
+                                                    VALUES ('idea_dismiss', %s, %s)""", (new, json.dumps(p))), payload)
+    assert request(served, "POST", f"/idea/{new}", f"action=dismiss&reason=duplicate&of={other}", cookie)[0] == 303
+    assert events() == [(before[0][0] + 1,)]
+
+
+def test_the_reasons_are_the_ones_the_database_takes(admin):
+    (check,) = table(admin, """SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                              WHERE conname = 'feedback_events_dismiss_reason'""")[0]
+    assert set(re.findall(r"'(\w+)'", check)) - {"idea_dismiss", "reason", "of"} == set(DismissReason)
 
 
 class Nearby:

@@ -37,6 +37,7 @@ uv run im audit-tension draft saved/tension-2 --model jev-1.14.0   # Jev drafts 
                                   # (OpenRouter models need OPENROUTER_API_KEY)
 uv run im import-chatgpt saved/chatgpt-idea-machine.md saved/chatgpt-curate-sheet.md   # what the ChatGPT Idea Machine's kept messages would send, a session at a time; --write reads them with extraction v5.3 into archive captures, once
 uv run im lattice                 # lattice counts: ideas, evidence, connections
+uv run im feedback --reasons      # the cards I dismissed, each counted once by the latest reason I gave (unknown: none given)
 uv run im connect --limit 0      # the connection judge: how many pairs are nominated and due, sending nothing
 uv run im connect --limit 100    # Jev screens up to 100 due pairs, Terra judges those that pass; without --limit, every due pair
 uv run im merges --limit 0       # the merge screen: likely duplicate clusters, likeliest first by what Jev already answered, sending nothing
