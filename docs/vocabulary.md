@@ -161,7 +161,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   config text that filled `v2`'s slot for my interests (ignored, with a warning, if still set). Their captures are in
   the archived database.
 - **Extraction fingerprint.** A hash of the system prompt, schema, model and effort (`extract.prompt_version`). It's
-  stored as `prompt_version` (007:40), and changing any part of it re-reads every episode. _Not_ the prompt revision.
+  stored as `prompt_version` (007:40). Changing any part of it holds every episode already read for a re-read (the
+  re-read gate). _Not_ the prompt revision.
 - **Quote.** The capture's excerpt of its cited lines, exactly as the transcript says it, so it can be checked
   (`extract.SYSTEM_V5_3`; the capture checks).
 - **Reading.** The quote repaired and resolved, with transcription fixed, fillers dropped and what "it" or "he"
@@ -372,10 +373,11 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   Terra's prompt version, model and effort and the screen's question, model and cut. **Status:** each `im run` asks
   about at most `[connect] max_pairs_per_run` due pairs (default 500), and `im connect` asks on demand.
 - **Connection verdict.** What the connection judge decided about a pair, one per pair (`im.connection_verdicts`,
-  059), with the pair's text hash and the judge's method, so a pair is asked again only when either changes. Terra's
-  label (`supports`, `elaborates`, `tension`, `related`, `same`, `none` or `unsure`), `refused` when it refused, or
-  `screened`. The first five are connections; `none`, `unsure`, `refused` and `screened` are not. A `same` is also
-  logged in `im.merge_review` as `judged_same`, for my review; nothing is merged unless I merge it (`im merge`).
+  059), with the pair's text hash and the judge's method, so a pair is asked again when its text changes, and held
+  for a re-read when only the method did (the re-read gate). Terra's label (`supports`, `elaborates`, `tension`,
+  `related`, `same`, `none` or `unsure`), `refused` when it refused, or `screened`. The first five are connections;
+  `none`, `unsure`, `refused` and `screened` are not. A `same` is also logged in `im.merge_review` as `judged_same`,
+  for my review; nothing is merged unless I merge it (`im merge`).
 - **Screened.** A connection verdict that Jev's screen gave without asking Terra: its `belongs`
   (`jev.QUESTIONS["edge"]`) is below `connect.SCREEN_CUT`, 0.39 (B8). A screened pair isn't connected.
 - **Connection kind.** An optional annotation on a connection that says how the two relate. A connection may carry
@@ -556,6 +558,18 @@ Each role decides one thing. The model behind it can change, so models are liste
 - **Laya, logreg, local LLM.** V1's triage backends (`backends.py`, [0001], [0002]). **Status:** off by default.
 - **Corral.** The job queue that runs the pipeline on the NAS, and GPU jobs on the dev box (deploy.md:4-7,
   118-130).
+- **Re-read gate.** What keeps a version change from sending again, by itself, work already done (`reread.py`;
+  install.md, "The re-read gate"). Each gated stage (extraction, the themes filer, sensitivity, the connection judge,
+  the merge screen) splits its due work into new work, work whose own input changed, and version re-sends. The first
+  two go ahead; the last is held work. _Not_ the monthly cap, which stops any request once the month's spend is
+  reached.
+- **Held work.** Items a gated stage did under another version whose input is unchanged: an episode read under an
+  earlier extraction fingerprint with the same payload, a pair judged by another method, an idea or theme tagged
+  under another question set or cut, a merge pair answered under another question set, an idea a filer of another
+  version found fits no theme in the same set. Its old result stays live. `im run` and `im pending` report it per
+  stage under `held`: how many, from which version(s) to which, and the **estimate**, the logged cost of its last
+  requests (scaled by `llm.PRICES` when the model changed). `im reread STAGE [--limit N]` sends it; nothing records
+  an approval.
 - **Trial.** A comparison of an extraction model or prompt against a reference read (normally Opus's) of the same
   sample of episodes, under policy B or C (`im trial`; `trial.py`; [0008]:38-43). Trial captures are kept apart in
   `im.prompt_trials`. Its counts:

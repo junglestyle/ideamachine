@@ -1,7 +1,9 @@
 """Themes (ROADMAP Phase 2, slice 4): my categories, proposed by the system and steered by me.
 
 - The filer puts each unthemed idea into up to two current themes, or none. It looks at an idea again only when
-  the set of themes changes, or when its batch was refused or failed (it's filed on the next run).
+  the set of themes changes, or when its batch was refused or failed (it's filed on the next run). An idea it
+  checked against the same set under another version (a new prompt, model or effort) is held by the re-read gate
+  (im.reread), fitting no theme as before, until `im reread themes`.
 - The proposer, once enough ideas fit no theme, asks Claude to group them into new themes. These arrive unpinned
   (`origin = 'clustered'`) and stay proposals until I pin, rename or reject them.
 - My theme feedback (pin, unpin, rename, reject, merge, split, filing or unfiling one idea) arrives as events in
@@ -15,7 +17,7 @@ import hashlib
 import json
 import string
 
-from im import egress, llm
+from im import egress, llm, reread
 from im.config import ModelConfig
 
 BATCH = 25
@@ -80,6 +82,16 @@ def themes_version(conn, chat: ModelConfig = ModelConfig()) -> str:
                    sorted((str(t), n, d) for t, n, d in current_themes(conn)))
 
 
+def filer_version(chat: ModelConfig = ModelConfig()) -> str:
+    """The filer's part of themes_version: its prompt, schema, model and effort."""
+    return version(FILE_SYSTEM, FILE_SCHEMA, chat.model, chat.effort)
+
+
+def theme_set(conn) -> str:
+    """The themes' part of themes_version: what an idea is filed against."""
+    return version(sorted((str(t), n, d) for t, n, d in current_themes(conn)))
+
+
 def _letters(n: int) -> list[str]:
     return [string.ascii_uppercase[i] if i < 26 else f"Z{i - 25}" for i in range(n)]
 
@@ -93,13 +105,37 @@ def ask(conn, client, chat: ModelConfig, system: str, schema: dict, text: str, p
                       max_tokens=chat.max_tokens)
 
 
-def _unthemed(conn, tv: str) -> list[tuple]:
-    """Visible ideas with no theme that the filer hasn't checked against this set of themes."""
-    return conn.execute(
-        """SELECT d.idea_id, d.title, d.statement FROM pub.ideas d
-           WHERE NOT EXISTS (SELECT 1 FROM im.idea_themes it WHERE it.idea_id = d.idea_id)
-             AND NOT EXISTS (SELECT 1 FROM im.theme_checks c WHERE c.idea_id = d.idea_id AND c.themes_version = %s)
-           ORDER BY d.created_at""", (tv,)).fetchall()
+def _unthemed(conn, chat: ModelConfig) -> tuple[list[tuple], list[tuple]]:
+    """Visible ideas with no theme that the filer hasn't checked against this set of themes under this version,
+    split by the re-read gate: (to file, held). To file: never checked, or checked against another set (or before
+    migration 062 kept which). Held: checked against this set under another filer version, with that version and
+    the request that checked it."""
+    tv, ts = themes_version(conn, chat), theme_set(conn)
+    todo, held = [], []
+    for idea_id, title, statement, checked, filer, checked_set, egress_id in conn.execute(
+            """SELECT d.idea_id, d.title, d.statement, c.themes_version, c.filer_version, c.theme_set, c.egress_id
+               FROM pub.ideas d LEFT JOIN im.theme_checks c USING (idea_id)
+               WHERE NOT EXISTS (SELECT 1 FROM im.idea_themes it WHERE it.idea_id = d.idea_id)
+               ORDER BY d.created_at"""):
+        if checked == tv:
+            continue
+        if checked_set == ts:
+            held.append((idea_id, title, statement, filer, egress_id))
+        else:
+            todo.append((idea_id, title, statement))
+    return todo, held
+
+
+def held_report(conn, held: list[tuple], chat: ModelConfig) -> dict | None:
+    """The re-read gate's report on held ideas (reread.report): their last requests are the batches that checked
+    them, each counted once."""
+    return reread.report("themes", [h[3] for h in held], filer_version(chat), reread.estimate(
+        conn, [h[4] for h in held if h[4] is not None], lambda _: chat.model))
+
+
+def held(conn, chat: ModelConfig = ModelConfig()) -> dict | None:
+    """What the re-read gate holds (held_report), sending and writing nothing."""
+    return held_report(conn, _unthemed(conn, chat)[1], chat)
 
 
 def refile_corrected(conn) -> int:
@@ -116,17 +152,27 @@ def refile_corrected(conn) -> int:
     return len(ids)
 
 
-def file_stage(conn, client, monthly_cap_usd: float = 20.0, chat: ModelConfig = ModelConfig()) -> dict:
-    """`chat`, here and in the other stages: the model and effort ([themes] in im.toml), part of every version."""
+def file_stage(conn, client, monthly_cap_usd: float = 20.0, chat: ModelConfig = ModelConfig(),
+               held_only: bool = False, limit: int | None = None) -> dict:
+    """`chat`, here and in the other stages: the model and effort ([themes] in im.toml), part of every version. Files
+    at most `limit` ideas (None: all). What the re-read gate holds is reported under `held`; with `held_only`, only
+    that is filed (`im reread themes`)."""
     refiled = refile_corrected(conn)
 
-    tv = themes_version(conn, chat)
+    tv, fv, ts = themes_version(conn, chat), filer_version(chat), theme_set(conn)
+    # A check from before migration 062 under this very version: its parts are known now.
+    conn.execute("""UPDATE im.theme_checks SET filer_version = %s, theme_set = %s
+                    WHERE themes_version = %s AND theme_set IS NULL""", (fv, ts, tv))
     themes = current_themes(conn)
-    todo = _unthemed(conn, tv)
+    todo, kept = _unthemed(conn, chat)
+    if held_only:
+        todo = [h[:3] for h in kept]
+    todo = todo[:limit]
     stats = {"themes_version": tv, "pending": len(todo), "refiled_after_correction": refiled, "assigned": 0, "none": 0,
              "refused": 0, "failed": 0, "stopped": None}
+    done = set()
     if not themes or not todo:
-        return stats
+        return reread.add(stats, held_report(conn, kept, chat) if themes else None)
     letters = _letters(len(themes))
     by_letter = dict(zip(letters, (t[0] for t in themes), strict=True))
     header = "Themes:\n" + "\n".join(f"{L}. {n}" + (f": {d}" if d else "") for L, (_, n, d) in zip(letters, themes))
@@ -154,11 +200,15 @@ def file_stage(conn, client, monthly_cap_usd: float = 20.0, chat: ModelConfig = 
                                     ON CONFLICT DO NOTHING""", (idea_id, theme_id))
                 result = "assigned" if picks else "none"
                 conn.execute(
-                    """INSERT INTO im.theme_checks (idea_id, themes_version, result) VALUES (%s, %s, %s)
+                    """INSERT INTO im.theme_checks (idea_id, themes_version, result, filer_version, theme_set,
+                         egress_id) VALUES (%s, %s, %s, %s, %s, %s)
                        ON CONFLICT (idea_id) DO UPDATE SET themes_version = excluded.themes_version,
-                         result = excluded.result, checked_at = now()""", (idea_id, tv, result))
+                         result = excluded.result, filer_version = excluded.filer_version,
+                         theme_set = excluded.theme_set, egress_id = excluded.egress_id, checked_at = now()""",
+                    (idea_id, tv, result, fv, ts, a.egress_id))
+                done.add(idea_id)
                 stats[result] += 1
-    return stats
+    return reread.add(stats, held_report(conn, [h for h in kept if h[0] not in done], chat))
 
 
 def propose_stage(conn, client, monthly_cap_usd: float = 20.0, chat: ModelConfig = ModelConfig()) -> dict:

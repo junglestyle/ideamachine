@@ -14,6 +14,8 @@ uv sync --extra models          # CPU-only torch, Laya, sentence-transformers, s
 uv run im migrate                 # im schema
 uv run im load-fixtures           # a synthetic Hearsay stream in $IM_STREAM_DIR (dev/stream)
 uv run im run                     # import + segment + extract ideas with Claude + route; idempotent
+uv run im pending                 # what the next run would send, and what the re-read gate holds per stage, with its estimated cost; sends nothing
+uv run im reread extract --limit 20   # approve held re-reads: 20 episodes read again under the current prompt (0: only the count and estimate)
 uv run im ideas                   # what Claude captured; --review to keep or discard each item
 uv run im ideas --discards        # what I discarded and why: material for revising the extraction prompt
 uv run im trial v5.3 --model openai/gpt-6.1-sol   # B3: a model on the trial sample, vs Opus
@@ -90,24 +92,23 @@ Every stage that asks a chat model takes its model and effort from the file:
 | `[digest]` | the weekly digest | `claude-opus-5-5` | `low` |
 | `[connect]` | the connection judge (each `im run`, and `im connect`; also `max_pairs_per_run`) | `openai/gpt-6.1-terra` | `low` |
 
-Both go into the stage's version. Changing extraction's re-reads every episode, so try it first with `im trial`.
-Changing the themes' asks again about every idea that fits no theme, and changing the connection judge's asks again
-about every pair it has judged.
-The matcher and the digest use a new one from then on; what they've already done stays.
+Both go into the stage's version. A version change never sends again by itself what was already done: the re-read
+gate (below) holds it. Try a new extraction prompt first with `im trial`. The matcher and the digest use a new one
+from then on; what they've already done stays.
 
-The sensitivity tags have no section: Jev (`jev.MODEL`) answers one yes or no per tag, and every idea and theme is
-tagged again when the questions or the cut (`sensitivity.CUT`) change.
+The sensitivity tags have no section: Jev (`jev.MODEL`) answers one yes or no per tag about every idea and theme,
+and asks again when its text changes; a change of the questions or the cut (`sensitivity.CUT`) is held by the gate.
 
 `im run` and `im connect` judge pairs of clusters (SPEC §5). The judge nominates every two cards at cosine ≥ 0.65
 where one is among the other's 10 nearest, leaving out pairs I linked or unlinked. Jev screens each, and Terra
 (`[connect]`) judges the pairs Jev rates at 0.39 or above with B4's prompt. Every verdict is kept in
-`im.connection_verdicts`, so a pair is asked again only when its text as shown or the judge's version (its prompt,
-model, effort, or the screen's question or cut) changes, never-asked pairs first. A connection replaces the pair's
-embedding stand-in; `none`, `unsure`, a refusal or a screened pair removes it, and the stand-ins rebuilt each run
-leave it out. It spends under the same monthly cap as the rest of `im run` (`extract.monthly_cap_usd`) and reports
-what it found and what Jev and Terra cost. `im run` asks about at most `[connect] max_pairs_per_run` pairs (default
-500, about $0.60 when that many are due; 0 only counts them), so a backlog is worked through over runs; `im connect
---limit N` asks about N now.
+`im.connection_verdicts`, so a pair is asked again only when its text as shown changes, never-asked pairs first; a
+pair judged under another version of the judge (its prompt, model, effort, or the screen's question or cut) is held
+by the re-read gate. A connection replaces the pair's embedding stand-in; `none`, `unsure`, a refusal or a screened
+pair removes it, and the stand-ins rebuilt each run leave it out. It spends under the same monthly cap as the rest
+of `im run` (`extract.monthly_cap_usd`) and reports what it found and what Jev and Terra cost. `im run` asks about at
+most `[connect] max_pairs_per_run` pairs (default 500, about $0.60 when that many are due; 0 only counts them), so a
+backlog is worked through over runs; `im connect --limit N` asks about N now.
 
 `im merge KEEP OTHER` merges two clusters that make one point, sending nothing. OTHER's captures, typed observations
 and match decisions move to KEEP, its connections and lineage are re-pointed (KEEP's own stand, one between the two
@@ -122,9 +123,10 @@ the pairs the connection judge nominates (one definition of near), both still ca
 or marked distinct (`im merge --distinct`). Jev (`jev.MODEL`) answers the matcher's `same_v2` ("is `a` another way of
 saying `b`?") on each cluster's title and statement, and the list is ordered by it, likeliest first; pairs not asked
 yet come last. Answers are kept in `im.jev_answers` under a hash of both texts, so a pair is asked again only when
-either changes; `--limit N` asks about at most N pairs (review rows first, then the nearest), `--limit 0` none,
-needing no key, and it spends under the monthly cap (`extract.monthly_cap_usd`). It writes nothing but Jev's answers
-and never merges: `im merge KEEP OTHER` does, by hand.
+either changes, and one answered under another question set is held by the re-read gate, listed by its old answer.
+`--limit N` asks about at most N pairs (review rows first, then the nearest), `--limit 0` none, needing no key, and
+it spends under the monthly cap (`extract.monthly_cap_usd`). It writes nothing but Jev's answers and never merges:
+`im merge KEEP OTHER` does, by hand.
 
 Each section also takes `max_tokens`, a request's output budget, reasoning included (OpenRouter counts it there).
 It isn't part of any version, so raising it changes nothing already done: a request that ran out is simply asked
@@ -177,6 +179,11 @@ Then, outside that transaction:
 - **Triage.** Each configured backend (none by default; see [decisions/0004](decisions/0004-claude-extraction.md)) answers the triage questions for
   current episodes whose rendered input it hasn't answered yet, newest first, committing in small batches. If
   Ollama is down or the GPU is busy, the run notes it and goes on.
+- **Extraction** ([decisions/0004](decisions/0004-claude-extraction.md)). Claude reads each current episode where I
+  speak whose payload no read has had: new speech, and speech whose payload changed (re-transcribed, a tap added),
+  newest first. A payload already read on another episode under the same version is reused, sending nothing. An
+  episode read under an earlier prompt, model or policy with the same payload is held by the re-read gate (below),
+  its captures staying live.
 - **Quotes** (`src/im/quotes.py`). Each new capture's quote is lined up with the lines it cites and the line
   either side, and the capture then cites every line its words are on: a model's citation can stop a line short or
   point a line off. Citations only grow, and the capture's observation, its idea, my verdicts on it, the feedback
@@ -212,3 +219,33 @@ schema) is logged in `im.egress_log` with what it cost, counted in the stage's
 `failed`, and asked again on the next run; the stage goes on to its next item. A refused filing, scoring or
 tagging batch is skipped the same way and asked again, rather than recorded or stopping the batches after it; a
 refused extraction is recorded as read, with nothing captured, and a refused match makes a new idea.
+
+### The re-read gate
+
+Re-sending work already done because a version changed is never automatic (`im.reread`). A version is what a
+stage's answer depends on besides its input: a prompt's wording or schema, the model and effort, the privacy policy,
+a Jev question set, a cut, a method. When one changes, each stage that would send old work again splits what's due:
+
+- **New work** (never done under any version) and **work whose own input changed** (an episode whose payload
+  changed, say re-transcribed or tapped; a card whose text changed; an idea checked against another set of themes)
+  go ahead under the current version, as before.
+- **Version re-sends** (done before under another version, input unchanged) are **held**. Their old results stay
+  live: an episode read under an earlier prompt keeps its captures, and everything downstream reads captures of any
+  version side by side; a held pair keeps its verdict, an idea its tags or its "fits no theme", a merge pair its
+  answer. An episode re-derived with the same payload (a segmentation change) takes the earlier read's captures.
+
+The gated stages are extraction (`extract`), the themes filer (`themes`), sensitivity (`sensitivity`), the
+connection judge (`connect`) and the merge screen (`merges`). The matcher never asks about a capture twice whatever
+its version, the digest writes each week once, and triage runs locally, so none of them has anything to hold.
+
+`im run`'s stats and `im pending` show, under `held` for each stage with held work, how many, from which version(s)
+to which, `estimated_usd` and how it was estimated, and the command that approves it. The estimate is the logged
+cost (`im.egress_log`) of those items' last requests, each counted once; when the model changed and both prices are
+in `llm.PRICES` it's scaled by the price ratio, and otherwise it says it's the old model's cost. `im pending` sends
+nothing.
+
+`im reread STAGE` is the approval, and nothing else is: there's no stored approval. It sends the stage's held work
+now, through the stage's own code, under the monthly cap (`extract.monthly_cap_usd`); `--limit N` sends at most N
+(a sample, say) and leaves the rest held, and `--limit 0` only prints how many are held and the estimate. Captures
+read again are placed, observed and matched by the next `im run`; a re-capture joins its observation's cluster
+unasked, so only what the new prompt captures that the old one didn't goes to the matcher.

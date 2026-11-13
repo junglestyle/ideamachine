@@ -218,11 +218,12 @@ def test_an_answer_missing_a_candidate_is_asked_again_and_a_statement_shown_as_s
 
 
 def test_a_re_read_joins_its_observations_cluster_unasked(seeded, cfg, stream):
-    # A new prompt reads every episode again. What it captures again folds into the same observations, and those
-    # captures join the clusters their observations are already in: no matcher request, no observation split.
+    # A new prompt's re-read, once approved (`im reread extract`), reads every episode again. What it captures again
+    # folds into the same observations, and those captures join the clusters their observations are already in: no
+    # matcher request, no observation split.
     lat_setup(seeded, cfg, stream)
     observations.assign_stage(seeded)
-    extract.run_stage(seeded, FakeClaude(items_for), system=extract.SYSTEM_V5_2)
+    extract.run_stage(seeded, FakeClaude(items_for), system=extract.SYSTEM_V5_2, held_only=True)
     observations.assign_stage(seeded)
     claude = FakeMatcher()
     stats = lattice.match_stage(seeded, claude, HashEmbedder())
@@ -246,7 +247,7 @@ def test_a_re_read_shows_each_observation_once_with_my_verdict(seeded, cfg, stre
                       count(*) FILTER (WHERE ev.verdict = 'discard')
                FROM pub.ideas d LEFT JOIN pub.evidence ev USING (idea_id) GROUP BY 1, 2 ORDER BY 1"""
     before = table(seeded, shown)
-    extract.run_stage(seeded, FakeClaude(items_for), system=extract.SYSTEM_V5_2)
+    extract.run_stage(seeded, FakeClaude(items_for), system=extract.SYSTEM_V5_2, held_only=True)
     observations.assign_stage(seeded)
     lattice.match_stage(seeded, FakeMatcher(), HashEmbedder())
     assert table(seeded, "SELECT count(*) FROM im.items") == [(6,)]

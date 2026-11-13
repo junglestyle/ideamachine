@@ -176,9 +176,9 @@ chown "root:$APPS_GID" "$NAS_CONFIG/im"; chmod 750 "$NAS_CONFIG/im"
 if [ ! -f "$NAS_CONFIG/im/im.toml" ]; then
     cat > "$NAS_CONFIG/im/im.toml" <<'TOML'
 # Idea Machine's config. Every key and its default is in src/im/config.py. Kept out of the repo: it's personal.
-# Changing extract.prompt re-reads every episode with Claude, so try a prompt first: im trial <prompt>. A stage's
-# model and effort are part of its version: changing them re-asks sensitivity about every idea, and themes about
-# every idea that fits no theme; the matcher and the digest use them from then on.
+# A stage's prompt, model and effort are part of its version. A change reads new speech with the new one; what was
+# read before is held, never sent again by itself: `im pending` says how much and what it would cost, and
+# `im reread <stage>` sends it. Try a prompt first: im trial <prompt>.
 [extract]
 # prompt = "v5.3"
 

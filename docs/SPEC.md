@@ -39,7 +39,9 @@ times, and one by `diarization` 147 of 162 times (the misses are short interject
   ([0013](decisions/0013-lenses-and-boards.md)). Viewing the graph from one cluster isn't a lens.
 
 It's a refactor of V1, not a rewrite: the ledger (`im.source_*`, `im.items`, `im.egress_log`), versioned inference
-and event-sourced human input are what V2 needs, and they stay.
+and event-sourced human input are what V2 needs, and they stay. A new version (a prompt, model, effort, policy,
+question set, cut or method) applies to new work and to work whose input changed; what was done under an old one
+stays live, and is sent again only when I approve it (`im reread`; the re-read gate, [install.md](install.md)).
 
 ### What V2 fixes from V1
 
@@ -129,10 +131,11 @@ sent to Terra (`im connect`, `im.connect`).
 - The model decides whether there's an edge: connected or `none`. Connected means the two belong in the same tight
   neighborhood, not that they share a subject, which is a lens's job ([0010](decisions/0010-connections-kinds-lenses.md)).
   `none` is a real answer, kept with every other verdict (`unsure`, a refusal, screened: none of them an edge) in
-  `im.connection_verdicts`, so a pair is asked again only when its text or the judge's method changes, and an
-  embedding stand-in never comes back. The model also suggests a kind, written on the connection and never deciding
-  whether it exists ([0009](decisions/0009-edges-connection-graded-kind-suggested.md)). `same` is an edge, and goes
-  to my merge review; nothing is merged unless I merge it (`im merge`).
+  `im.connection_verdicts`, so a pair is asked again only when its text changes (a change of the judge's method
+  holds the pairs it judged until I approve asking again), and an embedding stand-in never comes back. The model
+  also suggests a kind, written on the connection and never deciding whether it exists
+  ([0009](decisions/0009-edges-connection-graded-kind-suggested.md)). `same` is an edge, and goes to my merge review;
+  nothing is merged unless I merge it (`im merge`).
 - Tension (two ideas pulling against each other, contradiction included) and analogy (the same structure in
   different subjects) are passes of their own over pairs, each with its own model.
 - Every edge records `method` and model version, so it can be rerun and diffed.

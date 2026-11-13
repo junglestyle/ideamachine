@@ -26,15 +26,16 @@ The merge screen (`im merges`, B9m) lists the pairs that may be one point, likel
 cards, leaving out pairs I unlinked or marked distinct (`idea_distinct`, 061; `im merge --distinct`). Jev's
 `same_v2` (jev.QUESTIONS["match"]) on each cluster's title and statement, as the connection judge shows them, orders
 it; the group's combined `p` isn't used, since it counts `develops` too. An answer is kept (im.jev_answers) under a
-hash of both texts, so a pair is asked again only when either changes. The screen writes nothing else, and never
-merges.
+hash of both texts, so a pair is asked again only when either changes. A pair answered under another question set
+(its wording or Jev's model) for the same texts is held by the re-read gate (im.reread), ordered by that answer, until
+`im reread merges` asks it again. The screen writes nothing else, and never merges.
 """
 
 import hashlib
 import json
 import uuid
 
-from im import citations, connect, egress, jev, llm
+from im import citations, connect, egress, jev, llm, reread
 
 MERGED = "merge"
 SAME = "same_v2"   # the answer that orders the merge screen
@@ -206,21 +207,34 @@ def pairs(conn) -> dict[tuple, dict]:
 
 
 def screen(conn, client: "jev.Jev | None", limit: int | None = None,
-           monthly_cap_usd: float = 20.0) -> tuple[list[dict], dict]:
+           monthly_cap_usd: float = 20.0, held_only: bool = False) -> tuple[list[dict], dict]:
     """Every pair, the likeliest duplicate first by Jev's SAME, then those not asked yet; and what asking cost. Asks
     Jev about at most `limit` pairs with no answer for their texts (None: all; none without a client), review rows
-    first, then the nearest. The cap stops the asking, not the listing."""
+    first, then the nearest. A pair the re-read gate holds keeps its earlier answer, and is asked only `held_only`
+    (`im reread merges`), when it's all that's asked; what's held is in the stats. The cap stops the asking, not the
+    listing."""
     found = pairs(conn)
     shown = {i: (t, s) for i, t, s in conn.execute(
         "SELECT idea_id, title, statement FROM im.idea_text WHERE idea_id = ANY(%s)",
         (list({i for p in found for i in p}),))}
-    kept = jev.kept(conn, jev.question_set(client, "match"))
+    qs = jev.question_set(client, "match")
+    kept = jev.kept(conn, qs)
     rows = []
     for (a, b), v in found.items():
         key = hashlib.sha256(json.dumps([_side(*shown[a]), _side(*shown[b])]).encode()).hexdigest()
         rows.append({"a": a, "b": b, "shown": (shown[a], shown[b]), "key": key, "answer": kept.get(key), **v})
-    due = sorted((r for r in rows if r["answer"] is None),
-                 key=lambda r: (not r["review"], -(r["cosine"] or 0), str(r["a"]), str(r["b"])))
+    earlier = {k: (asked, a, egress_id) for k, asked, a, egress_id in conn.execute(
+        """SELECT key_sha256, question_set, answers, egress_id FROM im.jev_answers
+           WHERE key_sha256 = ANY(%s) AND question_set <> %s ORDER BY created_at""",
+        ([r["key"] for r in rows if r["answer"] is None], qs))}
+    held = []
+    for r in rows:
+        if r["answer"] is None and r["key"] in earlier:
+            r["held"] = earlier[r["key"]]
+            r["answer"] = r["held"][1] if SAME in r["held"][1] else None
+            held.append(r)
+    due = held if held_only else [r for r in rows if r["answer"] is None and "held" not in r]
+    due = sorted(due, key=lambda r: (not r["review"], -(r["cosine"] or 0), str(r["a"]), str(r["b"])))
     stats = {"pairs": len(rows), "due": len(due), "asked": 0, "failed": 0, "cost_usd": 0.0, "stopped": None}
     for r in due[:limit] if client else []:
         def state(r=r):
@@ -236,8 +250,14 @@ def screen(conn, client: "jev.Jev | None", limit: int | None = None,
         stats["asked"] += sent
         stats["failed"] += got is None
         stats["cost_usd"] += cost
-        r["answer"] = got
+        if got is not None:
+            r["answer"] = got
+            r.pop("held", None)
     stats["cost_usd"] = round(stats["cost_usd"], 6)
+    still = [r for r in held if "held" in r]
+    model = client.model if client else jev.MODEL
+    reread.add(stats, reread.report("merges", [r["held"][0] for r in still], qs, reread.estimate(
+        conn, [r["held"][2] for r in still if r["held"][2] is not None], lambda _: model)))
     rows.sort(key=lambda r: (r["answer"] is None, -(r["answer"] or {}).get(SAME, 0), not r["review"],
                              -(r["cosine"] or 0), str(r["a"]), str(r["b"])))
     return rows, stats
@@ -248,15 +268,19 @@ def listing(rows: list[dict], stats: dict, top: int) -> str:
     out = []
     for r in rows[:top]:
         same = f"{r['answer'][SAME]:.2f}" if r["answer"] else "not asked"
+        same += " (an earlier question set)" if "held" in r else ""
         near = f"cosine {r['cosine']:.2f}" if r["cosine"] is not None else "not near"
         review = f"merge review: {', '.join(sorted(r['review']))}" if r["review"] else "not in merge review"
         out.append(f"{SAME} {same}   {near}   {review}")
         for idea, (title, statement) in zip((r["a"], r["b"]), r["shown"], strict=True):
             out += [f"  {idea}  {title}", f"  {'':36}  {statement}"]
         out.append("")
-    unasked = sum(r["answer"] is None for r in rows)
+    unasked = sum(r["answer"] is None and "held" not in r for r in rows)
     out.append(f"{min(top, len(rows))} of {stats['pairs']} pairs shown; {unasked} not asked yet. Asked now: "
                f"{stats['asked']} (${stats['cost_usd']}), {stats['failed']} failed"
                + (f"; stopped: {stats['stopped']}" if stats["stopped"] else "") + ".")
+    if held := stats.get("held"):
+        out.append(f"Held by the re-read gate: {held['held']} answered under an earlier question set, about "
+                   f"${held['estimated_usd']} to ask again ({held['estimate']}): {held['approve']}.")
     out.append("Merge one: im merge KEEP OTHER. Mark two distinct: im merge --distinct A B.")
     return "\n".join(out)

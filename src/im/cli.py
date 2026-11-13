@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from im import config, db, fixtures, label, migrate, pipeline, projects, triage
+from im import config, db, fixtures, label, migrate, pipeline, projects, reread, triage
 from im.checks import run_checks
 from im.show import show
 
@@ -261,35 +261,85 @@ def cmd_themes(args) -> None:
 
 
 def cmd_pending(args) -> None:
-    """What the next run would send to Claude, without sending anything. After moving the database to another
-    machine, `already_extracted_would_resend` must be 0: anything else means the payloads changed (e.g. the time
-    zone), and the run would re-send episodes and orphan my verdicts."""
-    from im import egress, extract, lattice, themes
+    """What the next run would send, without sending anything, and what the re-read gate holds, per stage. After
+    moving the database to another machine, `already_extracted_would_resend` must be 0: anything else means the
+    payloads changed (e.g. the time zone), and the run would re-send episodes and orphan my verdicts."""
+    from im import extract, lattice, themes
 
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:
         prompt = args.prompt or cfg.extract.prompt
         pv = extract.prompt_version(cfg.extract.model, cfg.extract.effort, extract.PROMPTS[prompt])
-        todo = extract._pending(conn, cfg.extract.model, pv)
-        done = {r[0] for r in conn.execute(
-            """SELECT episode_id FROM im.extractions
-               WHERE model = %s AND prompt_version = %s AND privacy_policy_version = %s""",
-            (cfg.extract.model, pv, egress.POLICY_VERSION))}
-        # What each one's latest read cost, a read shared by reuse counted once; an `im trial` of a new prompt
-        # says how its cost compares (cost_vs_live).
+        todo, held = extract._pending(conn, cfg.extract.model, pv)
+        ids = [p.episode_id for p in todo]
+        # Those read before under any version: their payload changed. What each one's latest read cost, a read
+        # shared by reuse counted once.
+        (resend,) = conn.execute("SELECT count(DISTINCT episode_id) FROM im.extractions WHERE episode_id = ANY(%s)",
+                                 (ids,)).fetchone()
         (last_read,) = conn.execute(
             """SELECT sum(g.cost_usd) FROM im.egress_log g WHERE g.egress_id IN (
                  SELECT DISTINCT ON (episode_id) egress_id FROM im.extractions
                  WHERE episode_id = ANY(%s) AND model = %s ORDER BY episode_id, created_at DESC)""",
-            ([p.episode_id for p in todo], cfg.extract.model)).fetchone()
-        out = {"prompt_version": pv, "episodes_to_extract": len(todo),
-               "already_extracted_would_resend": sum(p.episode_id in done for p in todo),
+            (ids, cfg.extract.model)).fetchone()
+        out = {"prompt_version": pv, "episodes_to_extract": len(todo), "already_extracted_would_resend": resend,
                "their_last_reads_cost_usd": round(float(last_read or 0), 2),
                "items_to_match": len(lattice._pending_items(conn)),
-               "ideas_to_file": len(themes._unthemed(conn, themes.themes_version(conn, cfg.themes)))}
+               "ideas_to_file": len(themes._unthemed(conn, cfg.themes)[0])}
+        reports = {"extract": extract.held_report(conn, held, cfg.extract.model, pv)} | {
+            stage: _held(conn, cfg, stage) for stage in ("themes", "sensitivity", "connect", "merges")}
+        out["held"] = {stage: r for stage, r in reports.items() if r}
     _print(out)
     if args.expect_none_resent and out["already_extracted_would_resend"]:
         raise SystemExit(1)
+
+
+def _held(conn, cfg, stage: str) -> dict | None:
+    """What the re-read gate holds in `stage` (reread.report, or None), sending and writing nothing."""
+    from im import connect, extract, merge, sensitivity, themes
+
+    if stage == "extract":
+        x = cfg.extract
+        pv = extract.prompt_version(x.model, x.effort, extract.PROMPTS[x.prompt])
+        return extract.held_report(conn, extract._pending(conn, x.model, pv)[1], x.model, pv)
+    if stage == "themes":
+        return themes.held(conn, cfg.themes)
+    if stage == "sensitivity":
+        return sensitivity.held(conn)
+    if stage == "connect":
+        return connect.held(conn, cfg.connect)
+    return merge.screen(conn, None, 0)[1].get("held")
+
+
+def cmd_reread(args) -> None:
+    """The re-read gate's approval: send a stage's held work now, through the stage, under the monthly cap; at most
+    --limit items (0: only what's held and the estimate, sending nothing)."""
+    cfg = config.load()
+    with db.connect(db.pipeline_dsn()) as conn:
+        if args.limit == 0:
+            _print(_held(conn, cfg, args.stage) or {"held": 0})
+        else:
+            _print(_reread(conn, cfg, args.stage, args.limit))
+
+
+def _reread(conn, cfg, stage: str, limit: int | None) -> dict:
+    """Run `stage` on its held work only, at most `limit` items (None: all)."""
+    from im import connect, extract, jev, llm, merge, sensitivity, themes
+
+    cap = cfg.extract.monthly_cap_usd
+    if stage == "extract":
+        x = cfg.extract
+        if x.prompt not in extract.LIVE:
+            raise SystemExit(f"extract.prompt {x.prompt} isn't live; `im run` reads with {', '.join(extract.LIVE)}")
+        return extract.run_stage(conn, llm.client_for(x.model, cfg.egress.zdr), x.model, x.effort, cap, limit,
+                                 extract.PROMPTS[x.prompt], x.max_tokens, held_only=True)
+    if stage == "themes":
+        return themes.file_stage(conn, llm.client_for(cfg.themes.model, cfg.egress.zdr), cap, cfg.themes,
+                                 held_only=True, limit=limit)
+    if stage == "sensitivity":
+        return sensitivity.tag_stage(conn, jev.Jev(), cap, limit, held_only=True)
+    if stage == "connect":
+        return connect.stage(conn, *_judges(cfg), cap, limit, cfg.connect, held_only=True)
+    return merge.screen(conn, jev.Jev(), limit, cap, held_only=True)[1]
 
 
 def cmd_trial(args) -> None:
@@ -789,11 +839,18 @@ def main(argv=None) -> None:
     lb.add_argument("--review", metavar="QUESTION=ANSWER",
                     help="re-label episodes whose latest label has this answer, e.g. kind=idea or project=none")
     lb.set_defaults(func=cmd_label)
-    pe = sub.add_parser("pending", help="what the next run would send to Claude, without sending anything")
+    pe = sub.add_parser("pending", help="what the next run would send, and what the re-read gate holds per stage, "
+                        "without sending anything")
     pe.add_argument("--expect-none-resent", action="store_true",
                     help="exit 1 if any already-extracted episode would be sent again (use after a move)")
-    pe.add_argument("--prompt", help="as if extract.prompt were this one (e.g. v5.2): what it would read")
+    pe.add_argument("--prompt", help="as if extract.prompt were this one (e.g. v5.2): what it would read and hold")
     pe.set_defaults(func=cmd_pending)
+    rr = sub.add_parser("reread", help="the re-read gate: send a stage's held work, what a version change would send "
+                        "again, now (sends it, under the monthly cap)")
+    rr.add_argument("stage", choices=reread.STAGES)
+    rr.add_argument("--limit", type=int, help="send at most this many items (0: only print how many are held and the "
+                    "estimate, sending nothing)")
+    rr.set_defaults(func=cmd_reread)
     dg = sub.add_parser("digest", help="the weekly digest: what the lattice gained, synthesized by Claude")
     dg.add_argument("--week", help="any date in the week (default: the latest digest, or last week with --write)")
     dg.add_argument("--write", action="store_true", help="write the week's digest if it isn't written (sends to Claude)")
