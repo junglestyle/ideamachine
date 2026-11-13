@@ -76,6 +76,8 @@ a synthesis makes it an idea, linked to what it was made from.
 - Motion never changes where a star rests. Stars twinkle slowly, the sharp ones most. A tap sends a pulse out along
   the star's connections, four hops, with less energy each hop. The pulse draws each link as it crosses it, and each
   star it strikes flares and is knocked a few pixels the way the pulse was going, then springs back to its place.
+- A tap lights a star, ringed and named, and keeps what's picked; a tap on the lit star picks it. A tap on nothing
+  puts the lit star out, and another clears what's picked. So a stray tap while panning changes nothing.
 - While a star is picked, only the links it reaches are drawn, fainter each hop out; up to eight of the cards it's
   connected to are named; and the rest of the sky dims. Stars aren't draggable, so a drag always pans. With reduced
   motion asked for, nothing animates.
@@ -105,6 +107,11 @@ edge; a trail shows the order.
   have one, spread from 0.1 to 0.8.
 - On a trail of more than 16 stops the numbers show only at its ends and around the stop picked, whose legs in and
   out are drawn bright. Live conversations run to 82 stops.
+- **The pulse** (2026-11-13). Stars and haze are drawn as the sky draws them, a star gaining its spikes when a trail
+  lights it. As a trail is drawn its head is a pulse with a short bright tail: each stop it reaches flares and is
+  knocked the way the trail was going, then springs back. With reduced motion asked for, the stops only light.
+- A tap on one of the trail's own stops picks it. A tap on any other star lights it, ringed and named, and a second
+  tap goes to its conversation, so a stray tap while panning never leaves the trail.
 - Nothing ranks: conversations come in the order they happened, and stars keep the sky's size and hue.
 - Positions are today's. A trail says when things were said, never where they sat on the map at the time, which is
   the same caution as double exposure below.
