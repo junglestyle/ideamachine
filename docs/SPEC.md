@@ -43,6 +43,13 @@ and event-sourced human input are what V2 needs, and they stay. A new version (a
 question set, cut or method) applies to new work and to work whose input changed; what was done under an old one
 stays live, and is sent again only when I approve it (`im reread`; the re-read gate, [install.md](install.md)).
 
+### What I ask to see again
+
+A pendant tap, or my saying "note to self", puts the lines it marks on the **attention queue** (`im queue`): for a
+tap my lines from 30 s before it to 30 s after, for a note its line and my next few. Both are found in code, never by
+a model, and neither makes the speech a capture or changes how it's read: extraction, captures and cards go on as if
+they weren't there. Removing an item only marks it removed. The router (`im review`) still runs beside it, unchanged.
+
 ### What V2 fixes from V1
 
 | | Cause | Fixed in |

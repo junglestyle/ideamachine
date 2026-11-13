@@ -32,6 +32,7 @@ flowchart LR
         X --> M["Match into lattice<br/>embeddings + Claude"]
         M --> T["Themes"]
         X --> R["Route<br/>my review queue or auto-file"]
+        I --> Q["Attention queue<br/>pendant taps, notes to self"]
         S -.-> TR["Triage backends<br/>local LLM, Laya, logreg"]
         TR -.-> EV["im eval<br/>against my labels"]
     end

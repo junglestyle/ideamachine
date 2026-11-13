@@ -84,7 +84,10 @@ def _record_run(conn, run_id, stats: dict) -> None:
 def _run_stages(conn, cfg) -> dict:
     stats = pipeline.run(conn, cfg, db.stream_dir()) | {"monthly_cap_usd": cfg.extract.monthly_cap_usd}
     try:
-        from im import feedback
+        from im import attention, feedback
+
+        # Code only, before anything that can stop the run: a tap or a note to self is queued whatever Claude does.
+        stats["attention"] = attention.stage(conn)
 
         # Before extraction and matching, so captures I discarded stay out of the lattice.
         stats["feedback"] = feedback.apply_item_feedback(conn)
@@ -809,6 +812,21 @@ def cmd_review(args) -> None:
         print(f"\n{'' if n is None else f'reviewed {n}; '}{len(router.review_queue(conn))} still waiting")
 
 
+def cmd_queue(args) -> None:
+    """The attention queue (im.attention): what I tapped or called a note to self, newest first; or remove one."""
+    from im import attention
+
+    with db.connect(db.pipeline_dsn()) as conn:
+        if args.action == "remove":
+            if args.id is None:
+                raise SystemExit("im queue remove takes an item's id, e.g. im queue remove 3")
+            if not attention.remove(conn, args.id):
+                raise SystemExit(f"im queue: no open item #{args.id}")
+            print(f"removed #{args.id}")
+            return
+        print(attention.listing(attention.open_items(conn)))
+
+
 def cmd_project(args) -> None:
     with db.connect(db.pipeline_dsn()) as conn:
         try:
@@ -838,8 +856,9 @@ def main(argv=None) -> None:
     f.add_argument("--scenario", choices=fixtures.SCENARIOS, default="base",
                    help="base, or base plus every correction and a forget")
     f.set_defaults(func=cmd_load_fixtures)
-    sub.add_parser("run", help="import and segment, then send new speech to Claude to extract, match, file, score, "
-                   "tag and digest it (and triage, if a backend is set); idempotent").set_defaults(func=cmd_run)
+    sub.add_parser("run", help="import and segment, queue taps and notes to self, then send new speech to Claude to "
+                   "extract, match, file, score, tag and digest it (and triage, if a backend is set); idempotent"
+                   ).set_defaults(func=cmd_run)
     t = sub.add_parser("train", help="train the logreg baseline on my exact labels")
     t.add_argument("-C", type=float, default=1.0, help="inverse regularization strength")
     t.set_defaults(func=cmd_train)
@@ -1070,6 +1089,11 @@ def main(argv=None) -> None:
     rv = sub.add_parser("review", help="work through the episodes the router sent me")
     rv.add_argument("--status", action="store_true", help="show how many are waiting and exit")
     rv.set_defaults(func=cmd_review)
+    qu = sub.add_parser("queue", help="the attention queue: what I tapped the pendant for or called a note to self, "
+                        "with its lines, newest first; remove ID takes one off (and changes nothing else)")
+    qu.add_argument("action", nargs="?", default="list", choices=["list", "remove"])
+    qu.add_argument("id", nargs="?", type=int, help="remove: the item's id, as listed")
+    qu.set_defaults(func=cmd_queue)
     pr = sub.add_parser("project", help="the projects registry")
     pa = pr.add_subparsers(dest="action", required=True, metavar="action")
     a = pa.add_parser("add", help="add a project, or update its description and add aliases")
