@@ -9,7 +9,8 @@ Two more pages draw the same cards (docs/design/m6-emanation.md): Trails (`/trai
 conversation as the path it took from thought to thought, and Crossroads (`/crossroads/<id>`), one card with what was
 said around it and what's like it; and Echoes (`/echoes`), every connection between thoughts said in different
 conversations; and Threads (`/threads`), the neighborhoods of connected thoughts that run through several
-conversations; and Apart (`/apart`), the near pairs the connection judge kept apart. They only read.
+conversations; and Apart (`/apart`), the near pairs the connection judge kept apart; and Tree (`/tree`), the Tree of
+Life turned in three dimensions, a neighborhood standing in for each lens until lenses exist. They only read.
 
 Demo mode (a toggle, or `im web --demo` for nothing else) reads the `demo` views instead of `pub`'s, so nothing
 sensitive is there to show: the sky keeps a sensitive cluster's star, blank, with its edges, and the lists (the
@@ -27,7 +28,7 @@ import json
 import math
 import os
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
@@ -116,7 +117,7 @@ def feed(conn, show: str = "candidates", page: int = 0, demo: bool = False) -> s
                  (list(maturities), PAGE + 1, page * PAGE))
     tabs = " ".join(f'<a href="/?show={k}"{" aria-current=page" if k == show else ""}>{name}</a>'
                     for k, (_, name) in SHOW.items()) + ' <a href="/sky">sky</a> <a href="/trails">trails</a>' \
-        + ' <a href="/echoes">echoes</a> <a href="/threads">threads</a> <a href="/apart">apart</a> <a href="/crossroads">crossroads</a>' \
+        + ' <a href="/echoes">echoes</a> <a href="/threads">threads</a> <a href="/apart">apart</a> <a href="/crossroads">crossroads</a> <a href="/tree">tree</a>' \
         + f' <a href="/demo?on={0 if demo else 1}">{"leave demo mode" if demo else "demo mode"}</a>'
     cards = "".join(f'<li><a href="/idea/{r["idea_id"]}">{_e(r["title"])}</a><p>{_e(r["statement"])}</p>'
                     f'<small>{_e(_facts(r))}</small></li>' for r in rows[:PAGE])
@@ -245,6 +246,46 @@ def trails(conn, at: str | None = None, demo: bool = False) -> str | None:
         "SELECT a::text, b::text, kinds FROM pub.card_links") if a in index and b in index and a != b)
     data = json.dumps({"stars": stars, "moments": moments, "links": links, "at": at}, separators=(",", ":"))
     return _TRAILS.replace("{data}", data.replace("</", "<\\/"))
+
+
+TREE_LENSES = 32   # the Tree of Life's lenses: the ten sephirot and the 22 paths
+TREE_ALSO = 2      # the stand-in for a card on several lenses: this many connections into another's neighborhood
+
+
+def tree(conn, demo: bool = False) -> str:
+    """The Tree of Life as a Trellis board (docs/design/m6-emanation.md, Tree): every card, and which of the tree's 32
+    lenses it's on, for the page to gather around the sephirot and the paths. There are no lenses yet (decision
+    0013), so a graph neighbourhood stands in for each: the TREE_LENSES largest (lens.neighbourhoods), the largest on
+    Kether. A card is also on another lens when TREE_ALSO of its connections lead into that one's neighbourhood, so
+    the page has cards on several lenses to draw. Which neighbourhood is on which lens means nothing. `named` is the
+    first card said in each. In demo mode a sensitive card is on no lens, blank, with no connections."""
+    from im import lens
+
+    rows = _rows(conn, f"SELECT * FROM {_views(demo)}cards ORDER BY idea_id")
+    index = {str(r["idea_id"]): n for n, r in enumerate(rows) if not (demo and r["redacted"])}
+    pairs = sorted({tuple(sorted((a, b))) for a, b in conn.execute("SELECT a::text, b::text FROM pub.card_links")
+                    if a in index and b in index and a != b})
+    near: dict = defaultdict(set)
+    for a, b in pairs:
+        near[a].add(b)
+        near[b].add(a)
+    on, named = {}, []
+    for n, group in enumerate(lens.neighbourhoods(pairs)[:TREE_LENSES]):
+        on.update((i, n) for i in group)
+        first = min(group, key=lambda i: (rows[index[i]]["first_said"] is None, rows[index[i]]["first_said"], i))
+        named.append(rows[index[first]]["title"] or "")
+
+    def lenses(i: str) -> list[int]:
+        if i not in on:
+            return []
+        into = Counter(on[n] for n in near[i] if n in on and on[n] != on[i])
+        return [on[i], *sorted(n for n, k in into.items() if k >= TREE_ALSO)]
+
+    stars = [[str(r["idea_id"]), r["title"] or "", lenses(str(r["idea_id"]))] for r in rows]
+    order = {str(r["idea_id"]): n for n, r in enumerate(rows)}
+    data = json.dumps({"stars": stars, "links": [[order[a], order[b]] for a, b in pairs], "named": named},
+                      separators=(",", ":"))
+    return _TREE.replace("{data}", data.replace("</", "<\\/"))
 
 
 def _apart(a, b) -> str:
@@ -598,6 +639,7 @@ _TRAILS = (files("im") / "trails.html").read_text()
 _CROSSROADS = (files("im") / "crossroads.html").read_text()
 _ECHOES = (files("im") / "echoes.html").read_text()
 _THREADS = (files("im") / "threads.html").read_text()
+_TREE = (files("im") / "tree.html").read_text()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -669,6 +711,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, apart(conn, page, demo))
             if url.path == "/threads":
                 return self._send(200, threads(conn, demo))
+            if url.path == "/tree":
+                return self._send(200, tree(conn, demo))
             if url.path == "/crossroads":   # anywhere: a card at random
                 to = anywhere(conn, demo)
                 return self._send(303, headers={"Location": f"/crossroads/{to}" if to else "/"})

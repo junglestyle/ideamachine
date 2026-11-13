@@ -176,6 +176,30 @@ The negative space, as a list: pairs near enough by meaning to be asked about, t
 - Not seen on the live archive yet (2026-11-13): the reader role can't read verdicts until migration 064 is there,
   so how many rows this has isn't known.
 
+## Tree (`im web`, `/tree`)
+
+A first Trellis view, ahead of the lenses it's for: the Tree of Life as a board of 32 lenses (the ten sephirot and
+the 22 paths, [0013](../decisions/0013-lenses-and-boards.md)), turned in three dimensions.
+
+- **A stand-in, until lenses exist.** Each lens holds one of the 32 largest graph neighborhoods
+  (`lens.neighbourhoods`), the largest on Kether. Which neighborhood is on which lens means nothing, and the page
+  says so. On the live archive (2026-11-13) that puts 294 of 1,065 cards on the tree. When lenses exist, a card's
+  lenses come from them and this stand-in goes.
+- **Three dimensions, here only.** §Direction keeps the sky in 2D because depth hides neighbors. A board I lay out by
+  hand is different: its shape is the point, and the tree has one. The side pillars stand back from the middle one,
+  and it turns slowly until it's touched. Drag turns it, pinch or scroll zooms; nothing is draggable.
+- A sephira's cards are a ball around it, colored as the sephira (the Queen scale); a path's are a sleeve along it,
+  colored from one end to the other. A card on no lens is in the far sky, a shell of faint stars around the tree.
+- **A card on several lenses** has a star on each, joined by a double line, bright when the card is lit or picked.
+  Picking either star picks the card. The stand-in for this: a card is also on a lens when two of its connections
+  lead into that lens's neighborhood (21 cards on the live archive). If real lenses make the double lines a tangle,
+  draw them only for the card that's lit or picked.
+- **A tap lights, a second tap picks.** The first tap rings a star and names it, and keeps what's picked; a tap on
+  the lit star picks it and sends the sky's pulse out along its connections, each drawn to the nearest star of the
+  card it reaches. A tap on nothing puts the lit star out; another clears what's picked. A tap on a sephira or the
+  middle of a path lights the cards on it.
+- Demo mode: a sensitive card is in the far sky, blank, with no connections.
+
 ## Views the data could carry now (ideas, 2026-11-12)
 
 None of these needs lenses, so none waits for M5. Each reads only what `pub` already has.

@@ -314,7 +314,7 @@ def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F8
 
     lattice.place(matched, HashEmbedder().model_version)
     new = str(idea(matched, "Something new"))
-    for path in ("/trails", "/echoes", "/threads", "/apart", "/crossroads", f"/crossroads/{new}"):
+    for path in ("/trails", "/echoes", "/threads", "/apart", "/tree", "/crossroads", f"/crossroads/{new}"):
         assert request(served, "GET", path)[0] == 303 and request(served, "GET", path)[1]["Location"] == "/login"
     _, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")
     cookie = headers["Set-Cookie"].split(";")[0]
@@ -326,6 +326,7 @@ def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F8
     assert "<h1>Echoes</h1>" in request(served, "GET", "/echoes?kind=tension&gap=week", cookie=cookie)[2]
     assert "<h1>Threads</h1>" in request(served, "GET", "/threads", cookie=cookie)[2]
     assert "<h1>Apart</h1>" in request(served, "GET", "/apart?page=2", cookie=cookie)[2]
+    assert new in [s[0] for s in sky_data(request(served, "GET", "/tree", cookie=cookie)[2])["stars"]]
     assert request(served, "GET", "/trails?at=nope", cookie=cookie)[0] == 404
     assert request(served, "GET", "/crossroads/nope", cookie=cookie)[0] == 404
 
@@ -407,3 +408,29 @@ def test_a_thread_is_a_neighbourhood_said_in_more_than_one_conversation(matched,
     as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
                                          VALUES ('idea_sensitive', %s, '{"sensitive": true}')""", (new,)))
     assert "0 threads" in as_app(admin, web.threads, True)       # demo mode: a sensitive card is in no thread
+
+
+def test_the_tree_stands_a_neighbourhood_in_for_each_lens(matched, admin):  # noqa: F811
+    import json
+
+    build, coffee, new = (str(idea(matched, t)) for t in (
+        "Broken builds as signal", "The coffee order is the real meeting.", "Something new"))
+    before = sky_data(as_app(admin, web.tree))
+    lenses = {s[0]: s[2] for s in before["stars"]}
+    assert lenses[build] == lenses[coffee] == lenses[new] == [] and len(before["named"]) == 1   # no connection: no lens
+    judged(matched, build, coffee, "related")
+    data = sky_data(as_app(admin, web.tree))
+    ids = [s[0] for s in data["stars"]]
+    lenses = {s[0]: s[2] for s in data["stars"]}
+    assert lenses[build] == lenses[coffee] and lenses[new] == []           # a second neighbourhood, on a lens of its own
+    assert sorted(set(map(tuple, lenses.values()))) == [(), (0,), (1,)]
+    assert sorted((ids.index(build), ids.index(coffee))) in data["links"] and len(data["links"]) == 2
+    # Named by the first card said in it, and these two were said together.
+    assert data["named"][lenses[build][0]] in ("Broken builds as signal", "The coffee order is the real meeting.")
+    as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
+                                         VALUES ('idea_sensitive', %s, '{"sensitive": true}')""", (coffee,)))
+    demo = sky_data(as_app(admin, web.tree, True))
+    assert [s[0] for s in demo["stars"]] == ids                            # demo mode: every card keeps a star
+    hidden = {s[0]: s[2] for s in demo["stars"]}
+    assert hidden[build] == hidden[coffee] == [] and demo["links"] == before["links"]   # on no lens, unlinked
+    assert "coffee order" not in json.dumps(demo)                          # and blank
