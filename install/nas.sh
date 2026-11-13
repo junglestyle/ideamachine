@@ -16,7 +16,7 @@ say "Checking Docker and the clone"
 docker info >/dev/null 2>&1 || die "Docker isn't running. Set the Apps pool in the TrueNAS UI first."
 # Clones belong to admin: git as root in them trips "dubious ownership", and root-owned files block admin's pulls.
 [ "$(stat -c %U "$REPO_DIR")" != root ] || die "$REPO_DIR belongs to root. Run this from admin's clone. As admin:
-    git clone https://github.com/junglestyle/ideamachine.git /mnt/fast/repos/ideamachine
+    git clone https://github.com/lowmagic/ideamachine.git /mnt/fast/repos/ideamachine
 then: sudo /mnt/fast/repos/ideamachine/install/nas.sh"
 echo "ideamachine: $REPO_DIR"
 
@@ -314,7 +314,7 @@ else
     echo "    tailscale serve --bg --https=$WEB_HTTPS_PORT http://127.0.0.1:8792"
 fi
 
-say "The run on corral's NAS worker (github.com/junglestyle/corral)"
+say "The run on corral's NAS worker (github.com/lowmagic/corral)"
 # Hearsay enqueues ideamachine.run at the end of its pipeline, once the stream has new turns. Corral is set up from
 # the infra repo; this adds the kind to its worker.
 systemctl is-active -q corral-worker && [ -f "$NAS_CORRAL_DIR/worker.toml" ] \

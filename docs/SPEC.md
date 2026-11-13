@@ -77,7 +77,7 @@ V1's non-goals ([ROADMAP §1](ROADMAP.md#non-goals)) still hold, except "a UI in
 ## 2. Contracts
 
 **Hearsay → Idea Machine:** unchanged. The contract is Hearsay's
-[docs/stream.md](https://github.com/junglestyle/hearsay/blob/main/docs/stream.md); the import is
+[docs/stream.md](https://github.com/lowmagic/hearsay/blob/main/docs/stream.md); the import is
 [ROADMAP §3.3](ROADMAP.md#33-how-idea-machine-imports-it). V2 starts
 storing the index's `open` flag per conversation, which the format already carries.
 

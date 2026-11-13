@@ -12,7 +12,7 @@ connector is off until M5.
 | M | Goal | Done when | Design |
 |---|---|---|---|
 | M0 | Freeze V1 | `v1` tagged on all three repos; Lattice feature-frozen; [decision 0005](decisions/0005-presentation-inside-idea-machine.md) | done |
-| v1.1 | Stop re-spending on unchanged payloads | A naming change sends nothing to Claude and re-matches nothing ([#10](https://github.com/junglestyle/ideamachine/pull/10)) | done |
+| v1.1 | Stop re-spending on unchanged payloads | A naming change sends nothing to Claude and re-matches nothing ([#10](https://github.com/lowmagic/ideamachine/pull/10)) | done |
 | M1 | Stable segment identity | Naming produces no new segments or episodes, and no requests unless the pseudonymized payload changed; extractions per current episode ≤ 1.05; every verdict reachable, every item cites current segments, `pub.ideas` unchanged | [design](design/m1-segment-identity.md) |
 | M2 | Observations, clusters, candidates, weight; ideas I keep (canonical or pinned); proposals; edge citations | B5 passes; every cluster weighted; `pub.ideas` returns the same ids; Lattice works unchanged | done 2026-11-01 ([design](design/m2-observations-candidates-ideas.md)) |
 | Synthesis | A stage triggered by a neighborhood of connections ([0010](decisions/0010-connections-kinds-lenses.md)): consolidates a cluster's statement or writes one idea for several connected clusters, citing observations and linked to them (`synthesizes`); arrives as a proposal. A/B against proposing the neighborhood's best existing point. Written by Claude, as extraction is, at least until 2026-11-25; no model has been compared for it | Versioned and capped; I keep a fair share of what it proposes | after M2 |

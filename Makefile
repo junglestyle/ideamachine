@@ -1,6 +1,6 @@
 .PHONY: check standards sync-standards
 SHELL := bash
-ORG = https://github.com/junglestyle/.github
+ORG = https://github.com/lowmagic/.github
 
 # The whole suite or nothing: without the database env vars three quarters of it would skip, and without the models
 # extra the logreg tests would. Plain `uv run pytest` still runs whatever it can.

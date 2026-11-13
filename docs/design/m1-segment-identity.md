@@ -29,7 +29,7 @@ Everything below separates **observed** (in code, cited) from **proposed**.
 | Labels | Resolve forward through supersession links | `label.py:56-64` |
 | `reset --stage segment` | Deletes every episode, which cascades items, matches and evidence | `pipeline.py:145-147` |
 
-So naming currently churns segment, episode and item, and (before v1.1) an Opus call. [PR #10](https://github.com/junglestyle/ideamachine/pull/10) removes the call and the re-match when the pseudonymized payload is unchanged. The segment, episode and item churn remain. That churn (duplicate items with conflicting verdicts, recurrence that counts re-capture) is what the re-key fixes.
+So naming currently churns segment, episode and item, and (before v1.1) an Opus call. [PR #10](https://github.com/lowmagic/ideamachine/pull/10) removes the call and the re-match when the pseudonymized payload is unchanged. The segment, episode and item churn remain. That churn (duplicate items with conflicting verdicts, recurrence that counts re-capture) is what the re-key fixes.
 
 ## What the churn query decides
 

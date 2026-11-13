@@ -5,13 +5,13 @@
   </picture>
 </p>
 
-[![tests](https://github.com/junglestyle/ideamachine/actions/workflows/test.yml/badge.svg)](https://github.com/junglestyle/ideamachine/actions/workflows/test.yml)
+[![tests](https://github.com/lowmagic/ideamachine/actions/workflows/test.yml/badge.svg)](https://github.com/lowmagic/ideamachine/actions/workflows/test.yml)
 
 # Idea Machine
 
 Turns transcripts of my recorded conversations into a searchable map of the ideas in them.
 
-Idea Machine reads the speaker-attributed transcripts that [Hearsay](https://github.com/junglestyle/hearsay)
+Idea Machine reads the speaker-attributed transcripts that [Hearsay](https://github.com/lowmagic/hearsay)
 makes from conversations recorded with consent. It groups them into episodes, has Claude pull out ideas,
 jokes, tasks and decisions with quotes and line citations, and links each idea to similar ones it has seen
 before. A web view (`im web`) shows the result. Most recorded speech is small talk, so most of the work is
@@ -19,7 +19,7 @@ deciding what deserves attention, and measuring whether a cheap model can decide
 
 > **Versions.** `v1` is the proof of concept as it ran, before the V2 refactor. To run it, check out `v1.1`:
 > V1 plus one fix, so naming a speaker no longer sends an unchanged transcript back to Claude
-> ([#10](https://github.com/junglestyle/ideamachine/pull/10)). `main` is moving to V2
+> ([#10](https://github.com/lowmagic/ideamachine/pull/10)). `main` is moving to V2
 > ([decision 0005](docs/decisions/0005-presentation-inside-idea-machine.md)).
 
 ```mermaid

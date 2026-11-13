@@ -31,11 +31,11 @@ The source is Hearsay's **utterance stream** (Hearsay slice 8, `hearsay/stream.p
 
 ### 3.1 What Hearsay publishes
 
-Hearsay's [docs/stream.md](https://github.com/junglestyle/hearsay/blob/main/docs/stream.md) is the contract: the index, utterance and `forgotten.json` formats, what each speaker kind and basis means, how conversations and their IDs change, the vocabulary Idea Machine writes back, and the guarantees. It's the only copy; this roadmap doesn't restate it. The importer refuses a `format_version` it doesn't know (`read_index` in `src/im/importer.py`).
+Hearsay's [docs/stream.md](https://github.com/lowmagic/hearsay/blob/main/docs/stream.md) is the contract: the index, utterance and `forgotten.json` formats, what each speaker kind and basis means, how conversations and their IDs change, the vocabulary Idea Machine writes back, and the guarantees. It's the only copy; this roadmap doesn't restate it. The importer refuses a `format_version` it doesn't know (`read_index` in `src/im/importer.py`).
 
 ### 3.2 Status of the Hearsay asks (delivered 2026-10-01)
 
-Delivered: `format_version`, `transcript_revision`, `forgotten.json` and the write guarantees, all part of [the contract](https://github.com/junglestyle/hearsay/blob/main/docs/stream.md). The forgotten list stays empty until the operator can forget, which is Hearsay's to schedule.
+Delivered: `format_version`, `transcript_revision`, `forgotten.json` and the write guarantees, all part of [the contract](https://github.com/lowmagic/hearsay/blob/main/docs/stream.md). The forgotten list stays empty until the operator can forget, which is Hearsay's to schedule.
 
 ### 3.3 How Idea Machine imports it
 
