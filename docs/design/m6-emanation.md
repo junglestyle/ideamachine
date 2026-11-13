@@ -155,14 +155,31 @@ neighborhood that keeps coming back.
   synthesis would be proposed over, so this view is also where to look at what synthesis would be given.
 - Demo mode: a sensitive card is in no thread.
 
+## Apart (`im web`, `/apart`)
+
+The negative space, as a list: pairs near enough by meaning to be asked about, that the connection judge kept apart.
+
+- A row is a `none` from the judge (`pub.card_judgments`): the earlier card beside the later, how far apart they
+  were said, and the judge's reason, which says where it drew the line between sharing a subject and being
+  connected.
+- Newest first, 50 to a page. Nothing here is a connection, and the page makes none.
+- Pairs the screen kept from the judge aren't shown: nothing was said about them.
+- Not seen on the live archive yet (2026-11-13): the reader role can't read verdicts until migration 064 is there,
+  so how many rows this has isn't known.
+
 ## Views the data could carry now (ideas, 2026-11-12)
 
 None of these needs lenses, so none waits for M5. Each reads only what `pub` already has.
 
 - **Two voices.** Trails with the not-me moments drawn apart, to show where other people take me. Nothing to draw
   yet: every moment on the live archive is mine (1,026 by voice, 69 by diarization; 2026-11-13).
-- **Negative space, once `im connect` has run:** pairs the screen passed and Terra answered `none` for, drawn as
-  the dashed links above.
+- **Analogies.** The judge names the shared structure when two cards are analogous (`pub.card_judgments.analogy`),
+  and Echoes can narrow to those. An analogy is a lens ([0010](../decisions/0010-connections-kinds-lenses.md)), so its
+  own view waits for lenses: each named structure a lens, its results the other instances.
+- **Keeping from these views.** Apart and Echoes only read. A connection I make or remove is a `link` or `unlink`
+  event already (045); a button on a row would be the "keep a proposed connection" of the negative space above.
+- **Negative space on the sky.** Apart is a list. The dashed links of §Direction would draw the same pairs on the
+  map, once it's clear from the list how many there are.
 
 ## Later encodings (not M6)
 

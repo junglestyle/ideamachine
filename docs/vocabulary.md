@@ -483,6 +483,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   across the conversations in order, a knot where it was said, named by the first card said in it ([M6 notes]
   §Threads, `web.threads`, `/threads`). _Not_ a lens or a theme: nothing names its subject. _Not_ a conversation's
   trail.
+- **Apart.** The view that lists the pairs the connection judge kept apart (a `none` judgment), each with its
+  reason ([M6 notes] §Apart, `web.apart`, `/apart`). The negative space as a list. _Not_ a proposed connection.
 - **Star (on the sky).** The glyph that draws one cluster. _Not_ the `star` event.
 - **Stored map position.** A cluster's 2D coordinates, projected from embeddings by the pipeline and kept stable from
   run to run (015, 038, `lattice.place`). _Not_ a view layout: where a view draws a cluster. The sky draws at stored

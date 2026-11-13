@@ -9,7 +9,7 @@ Two more pages draw the same cards (docs/design/m6-emanation.md): Trails (`/trai
 conversation as the path it took from thought to thought, and Crossroads (`/crossroads/<id>`), one card with what was
 said around it and what's like it; and Echoes (`/echoes`), every connection between thoughts said in different
 conversations; and Threads (`/threads`), the neighborhoods of connected thoughts that run through several
-conversations. They only read.
+conversations; and Apart (`/apart`), the near pairs the connection judge kept apart. They only read.
 
 Demo mode (a toggle, or `im web --demo` for nothing else) reads the `demo` views instead of `pub`'s, so nothing
 sensitive is there to show: the sky keeps a sensitive cluster's star, blank, with its edges, and the lists (the
@@ -116,7 +116,7 @@ def feed(conn, show: str = "candidates", page: int = 0, demo: bool = False) -> s
                  (list(maturities), PAGE + 1, page * PAGE))
     tabs = " ".join(f'<a href="/?show={k}"{" aria-current=page" if k == show else ""}>{name}</a>'
                     for k, (_, name) in SHOW.items()) + ' <a href="/sky">sky</a> <a href="/trails">trails</a>' \
-        + ' <a href="/echoes">echoes</a> <a href="/threads">threads</a> <a href="/crossroads">crossroads</a>' \
+        + ' <a href="/echoes">echoes</a> <a href="/threads">threads</a> <a href="/apart">apart</a> <a href="/crossroads">crossroads</a>' \
         + f' <a href="/demo?on={0 if demo else 1}">{"leave demo mode" if demo else "demo mode"}</a>'
     cards = "".join(f'<li><a href="/idea/{r["idea_id"]}">{_e(r["title"])}</a><p>{_e(r["statement"])}</p>'
                     f'<small>{_e(_facts(r))}</small></li>' for r in rows[:PAGE])
@@ -510,6 +510,49 @@ def threads(conn, demo: bool = False) -> str:
     return _THREADS.replace("{body}", body)
 
 
+def apart(conn, page: int = 0, demo: bool = False) -> str:
+    """The negative space (docs/design/m6-emanation.md, Apart): pairs of cards near enough by meaning to be asked
+    about, that the connection judge kept apart (a `none` in pub.card_judgments), side by side with its reason. A
+    shared subject is no connection (decision 0010), and the reason says where the judge drew the line. Newest
+    first, by when the later one was said. Nothing here is a connection, and nothing can be made one from this
+    page. In demo mode a pair with a sensitive card is left out."""
+    v = _views(demo)
+    cards = {r["idea_id"]: r for r in _rows(conn, f"SELECT * FROM {v}cards") if not (demo and r["redacted"])}
+    found = []
+    for a, b, why in conn.execute("SELECT a, b, why FROM pub.card_judgments WHERE verdict = 'none' ORDER BY a, b"):
+        if a in cards and b in cards:
+            earlier, later = sorted((cards[a], cards[b]), key=lambda r: (r["first_said"] or r["last_seen"], r["idea_id"]))
+            found.append((earlier, later, why))
+    found.sort(key=lambda e: (e[1]["first_said"] or e[1]["last_seen"], e[1]["idea_id"], e[0]["idea_id"]), reverse=True)
+    shown = found[page * PAGE:(page + 1) * PAGE]
+    said: dict = {}   # card -> its conversations, and its first quote
+    for i, c, q in conn.execute(f"""SELECT idea_id, conversation_id, quote FROM {v}card_moments WHERE idea_id = ANY(%s)
+                                    ORDER BY said_at, item_id, observation_id""",
+                                ([r["idea_id"] for e in shown for r in e[:2]],)):
+        said.setdefault(i, (set(), q))[0].add(c)
+
+    def side(r: dict) -> str:
+        quote = said.get(r["idea_id"], (None, None))[1]
+        return (f'<a class="side" href="/crossroads/{r["idea_id"]}"><small>{_when(r["first_said"])}</small>'
+                f'<b>{_e(r["title"])}</b>' + (f"<q>{_e(quote)}</q>" if quote else "") + "</a>")
+
+    def gap(earlier: dict, later: dict) -> str:
+        if said.get(earlier["idea_id"], (set(),))[0] & said.get(later["idea_id"], (set(),))[0]:
+            return "same conversation"
+        both = earlier["first_said"] and later["first_said"]
+        return f"{_apart(later['first_said'], earlier['first_said'])} apart" if both else "—"
+
+    rows = "".join(f'<li class="apart">{side(earlier)}<div class="gap"><b>{_e(gap(earlier, later))}</b>'
+                   f'<small>kept apart</small></div>{side(later)}' + (f"<p>{_e(why)}</p>" if why else "") + "</li>"
+                   for earlier, later, why in shown)
+    turn = " ".join(f'<a href="/apart?page={n}">{name}</a>' for n, name, there in (
+        (page - 1, "newer", page > 0), (page + 1, "older", len(found) > (page + 1) * PAGE)) if there)
+    body = (f'<h1>Apart</h1><p class="lede">{len(found)} pair{"s" * (len(found) != 1)} near by meaning that the '
+            f'connection judge looked at and kept apart, each with its reason. A shared subject is no connection. '
+            f'Newest first.</p>' + (f"<ol>{rows}</ol><nav>{turn}</nav>" if shown else "<p>Nothing here.</p>"))
+    return _ECHOES.replace("<title>Echoes</title>", "<title>Apart</title>").replace("{body}", body)
+
+
 def anywhere(conn, demo: bool = False) -> str | None:
     """A card picked at random, for a crossroads to start from: nothing chooses it (decision 0007)."""
     row = conn.execute(f"""SELECT idea_id::text FROM {_views(demo)}cards c
@@ -621,6 +664,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, body) if body else self._send(404, _page("Not found", "Not found."))
             if url.path == "/echoes":
                 return self._send(200, echoes(conn, q.get("kind", "all"), q.get("gap", "any"), demo))
+            if url.path == "/apart":
+                page = int(q["page"]) if q.get("page", "").isdigit() else 0
+                return self._send(200, apart(conn, page, demo))
             if url.path == "/threads":
                 return self._send(200, threads(conn, demo))
             if url.path == "/crossroads":   # anywhere: a card at random

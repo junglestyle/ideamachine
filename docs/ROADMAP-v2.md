@@ -65,8 +65,8 @@ drawn through lenses ([0010](decisions/0010-connections-kinds-lenses.md)), and a
   at 3,000 cards and 1.5 s at 15,000, mostly the cards query and the lens's PageRank; links are now most of a
   frame's drawing. Two more read the same cards (2026-11-12): Trails, the map with each conversation as the path it
   took; Crossroads, one card with what was said around it and what's like it; Echoes, the connections between
-  thoughts said in different conversations; and Threads, the neighborhoods of connected thoughts that run through
-  several conversations
+  thoughts said in different conversations; Threads, the neighborhoods of connected thoughts that run through
+  several conversations; and Apart, the near pairs the connection judge kept apart
   ([M6 notes](design/m6-emanation.md)).
 - **Trellis: pinned lenses, laid out by hand, for organization.** The stable one, called Lattice v2 in
   [0010](decisions/0010-connections-kinds-lenses.md). Not the Lattice app (removed 2026-11-11). First two:

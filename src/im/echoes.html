@@ -56,6 +56,8 @@ li.tension .gap { color: var(--tension); }
 li p { grid-column: 1 / -1; margin: .2rem auto 0; max-width: 46rem; text-align: center; color: var(--muted);
   font-size: .86rem; text-wrap: pretty; }
 li p::before { content: "The judge: "; opacity: .75; }
+li.apart .gap::before, li.apart .gap::after { border-top-style: dashed; }
+ol + nav { margin-top: 1.4rem; }
 li p i { display: block; }
 @media (max-width: 720px) {
   li { grid-template-columns: minmax(0, 1fr); }
@@ -67,6 +69,6 @@ li p i { display: block; }
 }
 </style>
 <header><a href="/"><img src="/icon.svg" alt="" width="24" height="24" style="vertical-align: middle"> Idea Machine</a
-><a href="/sky">Sky</a><a href="/trails">Trails</a><a href="/threads">Threads</a><a href="/crossroads">Crossroads</a></header>
+><a href="/sky">Sky</a><a href="/trails">Trails</a><a href="/echoes">Echoes</a><a href="/threads">Threads</a><a href="/apart">Apart</a><a href="/crossroads">Crossroads</a></header>
 <div id="x">{body}</div>
 </html>

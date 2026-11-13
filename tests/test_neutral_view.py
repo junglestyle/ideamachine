@@ -314,7 +314,7 @@ def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F8
 
     lattice.place(matched, HashEmbedder().model_version)
     new = str(idea(matched, "Something new"))
-    for path in ("/trails", "/echoes", "/threads", "/crossroads", f"/crossroads/{new}"):
+    for path in ("/trails", "/echoes", "/threads", "/apart", "/crossroads", f"/crossroads/{new}"):
         assert request(served, "GET", path)[0] == 303 and request(served, "GET", path)[1]["Location"] == "/login"
     _, headers, _ = request(served, "POST", "/login", f"token={TOKEN}")
     cookie = headers["Set-Cookie"].split(";")[0]
@@ -325,6 +325,7 @@ def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F8
     assert request(served, "GET", f"/crossroads/{new}", cookie=cookie)[0] == 200
     assert "<h1>Echoes</h1>" in request(served, "GET", "/echoes?kind=tension&gap=week", cookie=cookie)[2]
     assert "<h1>Threads</h1>" in request(served, "GET", "/threads", cookie=cookie)[2]
+    assert "<h1>Apart</h1>" in request(served, "GET", "/apart?page=2", cookie=cookie)[2]
     assert request(served, "GET", "/trails?at=nope", cookie=cookie)[0] == 404
     assert request(served, "GET", "/crossroads/nope", cookie=cookie)[0] == 404
 
@@ -364,9 +365,15 @@ def test_an_echo_is_a_connection_across_conversations_the_earlier_beside_the_lat
     assert as_app(admin, lambda c: c.execute("SELECT count(*) FROM pub.card_judgments WHERE verdict = 'none'"
                                              ).fetchone()) == (1,)
     assert as_app(admin, web.echoes).count("<li ") == 1
+    # Apart shows the pair the judge kept apart, with its reason: the earlier beside the later, and no connection.
+    page = as_app(admin, web.apart)
+    assert "1 pair near by meaning" in page and page.count("<li ") == 1 and "Because." in page
+    assert page.index("coffee order") < page.index("1 hour apart") < page.index("Something new")
+    assert "Nothing here." in as_app(admin, web.apart, 1)                           # a page past the end
     as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
                                          VALUES ('idea_sensitive', %s, '{"sensitive": true}')""", (new,)))
     assert "0 connections" in as_app(admin, web.echoes, "all", "any", True)         # demo mode leaves the pair out
+    assert "0 pairs" in as_app(admin, web.apart, 0, True)
 
 
 def test_a_broad_card_does_not_fuse_the_neighbourhoods_it_touches():
