@@ -529,7 +529,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   **Status:** feature-frozen at `v1`, removed from the deploy 2026-11-11 with its MCP server, archived at M6.
 - **Trellis.** The stable family of views, each drawing one board: lenses arranged by hand. Called Lattice v2 in
   [0010] ([0010]:70-73, ROADMAP-v2 §4). The first are a grid of lenses and the Tree of Life. _Not_ the graph.
-  **Status:** not built.
+  **Status:** boards and lenses not built. Tree (`web.tree`, `/tree`) draws the Tree of Life's shape in three
+  dimensions with a graph neighborhood standing in for each lens ([M6 notes] §Tree).
 - **Tree of Life, correspondence.** The Tree of Life is the Qabalistic correspondence table, condensed into
   definitions and laid out on the sephirot and the paths between them. A correspondence is one entry of that table,
   such as 1/Kether, and each becomes a lens (ROADMAP-v2.md:69-70, [0010]:70-73).

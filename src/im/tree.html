@@ -1,0 +1,255 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Tree of Life</title>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#070910">
+<style>
+:root { --fg: #e8eaf2; --muted: #9aa0b4; --panel: rgba(20, 23, 34, .92); --accent: #9db8ff; }
+html, body { margin: 0; height: 100%; background: #070910; color: var(--fg); overflow: hidden;
+  font: 15px/1.45 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+canvas { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: grab; }
+nav { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 16px; display: flex; gap: 14px; }
+nav a, #bar a { color: var(--accent); text-decoration: none; }
+nav a { background: var(--panel); padding: 4px 10px; border-radius: 6px; }
+#note { position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 38px); left: 16px; right: 16px; max-width: 26rem; color: var(--muted); font-size: 12px; pointer-events: none; }
+#bar { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 40rem; margin: 0 auto; background: var(--panel);
+  border-radius: 10px; padding: 12px 14px; display: none; }
+#bar b { display: block; } #bar small { color: var(--muted); display: block; margin: 2px 0 8px; }
+</style>
+<nav><a href="/">Feed</a><a href="/sky">Sky</a><a href="/trails">Trails</a><a href="/threads">Threads</a></nav>
+<div id="note">There are no lenses yet. Each sephira and path holds one of the 32 largest neighborhoods of connected
+cards as a stand-in, so where a card sits means nothing yet. Cards on none are the far sky. A card on more than one has
+a star on each, joined by a double line. Drag to turn, pinch or scroll to zoom. Tap a star to light it and again to
+pick it, or tap a sephira or a path.</div>
+<canvas id="c"></canvas>
+<div id="bar"><b id="t"></b><small id="f"></small><a id="open">Open</a></div>
+<script type="application/json" id="d">{data}</script>
+<script>
+"use strict";
+// The Tree of Life as a Trellis board, turned in three dimensions (docs/design/m6-emanation.md, Tree). Each of its
+// 32 lenses, the ten sephirot and the 22 paths, gathers its cards around it. Until lenses exist, web.tree stands a
+// neighborhood in for each.
+const D = JSON.parse(document.getElementById("d").textContent);
+// The ten sephirot: name, place (x across the pillars, y up, z toward the viewer), and color (hue, saturation,
+// lightness; the Queen scale). The side pillars stand back from the middle one, so the tree has depth to turn.
+const SEPHIROT = [
+  ["Kether", 0, 4, 0, [0, 0, 96]], ["Chokmah", 1.25, 3.2, -.7, [220, 10, 72]], ["Binah", -1.25, 3.2, -.7, [265, 40, 52]],
+  ["Chesed", 1.25, 1.5, -.7, [215, 80, 64]], ["Geburah", -1.25, 1.5, -.7, [0, 80, 60]],
+  ["Tiphareth", 0, .6, .5, [48, 90, 64]], ["Netzach", 1.25, -.9, -.7, [135, 65, 55]], ["Hod", -1.25, -.9, -.7, [25, 90, 60]],
+  ["Yesod", 0, -1.9, .5, [280, 65, 68]], ["Malkuth", 0, -3.6, 0, [75, 40, 52]]];
+// The 22 paths, numbered 11 to 32, by the sephirot they join (numbered from 1) and their letters.
+const PATHS = [[1, 2, "Aleph"], [1, 3, "Beth"], [1, 6, "Gimel"], [2, 3, "Daleth"], [2, 6, "Heh"], [2, 4, "Vav"],
+  [3, 6, "Zain"], [3, 5, "Cheth"], [4, 5, "Teth"], [4, 6, "Yod"], [4, 7, "Kaph"], [5, 6, "Lamed"], [5, 8, "Mem"],
+  [6, 7, "Nun"], [6, 9, "Samekh"], [6, 8, "Ayin"], [7, 8, "Peh"], [7, 9, "Tzaddi"], [7, 10, "Qoph"], [8, 9, "Resh"],
+  [8, 10, "Shin"], [9, 10, "Tav"]];
+const rgb = ([h, s, l]) => {
+  s /= 100; l /= 100; const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  return [0, 8, 4].map(n => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)))));
+};
+const NODE = SEPHIROT.map(([name, x, y, z, color]) => ({name, x, y, z, rgb: rgb(color)}));
+// A seeded generator, so a card sits at the same place on every visit.
+function rng(seed) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; }
+const bell = r => (r() + r() + r() - 1.5) * 1.15;
+
+// A card is on any number of lenses, and has a star at each: C is the cards, S the stars. A card on no lens has one
+// star, in the far sky.
+const C = D.stars.map(([id, title, lenses], i) => ({i, id, title, lenses, next: [], at: []}));
+const S = C.flatMap(card => (card.lenses.length ? card.lenses : [-1]).map(lens => {
+  const r = rng(card.i * 2654435761 + 7 + lens * 40503), s = {card, title: card.title, lens, dx: 0, dy: 0};
+  card.at.push(s);
+  if (lens < 0) {          // on no lens: the far sky, a shell around the tree
+    const u = 2 * r() - 1, a = 6.283 * r(), q = Math.sqrt(1 - u * u), R = 7 + 2.5 * r();
+    Object.assign(s, {x: R * q * Math.cos(a), y: R * u, z: R * q * Math.sin(a), rgb: [150, 160, 200], far: true});
+  } else if (lens < 10) {  // a sephira's lens: a ball around it
+    const n = NODE[lens];
+    Object.assign(s, {x: n.x + .34 * bell(r), y: n.y + .34 * bell(r), z: n.z + .34 * bell(r), rgb: n.rgb});
+  } else {                 // a path's lens: a sleeve along it, colored from one end to the other
+    const [a, b] = PATHS[lens - 10], p = NODE[a - 1], q = NODE[b - 1], t = .2 + .6 * r();
+    Object.assign(s, {x: p.x + (q.x - p.x) * t + .1 * bell(r), y: p.y + (q.y - p.y) * t + .1 * bell(r),
+      z: p.z + (q.z - p.z) * t + .1 * bell(r), rgb: p.rgb.map((v, k) => Math.round((v + (q.rgb[k] - v) * Math.round(t * 4) / 4) / 8) * 8)});
+  }
+  s.phase = 6.283 * r(); s.pace = .5 + 1.3 * r();
+  return s;
+}));
+for (const [i, j] of D.links) { C[i].next.push(j); C[j].next.push(i); }
+
+const c = document.getElementById("c"), g = c.getContext("2d");
+let W = 0, H = 0, dpr = 1, yaw = .5, pitch = .08, zoom = 1, picked = -1, tapped = 0, touched = -1e9;
+// selected: the card picked, `from` the star of it that was tapped, `reached` the star of each card it's connected
+// to that is nearest that one. lit: a star tapped once, shown but not yet picked; a second tap picks it.
+let selected = null, from = null, reached = [], lit = null;
+const SPRITE = 96, sprites = new Map();
+function sprite([r, gr, b], far) {
+  const key = r + "," + gr + "," + b + far;
+  if (!sprites.has(key)) {
+    const sp = document.createElement("canvas"); sp.width = sp.height = SPRITE;
+    const q = sp.getContext("2d"), R = SPRITE / 2, core = R / 6; q.globalCompositeOperation = "lighter";
+    const halo = q.createRadialGradient(R, R, 0, R, R, R);
+    halo.addColorStop(0, `rgba(${key.replace(/[a-z]+$/, "")}, .26)`); halo.addColorStop(.3, `rgba(${r}, ${gr}, ${b}, .06)`);
+    halo.addColorStop(1, `rgba(${r}, ${gr}, ${b}, 0)`); q.fillStyle = halo; q.fillRect(0, 0, SPRITE, SPRITE);
+    const point = q.createRadialGradient(R, R, 0, R, R, core * 1.4), w = v => Math.round(v + (255 - v) * .75);
+    point.addColorStop(0, `rgba(${w(r)}, ${w(gr)}, ${w(b)}, 1)`); point.addColorStop(.5, `rgba(${r}, ${gr}, ${b}, .85)`);
+    point.addColorStop(1, `rgba(${r}, ${gr}, ${b}, 0)`); q.fillStyle = point; q.fillRect(0, 0, SPRITE, SPRITE);
+    if (!far) for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      const len = R * .8, spike = q.createLinearGradient(R - dx * len, R - dy * len, R + dx * len, R + dy * len);
+      spike.addColorStop(0, "rgba(255, 255, 255, 0)"); spike.addColorStop(.5, `rgba(${w(r)}, ${w(gr)}, ${w(b)}, .5)`);
+      spike.addColorStop(1, "rgba(255, 255, 255, 0)"); q.fillStyle = spike;
+      q.fillRect(R - (dx ? len : 1), R - (dy ? len : 1), dx ? 2 * len : 2, dy ? 2 * len : 2);
+    }
+    sprites.set(key, sp);
+  }
+  return sprites.get(key);
+}
+for (const s of S) s.img = sprite(s.rgb, s.far ? "far" : "");
+
+// Turn a place on the tree to the screen: yaw about the upright axis, then pitch, then perspective.
+const EYE = 24;
+function place(p) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const x = p.x * cy + p.z * sy, z0 = -p.x * sy + p.z * cy, y = p.y * cp - z0 * sp, z = p.y * sp + z0 * cp;
+  const k = Math.min(W * .26, H * .098) * zoom * EYE / (EYE - z);
+  p.sx = W / 2 + x * k + (p.dx || 0); p.sy = H / 2 - (y - .2) * k + (p.dy || 0); p.k = k; p.depth = z;
+}
+const still = matchMedia("(prefers-reduced-motion: reduce)");
+const HOP = 240, KNOCK = 9, SPRING = 260, DAMP = 150;
+
+function draw(now) {
+  if (!still.matches && now - touched > 3500) yaw += .0022;   // it turns slowly until it's touched
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.globalCompositeOperation = "source-over";
+  g.fillStyle = "#070910"; g.fillRect(0, 0, W, H); g.globalCompositeOperation = "lighter";
+  const wave = now - tapped, drawn = selected && !still.matches ? wave / HOP : 99;
+  for (const s of S) s.dx = s.dy = 0;
+  for (const n of NODE) place(n);
+  if (from) place(from);
+  if (from && drawn < 20) for (const s of reached) {   // struck stars are knocked away and spring back
+    const since = wave - HOP; if (since <= 0) continue;
+    place(s); const x = s.sx - from.sx, y = s.sy - from.sy, len = Math.hypot(x, y) || 1;
+    const far = KNOCK * Math.exp(-since / DAMP) * Math.sin(6.283 * since / SPRING);
+    s.dx = x / len * far; s.dy = y / len * far;
+  }
+  for (const s of S) place(s);
+  const t = still.matches ? 0 : now / 1000, near = z => Math.max(.3, Math.min(1.2, .85 + z / 5));
+  // The paths, then the sephirot as soft spheres. A picked sephira or path is brighter.
+  PATHS.forEach(([a, b], n) => {
+    const p = NODE[a - 1], q = NODE[b - 1], lit = picked === n + 10;
+    g.strokeStyle = `rgba(170, 182, 230, ${(lit ? .8 : .22) * near((p.depth + q.depth) / 2)})`; g.lineWidth = lit ? 1.6 : 1;
+    g.beginPath(); g.moveTo(p.sx, p.sy); g.lineTo(q.sx, q.sy); g.stroke();
+  });
+  NODE.forEach((n, i) => {
+    const R = .5 * n.k, [r, gr, b] = n.rgb, a = near(n.depth) * (picked === i ? 1.6 : 1);
+    const ball = g.createRadialGradient(n.sx - R * .25, n.sy - R * .25, 0, n.sx, n.sy, R);
+    ball.addColorStop(0, `rgba(${r}, ${gr}, ${b}, ${.2 * a})`); ball.addColorStop(.8, `rgba(${r}, ${gr}, ${b}, ${.07 * a})`);
+    ball.addColorStop(1, `rgba(${r}, ${gr}, ${b}, 0)`); g.fillStyle = ball;
+    g.beginPath(); g.arc(n.sx, n.sy, R, 0, 6.283); g.fill();
+    g.strokeStyle = `rgba(${r}, ${gr}, ${b}, ${.3 * a})`; g.lineWidth = 1; g.beginPath(); g.arc(n.sx, n.sy, R * .8, 0, 6.283); g.stroke();
+  });
+  // A card on several lenses: its stars are joined by a double line, bright when the card is picked or lit.
+  for (const card of C) for (let n = 1; n < card.at.length; n++) {
+    const p = card.at[n - 1], q = card.at[n], len = Math.hypot(q.sx - p.sx, q.sy - p.sy) || 1;
+    const ox = -(q.sy - p.sy) / len * 1.6, oy = (q.sx - p.sx) / len * 1.6, on = card === selected || lit && card === lit.card;
+    g.strokeStyle = `rgba(255, 236, 190, ${on ? .85 : selected || picked >= 0 ? .07 : .16})`; g.lineWidth = on ? 1.2 : 1;
+    for (const side of [1, -1]) {
+      g.beginPath(); g.moveTo(p.sx + ox * side, p.sy + oy * side); g.lineTo(q.sx + ox * side, q.sy + oy * side); g.stroke();
+    }
+  }
+  // The picked card's connections, drawn by the pulse from the star that was tapped.
+  if (from) {
+    const part = Math.max(0, Math.min(drawn, 1)); g.lineWidth = 1.4;
+    for (const s of reached) {
+      g.strokeStyle = `rgba(205, 215, 255, ${s.far ? .28 : .7})`;
+      g.beginPath(); g.moveTo(from.sx, from.sy);
+      g.lineTo(from.sx + (s.sx - from.sx) * part, from.sy + (s.sy - from.sy) * part); g.stroke();
+    }
+  }
+  for (const s of [...S].sort((a, b) => a.depth - b.depth)) {
+    if (s.sx < -40 || s.sy < -40 || s.sx > W + 40 || s.sy > H + 40) continue;
+    const mine = selected && (s.card === selected || drawn >= 1 && reached.includes(s));
+    const onPicked = picked >= 0 && s.lens === picked;
+    let a = (s.far ? .3 : .85) * near(s.depth) * (1 + .18 * Math.sin(t * s.pace + s.phase));
+    let r = s.far ? 7 * Math.sqrt(zoom) : .2 * s.k;
+    if (selected || picked >= 0) a *= mine || onPicked ? 1 : .4;
+    if (mine) { a = 1; r *= 1.3; if (drawn < 20 && s.card !== selected) { const f = Math.exp(-(wave - HOP) / 400); a += f; r *= 1 + .6 * f; } }
+    if (onPicked) { a = Math.min(1, a * 1.5 + .2); r *= 1.15; }
+    if (s === lit) { a = 1; r *= 1.3; }
+    g.globalAlpha = Math.min(a, 1); g.drawImage(s.img, s.sx - r, s.sy - r, 2 * r, 2 * r);
+  }
+  g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
+  g.font = "12px system-ui, sans-serif"; g.textBaseline = "middle"; g.textAlign = "center";
+  NODE.forEach((n, i) => { g.fillStyle = `rgba(232, 234, 242, ${picked === i ? 1 : .55 * near(n.depth)})`;
+                           g.fillText(n.name, n.sx, n.sy - .62 * n.k - 6); });
+  g.textAlign = "left";
+  if (lit) {   // tapped once: ringed and named, a second tap picks it
+    g.strokeStyle = "rgba(255, 255, 255, .7)"; g.lineWidth = 1; g.beginPath(); g.arc(lit.sx, lit.sy, 11, 0, 6.283); g.stroke();
+    g.fillStyle = "rgba(232, 234, 242, .9)"; g.fillText(lit.title.length > 42 ? lit.title.slice(0, 40) + "…" : lit.title, lit.sx + 15, lit.sy);
+  }
+  if (from) {
+    const names = drawn >= 1 ? reached.slice(0, 6) : [];
+    for (const s of [...names, from]) {
+      if (s === lit) continue;
+      g.fillStyle = s === from ? "#fff" : "rgba(232, 234, 242, .8)";
+      g.fillText(s.title.length > 42 ? s.title.slice(0, 40) + "…" : s.title, s.sx + 8, s.sy);
+    }
+  }
+  requestAnimationFrame(draw);
+}
+
+function resize() { dpr = devicePixelRatio || 1; W = innerWidth; H = innerHeight; c.width = W * dpr; c.height = H * dpr; }
+function show(title, facts, id) {
+  document.getElementById("bar").style.display = title ? "block" : "none";
+  const open = document.getElementById("open"); open.hidden = !id; if (id) open.href = "/idea/" + id;
+  document.getElementById("t").textContent = title || ""; document.getElementById("f").textContent = facts || "";
+}
+const lensName = n => n < 10 ? NODE[n].name : `Path ${n + 1}, ${PATHS[n - 10][2]} (${NODE[PATHS[n - 10][0] - 1].name} to ${NODE[PATHS[n - 10][1] - 1].name})`;
+function tap(px, py) {
+  let best = null, bestD = 12;
+  for (const s of S) { const d = Math.hypot(s.sx - px, s.sy - py); if (d < bestD) { best = s; bestD = d; } }
+  if (best && best !== lit) { lit = best; return; }   // the first tap only lights a star
+  if (best) {                                          // the second picks its card
+    selected = best.card; from = best; lit = null; picked = -1; tapped = performance.now();
+    const far = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2;
+    reached = selected.next.map(j => C[j].at.reduce((a, b) => far(b, from) < far(a, from) ? b : a));
+    const on = selected.lenses.map(lensName).join(" and ") || "no lens";
+    return show(selected.title || "(hidden)", "on " + on + " · " + selected.next.length + " connections", selected.id);
+  }
+  if (lit) { lit = null; return; }                     // a tap on nothing puts a lit star out, and keeps what's picked
+  selected = from = null; reached = []; picked = -1; tapped = performance.now();
+  // No star there: a sephira's sphere, or near the middle of a path.
+  NODE.forEach((n, i) => { if (Math.hypot(n.sx - px, n.sy - py) < .5 * n.k) picked = i; });
+  if (picked < 0) PATHS.forEach(([a, b], n) => {
+    const p = NODE[a - 1], q = NODE[b - 1], L = Math.hypot(q.sx - p.sx, q.sy - p.sy) || 1;
+    const u = ((px - p.sx) * (q.sx - p.sx) + (py - p.sy) * (q.sy - p.sy)) / L / L;
+    if (u > .2 && u < .8 && Math.abs((px - p.sx) * (q.sy - p.sy) - (py - p.sy) * (q.sx - p.sx)) / L < 12) picked = n + 10;
+  });
+  if (picked < 0) return show();
+  const held = S.filter(s => s.lens === picked).length;
+  show(lensName(picked), held + " cards · stand-in for a lens: the neighborhood that starts “" + (D.named[picked] || "") + "”");
+}
+
+const pointers = new Map(); let down = null, pinch = null;
+c.addEventListener("pointerdown", e => {
+  c.setPointerCapture(e.pointerId); pointers.set(e.pointerId, {x: e.clientX, y: e.clientY}); touched = performance.now();
+  down = pointers.size === 1 ? {x: e.clientX, y: e.clientY, t: Date.now(), moved: false} : null;
+  if (pointers.size === 2) { const [p, q] = [...pointers.values()]; pinch = Math.hypot(p.x - q.x, p.y - q.y); }
+});
+c.addEventListener("pointermove", e => {
+  const prev = pointers.get(e.pointerId); if (!prev) return;
+  const now = {x: e.clientX, y: e.clientY}; pointers.set(e.pointerId, now); touched = performance.now();
+  if (pointers.size === 2) {
+    const [p, q] = [...pointers.values()], d = Math.hypot(p.x - q.x, p.y - q.y);
+    if (pinch) zoom = Math.max(.5, Math.min(zoom * d / pinch, 8)); pinch = d;
+  } else {
+    yaw += (now.x - prev.x) * .008; pitch = Math.max(-1.2, Math.min(1.2, pitch + (now.y - prev.y) * .006));
+    if (down && Math.hypot(now.x - down.x, now.y - down.y) > 6) down.moved = true;
+  }
+});
+const up = e => {
+  pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null;
+  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") tap(e.clientX, e.clientY);
+  down = null;
+};
+c.addEventListener("pointerup", up); c.addEventListener("pointercancel", up);
+c.addEventListener("wheel", e => { e.preventDefault(); touched = performance.now();
+                                   zoom = Math.max(.5, Math.min(zoom * Math.exp(-e.deltaY / 400), 8)); }, {passive: false});
+addEventListener("resize", resize);
+resize(); requestAnimationFrame(draw);
+</script>
+</html>
