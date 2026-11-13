@@ -44,6 +44,29 @@ main nav a { color: var(--accent); }
 .left .door, .right .door { border-left-color: var(--time); }
 .door:hover, .door:focus-visible { border-color: var(--accent); outline: none; }
 .door small { display: block; font-size: .78rem; }
+/* Where a door's card is on the map from here: an arrow on the door, and a ray of the rose under the card. */
+.door { position: relative; }
+.way { position: absolute; top: .55rem; right: .6rem; width: 1rem; height: 1rem; }
+.way path { fill: none; stroke: var(--like); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.left .way path, .right .way path { stroke: var(--time); }
+.door small { padding-right: 1.4rem; }
+.door:target { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.rose { display: block; width: 8.5rem; height: 8.5rem; margin: 1rem auto .2rem; overflow: visible; }
+.rose line { stroke-width: 1.6; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.rose line.time { stroke: var(--time); } .rose line.like { stroke: var(--like); }
+.rose a:hover line, .rose a:focus line { stroke-width: 3.5; } .rose a { outline: none; }
+.rose circle { fill: var(--fg); }
+@media (prefers-reduced-motion: no-preference) {
+  /* The doors come in from their sides, and the rose's rays grow out of the card. */
+  .door { animation: arrive .45s ease-out backwards; }
+  .up .door { --from: 0 -14px; } .down .door { --from: 0 14px; }
+  .left .door { --from: -14px 0; } .right .door { --from: 14px 0; }
+  .door:nth-of-type(2) { animation-delay: 60ms; } .door:nth-of-type(3) { animation-delay: 120ms; }
+  .door:nth-of-type(4) { animation-delay: 180ms; }
+  @keyframes arrive { from { opacity: 0; translate: var(--from); } }
+  .rose line { stroke-dasharray: 60; stroke-dashoffset: 60; animation: ray .6s .2s ease-out forwards; }
+  @keyframes ray { to { stroke-dashoffset: 0; } }
+}
 .door b { display: block; font-weight: 600; line-height: 1.3; margin: .1rem 0; }
 .door q { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
   color: var(--muted); font: .95rem/1.4 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }

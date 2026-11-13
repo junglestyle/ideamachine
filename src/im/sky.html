@@ -7,7 +7,20 @@
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
   font: 15px/1.45 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
 canvas { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: grab; }
-nav { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 16px; display: flex; gap: 14px; }
+nav { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 16px; right: 16px; display: flex; gap: 8px 14px;
+  flex-wrap: wrap; pointer-events: none; }
+nav > * { pointer-events: auto; }
+button { font: inherit; color: var(--accent); background: var(--panel); border: 0; padding: 4px 10px; border-radius: 6px;
+  cursor: pointer; }
+button[aria-pressed=true] { color: var(--bg); background: var(--accent); }
+/* Replay's bar: play or pause, the time, and the day it shows. */
+#time { position: fixed; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); max-width: 40rem;
+  margin: 0 auto; background: var(--panel); border-radius: 10px; padding: 8px 12px; display: flex; gap: 12px;
+  align-items: center; }
+#time[hidden] { display: none; }
+#time input { flex: 1; min-width: 0; accent-color: var(--accent); } #time span { color: var(--muted); font-size: 13px;
+  white-space: nowrap; font-variant-numeric: tabular-nums; }
+body.replaying #bar { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 56px); }
 nav a, #bar a { color: var(--accent); text-decoration: none; }
 nav a { background: var(--panel); padding: 4px 10px; border-radius: 6px; }
 #bar { position: fixed; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); max-width: 40rem;
@@ -16,7 +29,9 @@ nav a { background: var(--panel); padding: 4px 10px; border-radius: 6px; }
 #bar a { margin-right: 16px; }
 </style>
 <nav><a href="/">Feed</a><a href="/trails">Trails</a><a href="/echoes">Echoes</a><a href="/threads">Threads</a><a href="/tree">Tree</a
+><a href="/grid">Grid</a><button id="replay" aria-pressed="false" title="Watch the archive grow from its first day">Replay</button
 ><a href="/sky" id="home" hidden>Home sky</a></nav>
+<div id="time" hidden><button id="go">Pause</button><input id="at" type="range" min="0" max="1000" value="0" aria-label="The day shown"><span id="day"></span></div>
 <canvas id="c"></canvas>
 <div id="bar"><b id="t"></b><small id="f"></small><a id="open">Open</a><a id="lens">Light from here</a></div>
 <script type="application/json" id="d">{data}</script>
@@ -24,8 +39,11 @@ nav a { background: var(--panel); padding: 4px 10px; border-radius: 6px; }
 "use strict";
 // The sky (decision 0005, amended): positions come from the pipeline and never move. A lens only lights.
 const D = JSON.parse(document.getElementById("d").textContent);
-const S = D.stars.map(([id, x, y, size, conv, age, title, facts]) =>
-  ({id, x, y: -y, size, conv, age, title, facts, rel: D.rel ? (D.rel[id] || 0) : 1}));
+// /sky?lit=<ids>: those cards lit where they are, as a lens lights its results (a thread, or a cell of the grid).
+const asked = new URLSearchParams(location.search).get("lit");
+if (asked && !D.rel) D.rel = Object.fromEntries(asked.split(",").map(id => [id, 1]));
+const S = D.stars.map(([id, x, y, size, conv, age, title, facts, first]) =>
+  ({id, x, y: -y, size, conv, age, title, facts, first, rel: D.rel ? (D.rel[id] || 0) : 1}));
 const RADIUS = [1.6, 2.6, 3.6, 4.8];   // observation, candidate, pinned idea, canonical idea
 const c = document.getElementById("c"), g = c.getContext("2d");
 let W = 0, H = 0, dpr = 1, cam = {x: 0, y: 0, k: 200}, selected = null, queued = false, dirty = false, last = 0;
@@ -163,7 +181,9 @@ function draw(now) {
   const t = still.matches ? 0 : now / 1000, wave = ripple ? now - ripple.at : 0;
   if (ripple && wave > ripple.ends) ripple = null;
   g.globalCompositeOperation = "lighter";
-  g.globalAlpha = D.rel ? .4 : 1; g.imageSmoothingQuality = "high";
+  g.globalAlpha = replay ? .25 : D.rel ? .4 : 1; g.imageSmoothingQuality = "high";
+  // In replay, a card is there once it has been said, and flares as it arrives.
+  const cut = replay ? replay.t : Infinity, fresh = (T1 - T0) / 45;
   g.drawImage(haze, (hz.x - cam.x) * cam.k + W / 2, (hz.y - cam.y) * cam.k + H / 2, hz.w * cam.k, hz.h * cam.k);
   g.globalAlpha = 1;
   // Stars are smaller on a small screen, where the same map is packed tighter.
@@ -181,6 +201,7 @@ function draw(now) {
   // the links it reaches are drawn, fainter each hop out, each growing from its nearer end as the pulse crosses
   // it; a lens still shows what it lights.
   for (const [i, j] of D.links) {
+    if (S[i].first > cut || S[j].first > cut) continue;   // a link shows once both its cards have been said
     const a = S[i], b = S[j], da = near ? near.depth.get(i) : undefined, db = near ? near.depth.get(j) : undefined;
     const d = da === undefined || db === undefined ? HOPS : Math.min(da, db);
     const lit = D.rel ? Math.round(45 * Math.min(a.rel, b.rel)) / 100 : near ? 0 : .12;
@@ -210,7 +231,7 @@ function draw(now) {
   }
   for (const s of S) {
     const x = sx(s), y = sy(s);
-    if (x < -60 || y < -60 || x > W + 60 || y > H + 60) continue;
+    if (x < -60 || y < -60 || x > W + 60 || y > H + 60 || s.first > cut) continue;
     // In a lens, what it reaches stands out at any recurrence, and the rest recedes to a faint backdrop.
     let a = !D.rel ? s.bright : s.rel > 0 ? Math.max(s.bright, .7) * (.45 + .55 * s.rel) : .06 * s.bright;
     let r = RADIUS[s.size] * grow * (D.rel && s.rel > 0 ? 1.3 : 1);
@@ -225,6 +246,7 @@ function draw(now) {
     if (struck && d === 0) { a = 1; r *= 1.25; }
     else if (struck && d === 1) { a = Math.max(a, .9); r *= 1.15; }
     else if (near && !D.rel) a *= struck ? FADE[d] : UNLIT;
+    if (replay && s.first != null && cut - s.first < fresh) { const born = 1 - (cut - s.first) / fresh; a += born; r *= 1 + .8 * born; }
     if (s === lit) { a = 1; r *= 1.2; }
     g.globalAlpha = Math.min(a, 1); g.drawImage(s.img, x - r * REACH, y - r * REACH, 2 * r * REACH, 2 * r * REACH);
   }
@@ -234,6 +256,7 @@ function draw(now) {
   if (selected && !labelled.includes(selected)) labelled.push(selected);
   if (lit) {
     g.strokeStyle = "rgba(255, 255, 255, .7)"; g.lineWidth = 1; g.beginPath(); g.arc(sx(lit), sy(lit), 11, 0, 6.283); g.stroke();
+    g.strokeStyle = "rgba(255, 255, 255, .16)"; g.beginPath(); g.arc(sx(lit), sy(lit), AGAIN, 0, 6.283); g.stroke();   // where a tap picks it
     if (!labelled.includes(lit)) labelled.push(lit);
   }
   g.font = "12px system-ui, sans-serif"; g.textBaseline = "middle";
@@ -247,8 +270,13 @@ function draw(now) {
 // the map is being moved. With reduced motion asked for, it draws only when something changes.
 function frame(now) {
   queued = false;
+  if (replay && replay.playing) {
+    replay.t = Math.min(T1, replay.t + (now - replay.last) / SWEEP * (T1 - T0)); replay.last = now;
+    if (replay.t >= T1) playing(false);
+    told(); dirty = true;
+  }
   if (dirty || ripple || now - last >= 33) { dirty = false; last = now; draw(now); }
-  if (ripple || !still.matches && !document.hidden) { queued = true; requestAnimationFrame(frame); }
+  if (ripple || replay && replay.playing || !still.matches && !document.hidden) { queued = true; requestAnimationFrame(frame); }
 }
 const redraw = () => { dirty = true; if (!queued) { queued = true; requestAnimationFrame(frame); } };
 document.addEventListener("visibilitychange", redraw);
@@ -287,15 +315,49 @@ function tap(s) {
   else select(null);
 }
 
+// A lit star is a bigger target than an unlit one: a tap within AGAIN px of it is a tap on it, whatever else is
+// nearer, so a finger can pick it among its neighbors.
+const AGAIN = 36;
+const again = (px, py) => lit && Math.hypot(sx(lit) - px, sy(lit) - py) <= AGAIN ? lit : null;
+
 function hit(px, py) {
   let best = null, bestD = Infinity;
   for (const s of S) {
-    if (D.rel && s.rel === 0) continue;
+    if (D.rel && s.rel === 0 || replay && s.first > replay.t) continue;
     const d = Math.hypot(sx(s) - px, sy(s) - py);
     if (d < bestD) { best = s; bestD = d; }
   }
   return bestD <= 18 ? best : null;
 }
+
+// Replay: the archive as it grew. The time runs from the first card said to the last; a card is on the sky once
+// it has been said, and a link once both its cards have. It replays when things were said, on today's map: where a
+// card sits, and which cards are connected, are as they are now. A card with no time said (typed) is always there.
+const said = S.map(s => s.first).filter(t => t != null).sort((a, b) => a - b);
+const T0 = said.length ? said[0] : 0, T1 = said.length ? said[said.length - 1] : 1, SWEEP = 45000;   // ms, end to end
+let replay = null;   // {t: the time shown, playing, last: the frame it last moved on}
+const fmtDay = new Intl.DateTimeFormat(undefined, {day: "numeric", month: "short", year: "numeric"});
+function told() {
+  let n = 0; while (n < said.length && said[n] <= replay.t) n++;
+  document.getElementById("day").textContent = `${fmtDay.format(replay.t * 1000)} · ${n + S.length - said.length} cards`;
+  document.getElementById("at").value = Math.round(1000 * (replay.t - T0) / Math.max(T1 - T0, 1));
+}
+function playing(on) {
+  if (on && replay.t >= T1) replay.t = T0;
+  replay.playing = on; replay.last = performance.now(); document.getElementById("go").textContent = on ? "Pause" : "Play";
+  redraw();
+}
+document.getElementById("replay").addEventListener("click", e => {
+  replay = replay ? null : {t: T0, playing: false, last: 0};
+  e.currentTarget.setAttribute("aria-pressed", !!replay); document.getElementById("time").hidden = !replay;
+  document.body.classList.toggle("replaying", !!replay);
+  if (replay) { lit = null; select(null); playing(true); told(); } else redraw();
+});
+document.getElementById("go").addEventListener("click", () => playing(!replay.playing));
+document.getElementById("at").addEventListener("input", e => {
+  replay.t = T0 + (T1 - T0) * e.target.value / 1000; replay.playing = false;
+  document.getElementById("go").textContent = "Play"; told(); redraw();
+});
 
 const pointers = new Map();
 let down = null, pinch = null;
@@ -326,7 +388,7 @@ c.addEventListener("pointermove", e => {
 const up = e => {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
-  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") tap(hit(e.clientX, e.clientY));
+  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") tap(again(e.clientX, e.clientY) || hit(e.clientX, e.clientY));
   down = null;
 };
 c.addEventListener("pointerup", up);
@@ -340,9 +402,9 @@ addEventListener("resize", resize);
 function show() {
   lit = null;
   for (const s of S) s.rel = D.rel ? (D.rel[s.id] || 0) : 1;
-  document.getElementById("home").hidden = !D.seed;
-  const lit = D.rel ? S.filter(s => s.rel >= .25) : S;
-  fit(lit.length >= 2 ? lit : S);
+  document.getElementById("home").hidden = !D.rel;
+  const lighted = D.rel ? S.filter(s => s.rel >= .25) : S;
+  fit(lighted.length >= 2 ? lighted : S);
   select(D.seed ? S.find(s => s.id === D.seed) || null : null);
 }
 async function light(seed, push) {

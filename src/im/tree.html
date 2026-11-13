@@ -15,7 +15,7 @@ nav a { background: var(--panel); padding: 4px 10px; border-radius: 6px; }
   border-radius: 10px; padding: 12px 14px; display: none; }
 #bar b { display: block; } #bar small { color: var(--muted); display: block; margin: 2px 0 8px; }
 </style>
-<nav><a href="/">Feed</a><a href="/sky">Sky</a><a href="/trails">Trails</a><a href="/threads">Threads</a></nav>
+<nav><a href="/">Feed</a><a href="/sky">Sky</a><a href="/trails">Trails</a><a href="/threads">Threads</a><a href="/grid">Grid</a></nav>
 <div id="note">There are no lenses yet. Each sephira and path holds one of the 32 largest neighborhoods of connected
 cards as a stand-in, so where a card sits means nothing yet. Cards on none are the far sky. A card on more than one has
 a star on each, joined by a double line. Drag to turn, pinch or scroll to zoom. Tap a star to light it and again to
@@ -77,6 +77,9 @@ let W = 0, H = 0, dpr = 1, yaw = .5, pitch = .08, zoom = 1, picked = -1, tapped 
 // selected: the card picked, `from` the star of it that was tapped, `reached` the star of each card it's connected
 // to that is nearest that one. lit: a star tapped once, shown but not yet picked; a second tap picks it.
 let selected = null, from = null, reached = [], lit = null;
+const AGAIN = 36;
+// /tree?lit=<ids>: those cards lit wherever they are on the tree (a thread, or a cell of the grid), until a tap on nothing.
+const LIT = new Set((new URLSearchParams(location.search).get("lit") || "").split(",").filter(Boolean));
 const SPRITE = 96, sprites = new Map();
 function sprite([r, gr, b], far) {
   const key = r + "," + gr + "," + b + far;
@@ -163,10 +166,10 @@ function draw(now) {
   for (const s of [...S].sort((a, b) => a.depth - b.depth)) {
     if (s.sx < -40 || s.sy < -40 || s.sx > W + 40 || s.sy > H + 40) continue;
     const mine = selected && (s.card === selected || drawn >= 1 && reached.includes(s));
-    const onPicked = picked >= 0 && s.lens === picked;
+    const onPicked = picked >= 0 && s.lens === picked || LIT.has(s.card.id);
     let a = (s.far ? .3 : .85) * near(s.depth) * (1 + .18 * Math.sin(t * s.pace + s.phase));
     let r = s.far ? 7 * Math.sqrt(zoom) : .2 * s.k;
-    if (selected || picked >= 0) a *= mine || onPicked ? 1 : .4;
+    if (selected || picked >= 0 || LIT.size) a *= mine || onPicked ? 1 : .4;
     if (mine) { a = 1; r *= 1.3; if (drawn < 20 && s.card !== selected) { const f = Math.exp(-(wave - HOP) / 400); a += f; r *= 1 + .6 * f; } }
     if (onPicked) { a = Math.min(1, a * 1.5 + .2); r *= 1.15; }
     if (s === lit) { a = 1; r *= 1.3; }
@@ -179,6 +182,7 @@ function draw(now) {
   g.textAlign = "left";
   if (lit) {   // tapped once: ringed and named, a second tap picks it
     g.strokeStyle = "rgba(255, 255, 255, .7)"; g.lineWidth = 1; g.beginPath(); g.arc(lit.sx, lit.sy, 11, 0, 6.283); g.stroke();
+    g.strokeStyle = "rgba(255, 255, 255, .16)"; g.beginPath(); g.arc(lit.sx, lit.sy, AGAIN, 0, 6.283); g.stroke();
     g.fillStyle = "rgba(232, 234, 242, .9)"; g.fillText(lit.title.length > 42 ? lit.title.slice(0, 40) + "…" : lit.title, lit.sx + 15, lit.sy);
   }
   if (from) {
@@ -200,8 +204,10 @@ function show(title, facts, id) {
 }
 const lensName = n => n < 10 ? NODE[n].name : `Path ${n + 1}, ${PATHS[n - 10][2]} (${NODE[PATHS[n - 10][0] - 1].name} to ${NODE[PATHS[n - 10][1] - 1].name})`;
 function tap(px, py) {
-  let best = null, bestD = 12;
+  let best = null, bestD = 18;
   for (const s of S) { const d = Math.hypot(s.sx - px, s.sy - py); if (d < bestD) { best = s; bestD = d; } }
+  // A lit star is a bigger target: a tap within AGAIN px of it is a tap on it, whatever else is nearer.
+  if (lit && Math.hypot(lit.sx - px, lit.sy - py) <= AGAIN) best = lit;
   if (best && best !== lit) { lit = best; return; }   // the first tap only lights a star
   if (best) {                                          // the second picks its card
     selected = best.card; from = best; lit = null; picked = -1; tapped = performance.now();
@@ -211,7 +217,7 @@ function tap(px, py) {
     return show(selected.title || "(hidden)", "on " + on + " · " + selected.next.length + " connections", selected.id);
   }
   if (lit) { lit = null; return; }                     // a tap on nothing puts a lit star out, and keeps what's picked
-  selected = from = null; reached = []; picked = -1; tapped = performance.now();
+  selected = from = null; reached = []; picked = -1; tapped = performance.now(); LIT.clear();
   // No star there: a sephira's sphere, or near the middle of a path.
   NODE.forEach((n, i) => { if (Math.hypot(n.sx - px, n.sy - py) < .5 * n.k) picked = i; });
   if (picked < 0) PATHS.forEach(([a, b], n) => {

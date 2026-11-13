@@ -11,7 +11,8 @@ conversation as the path it took from thought to thought, and Crossroads (`/cros
 said around it and what's like it; and Echoes (`/echoes`), every connection between thoughts said in different
 conversations; and Threads (`/threads`), the neighborhoods of connected thoughts that run through several
 conversations; and Apart (`/apart`), the near pairs the connection judge kept apart; and Tree (`/tree`), the Tree of
-Life turned in three dimensions, a neighborhood standing in for each lens until lenses exist. They only read.
+Life turned in three dimensions, and Grid (`/grid`), a cell a lens, a neighborhood standing in for each lens until
+lenses exist. They only read.
 
 Demo mode (a toggle, or `im web --demo` for nothing else) reads the `demo` views instead of `pub`'s, so nothing
 sensitive is there to show: the sky keeps a sensitive cluster's star, blank, with its edges, and the lists (the
@@ -122,7 +123,7 @@ def feed(conn, show: str = "candidates", page: int = 0, demo: bool = False) -> s
                  (list(maturities), PAGE + 1, page * PAGE))
     tabs = " ".join(f'<a href="/?show={k}"{" aria-current=page" if k == show else ""}>{name}</a>'
                     for k, (_, name) in SHOW.items()) + ' <a href="/sky">sky</a> <a href="/trails">trails</a>' \
-        + ' <a href="/echoes">echoes</a> <a href="/threads">threads</a> <a href="/apart">apart</a> <a href="/crossroads">crossroads</a> <a href="/tree">tree</a>' \
+        + ' <a href="/echoes">echoes</a> <a href="/threads">threads</a> <a href="/apart">apart</a> <a href="/crossroads">crossroads</a> <a href="/tree">tree</a> <a href="/grid">grid</a>' \
         + f' <a href="/demo?on={0 if demo else 1}">{"leave demo mode" if demo else "demo mode"}</a>'
     cards = "".join(f'<li><a href="/idea/{r["idea_id"]}">{_e(r["title"])}</a><p>{_e(r["statement"])}</p>'
                     f'<small>{_e(_facts(r))}</small></li>' for r in rows[:PAGE])
@@ -206,7 +207,8 @@ def sky(conn, seed: str | None = None, demo: bool = False) -> str | None:
     now = datetime.now(timezone.utc)
     stars = [[str(r["idea_id"]), round(float(r["x"]), 4), round(float(r["y"]), 4),
               SIZES[r["maturity"]] + (r["kept_as"] == "canonical"), r["conversations"],
-              max((now - r["last_seen"]).days, 0) if r["last_seen"] else 365, r["title"] or "", _facts(r)]
+              max((now - r["last_seen"]).days, 0) if r["last_seen"] else 365, r["title"] or "", _facts(r),
+              int(r["first_said"].timestamp()) if r["first_said"] else None]   # when first said, for replay
              for r in rows]
     links = sorted({tuple(sorted((index[a], index[b]))) for a, b in conn.execute(
         """SELECT a::text, b::text FROM pub.card_links UNION ALL SELECT from_id::text, to_id::text FROM pub.card_lineage""")
@@ -307,6 +309,60 @@ def tree(conn, demo: bool = False) -> str:
     return _TREE.replace("{data}", data.replace("</", "<\\/"))
 
 
+GRID_CARDS = 3   # the least a cell of the grid holds
+
+
+def grid(conn, demo: bool = False) -> str:
+    """A grid of lenses, the plainer Trellis board (docs/design/m6-emanation.md, Grid): one cell a lens, its cards
+    drawn as a small constellation, each where the sky puts it relative to the others, with the connections among
+    them. There are no lenses yet (decision 0013), so a graph neighbourhood of at least GRID_CARDS cards stands in for
+    each (lens.neighbourhoods), named by the first card said in it, and nothing places a cell by hand: they come in
+    the order they began. A star opens its card's crossroads; a cell's cards can be lit on the sky or the tree. In
+    demo mode a sensitive card is in no cell."""
+    from im import lens
+
+    v = _views(demo)
+    cards = {str(r["idea_id"]): r for r in _rows(
+        conn, f"SELECT c.*, p.x, p.y FROM {v}cards c LEFT JOIN pub.card_positions p USING (idea_id)")
+        if not (demo and r["redacted"])}
+    pairs = sorted({tuple(sorted((a, b))) for a, b in conn.execute("SELECT a::text, b::text FROM pub.card_links")
+                    if a in cards and b in cards and a != b})
+    at = {i: (float(r["x"]), -float(r["y"])) for i, r in cards.items() if r["x"] is not None}
+    mx, my = (sum(p[0] for p in at.values()) / len(at), sum(p[1] for p in at.values()) / len(at)) if at else (0, 0)
+    when = lambda i: (cards[i]["first_said"] is None, cards[i]["first_said"], i)   # noqa: E731
+    cells = []
+    for group in lens.neighbourhoods(pairs):
+        if len(group) < GRID_CARDS:
+            continue
+        order, inside = sorted(group, key=when), set(group)
+        # Each card where the sky puts it, the group scaled to fill the cell; one the sky hasn't placed sits in a ring.
+        spot = {i: at.get(i) or (mx + math.cos(n), my + math.sin(n)) for n, i in enumerate(order)}
+        x0, y0 = min(p[0] for p in spot.values()), min(p[1] for p in spot.values())
+        wide = max(max(p[0] for p in spot.values()) - x0, max(p[1] for p in spot.values()) - y0, 1e-6)
+        ox, oy = (wide - (max(p[0] for p in spot.values()) - x0)) / 2, (wide - (max(p[1] for p in spot.values()) - y0)) / 2
+        put = {i: (round(14 + 72 * (p[0] - x0 + ox) / wide, 1), round(14 + 72 * (p[1] - y0 + oy) / wide, 1))
+               for i, p in spot.items()}
+        lines = "".join(f'<line x1="{put[a][0]}" y1="{put[a][1]}" x2="{put[b][0]}" y2="{put[b][1]}"/>'
+                        for a, b in pairs if a in inside and b in inside)
+        stars = "".join(
+            f'<a href="/crossroads/{i}"><circle cx="{put[i][0]}" cy="{put[i][1]}" '
+            f'r="{2 + .7 * (SIZES[cards[i]["maturity"]] + (cards[i]["kept_as"] == "canonical")):.1f}" style="--hue: '
+            f'{round(math.degrees(math.atan2(spot[i][1] - my, spot[i][0] - mx)) % 360)}; --d: {n % 7}">'
+            f'<title>{_e(cards[i]["title"])}</title></circle></a>' for n, i in enumerate(order))
+        lit = ",".join(order)
+        cells.append((when(order[0]), (
+            f'<section><svg viewBox="0 0 100 100" role="img" aria-label="{len(order)} connected cards">{lines}{stars}'
+            f'</svg><b>{_e(cards[order[0]]["title"])}</b><small>{len(order)} cards · began '
+            f'{_when(cards[order[0]]["first_said"])}</small><small><a href="/sky?lit={lit}">on the sky</a>'
+            f'<a href="/tree?lit={lit}">on the tree</a></small></section>')))
+    cells.sort(key=lambda c: c[0])
+    body = (f'<h1>Grid</h1><p class="lede">{len(cells)} cell{"s" * (len(cells) != 1)}. There are no lenses yet, so each '
+            f'cell holds a neighborhood of connected cards as a stand-in, named by the first thing said in it, in the '
+            f'order they began. A star is a card, placed as the sky places it among the others.</p>'
+            + (f'<div class="grid">{"".join(c for _, c in cells)}</div>' if cells else "<p>Nothing here.</p>"))
+    return _GRID.replace("{body}", body)
+
+
 def _apart(a, b) -> str:
     """How far apart two times are, in words: "4 minutes", "3 days", "5 months"."""
     s = abs((a - b).total_seconds())
@@ -317,10 +373,15 @@ def _apart(a, b) -> str:
     return "moments"
 
 
-def _door(way: str, r: dict, why: str, quotes: dict) -> str:
+def _door(way: str, r: dict, why: str, quotes: dict, turn: float | None = None) -> str:
+    """A door to another card's crossroads. `turn` is the way that card lies on the map from this one, in degrees
+    clockwise from east as the sky draws it, shown as a small arrow."""
     quote = quotes.get(r["idea_id"])
-    return (f'<a class="door" data-way="{way}" href="/crossroads/{r["idea_id"]}"><small>{_e(why)}</small>'
-            f'<b>{_e(r["title"])}</b>' + (f"<q>{_e(quote)}</q>" if quote else "") + "</a>")
+    arrow = "" if turn is None else (f'<svg class="way" viewBox="-8 -8 16 16" aria-hidden="true"><path '
+                                     f'transform="rotate({turn:.0f})" d="M-5,0H5M2,-3L5,0L2,3"/></svg>')
+    return (f'<a class="door" id="d{r["idea_id"]}" data-way="{way}" href="/crossroads/{r["idea_id"]}">'
+            f'<small>{_e(why)}</small>'
+            f'<b>{_e(r["title"])}</b>' + (f"<q>{_e(quote)}</q>" if quote else "") + arrow + "</a>")
 
 
 ECHOES = 4   # how many doors each way in meaning
@@ -393,14 +454,31 @@ def crossroads(conn, idea_id: str, demo: bool = False) -> str | None:
     quotes = dict(conn.execute(f"""SELECT DISTINCT ON (idea_id) idea_id, quote FROM {v}card_moments
                                    WHERE idea_id = ANY(%s) ORDER BY idea_id, said_at, item_id""", (doors,)).fetchall())
 
+    # Where each door is on the map from here: its direction, and how far next to the others.
+    at = {i: (float(x), -float(y)) for i, x, y in conn.execute(
+        "SELECT idea_id, x, y FROM pub.card_positions WHERE idea_id = ANY(%s)", (doors + [r["idea_id"]],))}
+    here_at, turn, far = at.get(r["idea_id"]), {}, {}
+    for i in doors:
+        if here_at and i in at and at[i] != here_at:
+            turn[i] = math.degrees(math.atan2(at[i][1] - here_at[1], at[i][0] - here_at[0]))
+            far[i] = math.hypot(at[i][1] - here_at[1], at[i][0] - here_at[0])
+    longest = max(far.values(), default=1.0)
+    rays = "".join(
+        f'<a href="#d{x["idea_id"]}"><line class="{axis}" x2="{18 + 26 * far[x["idea_id"]] / longest:.1f}" '
+        f'transform="rotate({turn[x["idea_id"]]:.0f})"><title>{_e(x["title"])}</title></line></a>'
+        for axis, found in (("time", before + after), ("like", earlier + later))
+        for x, _ in found if x["idea_id"] in turn)
+    rose = (f'<svg class="rose" viewBox="-50 -50 100 100" role="img" aria-label="Where its doors are on the map">'
+            f'{rays}<circle r="3"/></svg><small>where its doors are on the map</small>') if rays else ""
+
     def arm(way: str, name: str, found: list) -> str:
-        inner = "".join(_door(way, x, why, quotes) for x, why in found) or "<i>nothing</i>"
+        inner = "".join(_door(way, x, why, quotes, turn.get(x["idea_id"])) for x, why in found) or "<i>nothing</i>"
         return f'<section class="{way}"><h2>{name}</h2>{inner}</section>'
 
     here = "".join(f"<blockquote><p>{_e(m['quote'])}</p><small>{_e(SPEAKERS.get(m['speaker'], m['speaker']))} · "
                    f"{_when(m['said_at'])}</small></blockquote>" for m in mine[:3])
     body = (arm("up", "Like it, earlier", earlier) + arm("left", "Just before", before)
-            + f'<main><h1>{_e(r["title"])}</h1>{here}<p>{_e(r["statement"])}</p><small>{_e(_facts(r))}</small>'
+            + f'<main><h1>{_e(r["title"])}</h1>{here}<p>{_e(r["statement"])}</p><small>{_e(_facts(r))}</small>{rose}'
               f'<nav><a href="/idea/{idea_id}">Card</a><a href="/trails?at={idea_id}">Its trail</a>'
               f'<a href="/sky?seed={idea_id}">Light the sky</a><a href="/crossroads">Somewhere else</a></nav></main>'
             + arm("right", "Just after", after) + arm("down", "Like it, later", later))
@@ -421,7 +499,8 @@ def _arcs(found: list, first, last) -> str:
     for n, e in enumerate(found):
         x0, x1 = at(e["earlier"]["first_said"]), at(e["later"]["first_said"])
         r = max((x1 - x0) / 2, 1.5)
-        out.append(f'<a href="#e{n}"><path class="{" ".join(e["kinds"]) or "plain"}" d="M{x0},{base}A{r:.1f},'
+        out.append(f'<a href="#e{n}"><path pathLength="1" style="--d: {len(found) - 1 - n}" '
+                   f'class="{" ".join(e["kinds"]) or "plain"}" d="M{x0},{base}A{r:.1f},'
                    f'{min(r, top):.1f} 0 0 1 {x1},{base}"><title>{_e(e["earlier"]["title"])} … '
                    f'{_e(e["later"]["title"])} ({_e(e["gap"])})</title></path></a>')
     ticks, t = [], first.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -560,7 +639,9 @@ def threads(conn, demo: bool = False) -> str:
             f'cards · {len(cols)} conversations · over {_apart(t["ended"], t["began"])}</small></span>'
             f'<svg viewBox="0 0 {n * step} 22" preserveAspectRatio="none"><line x1="{cols[0] * step + step / 2}" '
             f'x2="{cols[-1] * step + step / 2}" y1="11" y2="11"/></svg>'
-            f'<svg viewBox="0 0 {n * step} 22">{knots}</svg></summary><ol>{listed}</ol></details>')
+            f'<svg viewBox="0 0 {n * step} 22">{knots}</svg></summary><p class="on">Light its cards '
+            f'<a href="/sky?lit={",".join(t["cards"])}">on the sky</a> '
+            f'<a href="/tree?lit={",".join(t["cards"])}">on the tree</a></p><ol>{listed}</ol></details>')
     body = (f'<h1>Threads</h1><p class="lede">{len(found)} thread{"s" * (len(found) != 1)}: neighborhoods of connected '
             f'thoughts that run through more than one conversation. Each row crosses all {len(columns)} conversations '
             f'in order, with a knot where the thread was said; it&#x27;s named by the first thing said in it. '
@@ -669,6 +750,7 @@ _CROSSROADS = (files("im") / "crossroads.html").read_text()
 _ECHOES = (files("im") / "echoes.html").read_text()
 _THREADS = (files("im") / "threads.html").read_text()
 _TREE = (files("im") / "tree.html").read_text()
+_GRID = (files("im") / "grid.html").read_text()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -742,6 +824,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, threads(conn, demo))
             if url.path == "/tree":
                 return self._send(200, tree(conn, demo))
+            if url.path == "/grid":
+                return self._send(200, grid(conn, demo))
             if url.path == "/crossroads":   # anywhere: a card at random
                 to = anywhere(conn, demo)
                 return self._send(303, headers={"Location": f"/crossroads/{to}" if to else "/"})

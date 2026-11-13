@@ -161,6 +161,7 @@ if (S.length) {
 const KNOCK = 9, SPRING = 260, DAMP = 150, FLARE = 420, SETTLE = 900, still = matchMedia("(prefers-reduced-motion: reduce)");
 let pulsed = -1e9;   // when the trail now being drawn set off
 let glint = null;    // a star tapped once: ringed and named, not yet picked
+const AGAIN = 36;    // a tap this near a lit star is a tap on it, whatever else is nearer
 
 const narrow = () => W <= 760;
 // The part of the window the map is seen through: beside the list, above the strip.
@@ -305,6 +306,7 @@ function draw() {
   if (glint) {   // tapped once: ringed and named; a second tap goes to its conversation
     const x = sx(glint.x), y = sy(glint.y);
     g.strokeStyle = "rgba(255, 255, 255, .7)"; g.lineWidth = 1; g.beginPath(); g.arc(x, y, 11, 0, 7); g.stroke();
+    g.strokeStyle = "rgba(255, 255, 255, .16)"; g.beginPath(); g.arc(x, y, AGAIN, 0, 7); g.stroke();   // where a tap picks it
     label(glint.title || "hidden", x + 15, y, false);
   }
 }
@@ -496,7 +498,7 @@ c.addEventListener("pointermove", e => {
 const up = e => {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
-  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") tap(hit(e.clientX, e.clientY));
+  if (down && !down.moved && Date.now() - down.t < 500 && e.type === "pointerup") tap(glint && Math.hypot(sx(glint.x) - e.clientX, sy(glint.y) - e.clientY) <= AGAIN ? glint : hit(e.clientX, e.clientY));
   down = null;
 };
 c.addEventListener("pointerup", up);
