@@ -196,14 +196,10 @@ One PR each, in order:
 
 ## The canonical lenses
 
-Six, chosen 2026-11-14, each a `jev` lens, pinned. A topic is a subject ("what's this about"); a question is
-something I'd ask of the map. The topics are three of the largest neighborhoods of connected cards on the live map
-that day (18, 16 and 14 cards).
-
-- Topics: **AI work and career**; **How I see myself and what drives me**; **Social life and confidence**.
-- Questions: **What have I changed my mind about?**; **What could I build?**; **What am I struggling with?**
-
-ROADMAP-v2 asks for 5 judged useful, so M5 is done when 5 of the 6 pass.
+Six, chosen 2026-11-14, each a `jev` lens, pinned: three topics (what a card is about) and three questions (what
+I'd ask of the map). Their names, descriptions and Jev questions are personal, so they live in im-evals, which is
+private, and reach `im` as data (`im lens import FILE`, 0013); nothing in this repo names them. ROADMAP-v2 asks for
+5 judged useful, so M5 is done when 5 of the 6 pass.
 
 Judged twice, both bars registered in im-evals before any run, and my use kept apart from both:
 
@@ -219,5 +215,5 @@ Judged twice, both bars registered in im-evals before any run, and my use kept a
 
 ## Still open
 
-- Each lens's description and Jev questions, drafted for me to edit (0013), before the sheets.
+- Each lens's description and Jev questions: drafted in im-evals, for me to edit, before the sheets.
 - The bars' numbers, in the pre-registration (a starting point: precision ≥ 0.8, and above the baseline's).
