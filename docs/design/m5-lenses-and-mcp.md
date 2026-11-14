@@ -192,12 +192,18 @@ One PR each, in order:
    boards stored, the Tree and the Grid reading them.
 4. The `jev` kind and `im lens run`.
 5. Themes become lenses.
-6. The 5 canonical lenses, judged under bars registered in im-evals first.
+6. The canonical lenses, judged under bars registered in im-evals first.
 
-## The 5 canonical lenses
+## The canonical lenses
 
-Three topics and two questions, which I name (below). A topic is a subject ("what's this about"); a question is
-something I'd ask of the map ("what could I build"). Each is a `jev` lens, pinned.
+Six, chosen 2026-11-14, each a `jev` lens, pinned. A topic is a subject ("what's this about"); a question is
+something I'd ask of the map. The topics are three of the largest neighborhoods of connected cards on the live map
+that day (18, 16 and 14 cards).
+
+- Topics: **AI work and career**; **How I see myself and what drives me**; **Social life and confidence**.
+- Questions: **What have I changed my mind about?**; **What could I build?**; **What am I struggling with?**
+
+ROADMAP-v2 asks for 5 judged useful, so M5 is done when 5 of the 6 pass.
 
 Judged twice, both bars registered in im-evals before any run, and my use kept apart from both:
 
@@ -213,5 +219,5 @@ Judged twice, both bars registered in im-evals before any run, and my use kept a
 
 ## Still open
 
-- The three topics and two questions.
+- Each lens's description and Jev questions, drafted for me to edit (0013), before the sheets.
 - The bars' numbers, in the pre-registration (a starting point: precision ≥ 0.8, and above the baseline's).
