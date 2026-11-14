@@ -8,14 +8,12 @@ local LLM's flags (router v1, decision 0003) are no longer read: against my labe
 Routes are labels in im.routes; nothing is dropped.
 """
 
-import re
-
+from im.attention import NOTE_TO_SELF
 from im.triage import EpisodeState, render
 
 SCHEMA_VERSION = 1
 STAGE_VERSION = "route/2"
 ROUTER_VERSION = "rules-3;claude-items;tap;note_to_self"
-NOTE_TO_SELF = re.compile(r"\bnote to (my)?self\b", re.IGNORECASE)
 
 
 def route(state: EpisodeState, captures: int | None) -> tuple[str, list[str]]:

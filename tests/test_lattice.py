@@ -12,10 +12,9 @@ from im import citations, egress, extract, fixtures, lattice, observations, pipe
 from im.checks import run_checks
 from im.config import ModelConfig
 
-from helpers import assert_invariants, run, segment_of, table
+from helpers import HashEmbedder, assert_invariants, run, segment_of, table
 from test_extract import FakeClaude
 from test_pipeline import LORA
-from test_triage import HashEmbedder
 
 # Ideas I added before anything was captured: (title, statement, notes), then my two themes as (name, description,
 # members), and the method of the connection a judge made between the first two.

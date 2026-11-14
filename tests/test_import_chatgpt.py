@@ -7,10 +7,9 @@ import pytest
 
 from im import archive_observations as ao, egress, lattice
 
-from helpers import assert_invariants, table
+from helpers import HashEmbedder, assert_invariants, table
 from test_extract import FakeClaude
 from test_lattice import FakeMatcher
-from test_triage import HashEmbedder
 
 # Shaped like the real export (ChatGPT Exporter): an instruction, an idea, and a late-night session that runs past
 # midnight, then a message more than six hours later. ChatGPT's replies carry its numbering, which is never read.

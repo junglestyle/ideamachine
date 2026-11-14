@@ -4,10 +4,9 @@ import uuid
 
 from im import citations, extract, lattice, observations
 
-from helpers import assert_invariants, run, table
+from helpers import HashEmbedder, assert_invariants, run, table
 from test_extract import FakeClaude
 from test_lattice import JUDGED, FakeMatcher, items_for, legacy_evolves, seeded  # noqa: F401
-from test_triage import HashEmbedder
 
 # Every edge with what the old table called its kind, or `judged` for a connection a judge made.
 EDGES = """SELECT a, b, CASE WHEN method LIKE 'embedding:%%' THEN 'related' ELSE 'judged' END AS kind,

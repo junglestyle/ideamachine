@@ -260,7 +260,7 @@ def test_jev_drafts_a_sheet_from_each_side_as_shown_and_connection_is_scored_at_
 
 def test_the_analogy_spike_ranks_a_partner_that_makes_the_same_move_first(lattice_with_clusters, tmp_path):
     from im import analogy_spike
-    from test_triage import HashEmbedder
+    from helpers import HashEmbedder
 
     edge_audit.write(lattice_with_clusters, tmp_path, size=2)
     marked = iter([("none", "analogy: same move"), ("none", "")])

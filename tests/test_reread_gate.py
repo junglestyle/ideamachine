@@ -11,7 +11,7 @@ from im import connect, extract, fixtures, jev, lattice, llm, observations, sens
 from im.checks import run_checks
 from im.config import ModelConfig
 
-from helpers import run, table
+from helpers import HashEmbedder, run, table
 from test_connect import idea, judge, nearby, screen, terra  # noqa: F401  # nearby: a fixture, used by name
 from test_extract import FakeClaude
 from test_lattice import FakeMatcher, items_for
@@ -21,7 +21,6 @@ from test_pipeline import CORRECTIONS
 from test_review import as_web_role
 from test_sensitivity import tagger
 from test_themes import FakeThemer, lat  # noqa: F401  # lat: a fixture, used by name
-from test_triage import HashEmbedder
 
 READ = (1000 * 4 + 200 * 20) / 1e6       # one FakeClaude read, at Opus's price
 SONNET = '[extract]\nmodel = "claude-sonnet-5-5"\n'

@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from im import llm, mishearings
-from im.triage import _part_of_day
 
 POLICY_VERSION = "B1;speakers-pseudonymized;spoken-names-not-scrubbed;no-registry"
 
@@ -49,6 +48,11 @@ def pseudonyms(speakers) -> dict:
             alias[label] = ("me" if kind == "owner" else "unknown" if kind == "unknown"
                             else f"S{sum(1 for a in alias.values() if a.startswith('S')) + 1}")
     return alias
+
+
+def _part_of_day(hour: int) -> str:
+    return ("night" if hour < 5 else "morning" if hour < 12 else "afternoon" if hour < 17
+            else "evening" if hour < 22 else "night")
 
 
 def build(conn, episode_id) -> Payload:

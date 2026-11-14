@@ -1,3 +1,7 @@
+import hashlib
+
+import numpy as np
+
 from im import pipeline
 from im.checks import run_checks
 
@@ -69,3 +73,23 @@ def changed_episodes(before, after):
 
 def assert_invariants(conn):
     assert run_checks(conn) == {"orphans": [], "stale": [], "tombstoned": [], "uncited": [], "merged": []}
+
+
+class HashEmbedder:
+    """Bag of words hashed into 64 dimensions: deterministic, and similar texts land close."""
+    model, model_version = "hash-bow", "hash-bow/64"
+
+    def embed(self, texts):
+        rows = []
+        for t in texts:
+            v = np.zeros(64)
+            for w in t.lower().split():
+                v[int(hashlib.md5(w.encode()).hexdigest(), 16) % 64] += 1
+            rows.append(v / (np.linalg.norm(v) or 1))
+        return np.vstack(rows)
+
+
+def script(*lines):
+    """A `read` that answers prompts in order, and a `write` that records output."""
+    it, out = iter(lines), []
+    return (lambda prompt="": next(it)), out.append, out

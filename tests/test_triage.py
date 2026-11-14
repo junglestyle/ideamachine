@@ -1,7 +1,6 @@
 """The triage stage, the logreg baseline and `im eval`, with fake models.
 Laya itself is exercised only when IM_TEST_MODELS=1 (see test_laya_backend)."""
 
-import hashlib
 import os
 from importlib.util import find_spec
 
@@ -11,24 +10,10 @@ import pytest
 from im import backends, evaluate, label, pipeline, projects, triage
 from im.triage import Prediction, normalize
 
-from helpers import episodes_with_text, run, table
+from helpers import HashEmbedder, episodes_with_text, run, table
 from test_pipeline import BACKUP, SECRET
 
 needs_sklearn = pytest.mark.skipif(find_spec("sklearn") is None, reason="needs the models extra (scikit-learn)")
-
-
-class HashEmbedder:
-    """Bag of words hashed into 64 dimensions: deterministic, and similar texts land close."""
-    model, model_version = "hash-bow", "hash-bow/64"
-
-    def embed(self, texts):
-        rows = []
-        for t in texts:
-            v = np.zeros(64)
-            for w in t.lower().split():
-                v[int(hashlib.md5(w.encode()).hexdigest(), 16) % 64] += 1
-            rows.append(v / (np.linalg.norm(v) or 1))
-        return np.vstack(rows)
 
 
 class KeywordBackend:

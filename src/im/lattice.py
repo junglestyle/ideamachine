@@ -100,6 +100,31 @@ def _title(statement: str, words: int = 8) -> str:
 
 # --- Embeddings ----------------------------------------------------------------------------------------
 
+class SentenceEmbedder:
+    """A small local sentence-embedding model (`[lattice] embedding_model`), on CPU. Long texts are embedded in word
+    windows and mean-pooled, since the model reads 512 tokens at most. sentence-transformers (the `models` extra) is
+    imported on first use, so the rest of `im` runs without it."""
+
+    def __init__(self, model: str = "BAAI/bge-small-en-v1.5", window_words: int = 250):
+        self.model, self.window_words = model, window_words
+        self.model_version = f"{model};window={window_words};mean"
+        self._st = None
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        """Unit-length rows, one per text."""
+        if self._st is None:
+            from sentence_transformers import SentenceTransformer
+
+            self._st = SentenceTransformer(self.model, device="cpu")
+        rows = []
+        for text in texts:
+            words = text.split()
+            chunks = [" ".join(words[i:i + self.window_words]) for i in range(0, max(len(words), 1), self.window_words)]
+            v = self._st.encode(chunks, normalize_embeddings=True).mean(axis=0)
+            rows.append(v / np.linalg.norm(v))
+        return np.vstack(rows)
+
+
 def _vec(v) -> str:
     return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
 

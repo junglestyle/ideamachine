@@ -53,7 +53,7 @@ def _llm(cfg):
 
 
 def _embedder(cfg):
-    from im.backends import SentenceEmbedder
+    from im.lattice import SentenceEmbedder
 
     return SentenceEmbedder(cfg.triage.embedding_model)
 
@@ -154,7 +154,7 @@ def _lattice(conn, cfg) -> dict:
     import anthropic
 
     from im import lattice, llm
-    from im.backends import SentenceEmbedder
+    from im.lattice import SentenceEmbedder
 
     try:
         return lattice.match_stage(conn, llm.client_for(cfg.match.model, cfg.egress.zdr),
@@ -491,7 +491,7 @@ def cmd_audit_probe(args) -> None:
             _print(summary_audit.write(conn, folder, args.seed, args.size or summary_audit.SIZE))
             return
         from im import llm
-        from im.backends import SentenceEmbedder
+        from im.lattice import SentenceEmbedder
 
         embedder = SentenceEmbedder(cfg.lattice.embedding_model) if args.question == "analogy" else None
         jev_client = None
@@ -574,7 +574,7 @@ def cmd_analogy_spike(args) -> None:
     from pathlib import Path
 
     from im import analogy_spike, llm
-    from im.backends import SentenceEmbedder
+    from im.lattice import SentenceEmbedder
 
     cfg = config.load()
     with db.connect(db.pipeline_dsn()) as conn:

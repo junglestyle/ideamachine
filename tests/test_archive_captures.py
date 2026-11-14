@@ -10,10 +10,9 @@ import pytest
 from im import extract, fixtures, lattice, observations, pipeline, quotes, weight
 from im.config import WeightConfig
 
-from helpers import assert_invariants, run, table
+from helpers import HashEmbedder, assert_invariants, run, table
 from test_extract import FakeClaude
 from test_lattice import FakeMatcher, items_for
-from test_triage import HashEmbedder
 
 TYPED = "a build that breaks every week is telling you something about the team"
 

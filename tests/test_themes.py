@@ -8,10 +8,9 @@ import pytest
 
 from im import extract, lattice, themes
 
-from helpers import run, table
+from helpers import HashEmbedder, run, table
 from test_extract import FakeClaude
 from test_lattice import FakeMatcher, items_for, seed
-from test_triage import HashEmbedder
 
 
 class FakeThemer:

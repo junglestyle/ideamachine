@@ -160,7 +160,7 @@ def sky_data(page):
 
 def test_the_sky_places_every_card_even_one_pub_ideas_hides(matched, admin):  # noqa: F811
     from im import lattice
-    from test_triage import HashEmbedder
+    from helpers import HashEmbedder
 
     new = idea(matched, "Something new")
     matched.execute("""INSERT INTO im.item_verdicts (item_id, segment_ids, quote, verdict)
@@ -205,7 +205,7 @@ def test_demo_mode_blanks_a_sensitive_star_and_leaves_it_out_of_every_list(match
     import json
 
     from im import lattice
-    from test_triage import HashEmbedder
+    from helpers import HashEmbedder
 
     new = str(idea(matched, "Something new"))
     as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
@@ -313,7 +313,7 @@ def test_a_seed_nothing_is_like_lights_only_itself():
 
 def test_a_trail_is_a_conversations_moments_in_the_order_said(matched, admin):  # noqa: F811
     from im import lattice
-    from test_triage import HashEmbedder
+    from helpers import HashEmbedder
 
     lattice.place(matched, HashEmbedder().model_version)
     build, coffee, new = (str(idea(matched, t)) for t in (
@@ -356,7 +356,7 @@ def test_demo_mode_keeps_a_sensitive_card_off_every_trail_and_behind_no_door(mat
     import json
 
     from im import lattice
-    from test_triage import HashEmbedder
+    from helpers import HashEmbedder
 
     build, coffee = (str(idea(matched, t)) for t in ("Broken builds as signal", "The coffee order is the real meeting."))
     as_app(admin, lambda c: c.execute("""INSERT INTO pub.feedback_events (kind, idea_id, payload)
@@ -374,7 +374,7 @@ def test_demo_mode_keeps_a_sensitive_card_off_every_trail_and_behind_no_door(mat
 
 def test_the_new_views_are_served_behind_the_login(served, matched):  # noqa: F811
     from im import lattice
-    from test_triage import HashEmbedder
+    from helpers import HashEmbedder
 
     lattice.place(matched, HashEmbedder().model_version)
     new = str(idea(matched, "Something new"))
@@ -454,7 +454,7 @@ def test_a_broad_card_does_not_fuse_the_neighbourhoods_it_touches():
 
 def test_a_thread_is_a_neighbourhood_said_in_more_than_one_conversation(matched, admin):  # noqa: F811
     from im import lattice
-    from test_triage import HashEmbedder
+    from helpers import HashEmbedder
 
     lattice.place(matched, HashEmbedder().model_version)
     build, coffee, new = (idea(matched, t) for t in (
@@ -506,7 +506,7 @@ def test_the_tree_stands_a_neighbourhood_in_for_each_lens(matched, admin):  # no
 
 def test_the_sky_says_when_each_card_was_first_said_for_replay(matched, admin):  # noqa: F811
     from im import lattice
-    from test_triage import HashEmbedder
+    from helpers import HashEmbedder
 
     lattice.place(matched, HashEmbedder().model_version)
     new = idea(matched, "Something new")
@@ -517,7 +517,7 @@ def test_the_sky_says_when_each_card_was_first_said_for_replay(matched, admin): 
 
 def test_a_grid_cell_is_a_neighbourhood_drawn_as_the_sky_places_it(matched, admin):  # noqa: F811
     from im import lattice
-    from test_triage import HashEmbedder
+    from helpers import HashEmbedder
 
     lattice.place(matched, HashEmbedder().model_version)
     build, coffee, new = (idea(matched, t) for t in (
@@ -537,7 +537,7 @@ def test_a_grid_cell_is_a_neighbourhood_drawn_as_the_sky_places_it(matched, admi
 
 def test_crossroads_shows_where_its_doors_are_on_the_map(matched, admin):  # noqa: F811
     from im import lattice
-    from test_triage import HashEmbedder
+    from helpers import HashEmbedder
 
     build, new = (idea(matched, t) for t in ("Broken builds as signal", "Something new"))
     judged(matched, build, new, "related")
