@@ -1,5 +1,5 @@
 """Capture eligibility (ROADMAP-v2, Triage): how many of the live captures don't deserve to be a card. Measurement
-only: nothing here changes routing, prompts, extraction or quarantine. The protocol
+only: nothing here changes prompts, extraction or quarantine. The protocol
 (docs/design/eligibility-audit.md):
 
 1. `sheet`: a seeded uniform sample of the live speech captures (on current episodes, from the live read under the
@@ -26,7 +26,7 @@ import random
 import re
 from pathlib import Path
 
-from im import egress, extract, llm, router, themes
+from im import egress, extract, llm, themes
 from im.capture_checks import lines_of
 
 SIZE = 100
@@ -135,21 +135,18 @@ def live_read(x) -> tuple[str, str]:
 def captures(conn, read: tuple[str, str]) -> tuple[list[dict], int]:
     """The live speech captures under `read` (prompt_version, model) and the policy requests go out under now, on
     current episodes, with the hash of the transcript their episode's read was of (im.extractions) and their
-    episode's kind and route; and how many archive captures there are under it, which have no lines to show."""
+    episode's kind; and how many archive captures there are under it, which have no lines to show."""
     pv, model = read
     rows = conn.execute(
-        """SELECT i.item_id, i.episode_id, x.input_hash, i.quote, i.gist, i.source_segment_ids, e.kind, r.route,
-                  r.reasons
+        """SELECT i.item_id, i.episode_id, x.input_hash, i.quote, i.gist, i.source_segment_ids, e.kind
            FROM im.items i JOIN im.episodes e ON e.episode_id = i.episode_id AND e.current
            JOIN im.extractions x ON x.episode_id = i.episode_id AND x.model = i.model
              AND x.prompt_version = i.prompt_version AND x.privacy_policy_version = i.privacy_policy_version
-           LEFT JOIN im.routes r ON r.episode_id = i.episode_id AND r.router_version = %s
            WHERE i.prompt_version = %s AND i.model = %s AND i.privacy_policy_version = %s
-           ORDER BY i.item_id""", (router.ROUTER_VERSION, pv, model, egress.POLICY_VERSION)).fetchall()
+           ORDER BY i.item_id""", (pv, model, egress.POLICY_VERSION)).fetchall()
     out = [{"item_id": str(item), "episode_id": str(eid), "read_sha256": sha, "quote": quote, "gist": gist,
-            "segments": [str(s) for s in segs], "kind": kind, "route": route or "unrouted",
-            "reasons": list(reasons or [])}
-           for item, eid, sha, quote, gist, segs, kind, route, reasons in rows]
+            "segments": [str(s) for s in segs], "kind": kind}
+           for item, eid, sha, quote, gist, segs, kind in rows]
     archive = conn.execute("""SELECT count(*) FROM im.items WHERE episode_id IS NULL AND prompt_version = %s
                               AND model = %s AND privacy_policy_version = %s""",
                            (pv, model, egress.POLICY_VERSION)).fetchone()[0]
@@ -178,9 +175,7 @@ def _sha(text: str) -> str:
 
 def _spread(caps: list[dict]) -> dict:
     count = lambda xs: dict(sorted({x: xs.count(x) for x in xs}.items()))  # noqa: E731
-    return {"N": len(caps), "by_kind": count([c["kind"] for c in caps]),
-            "by_route": count([c["route"] for c in caps]),
-            "by_reason": count([r for c in caps for r in c["reasons"]])}
+    return {"N": len(caps), "by_kind": count([c["kind"] for c in caps])}
 
 
 def build(conn, read: tuple[str, str], seed: int = 10, size: int = SIZE) -> tuple[str, dict]:
@@ -207,13 +202,11 @@ def build(conn, read: tuple[str, str], seed: int = 10, size: int = SIZE) -> tupl
         lines += [f"## {num}", "", c["text"], ""]
     key = {"audit": "capture eligibility", "rubric": r, "seed": seed, "size": size,
            "read": {"prompt_version": read[0], "model": read[1]}, "policy": egress.POLICY_VERSION,
-           "router_version": router.ROUTER_VERSION,
            "population": _spread(caps) | {"archive_skipped": archive, "payload_changed_passed_over": changed},
            "sample": _spread(picked),
            "items": {str(num): {"item_id": c["item_id"], "episode_id": c["episode_id"],
                                 "read_sha256": c["read_sha256"], "shown_sha256": _sha(c["text"]),
-                                "kind": c["kind"], "route": c["route"], "reasons": c["reasons"],
-                                "segments": c["segments"], "shown_segments": c["shown_segments"]}
+                                "kind": c["kind"], "segments": c["segments"], "shown_segments": c["shown_segments"]}
                      for num, c in enumerate(picked, 1)}}
     return "\n".join(lines), key
 

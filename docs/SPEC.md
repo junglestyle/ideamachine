@@ -48,7 +48,8 @@ stays live, and is sent again only when I approve it (`im reread`; the re-read g
 A pendant tap, or my saying "note to self", puts the lines it marks on the **attention queue** (`im queue`): for a
 tap my lines from 30 s before it to 30 s after, for a note its line and my next few. Both are found in code, never by
 a model, and neither makes the speech a capture or changes how it's read: extraction, captures and cards go on as if
-they weren't there. Removing an item only marks it removed. The router (`im review`) still runs beside it, unchanged.
+they weren't there. Removing an item only marks it removed. It replaced V1's router and its review list (`im review`),
+retired with `im label`, `im eval` and the triage backends ([decision 0014](decisions/0014-retire-routing.md)).
 
 ### What V2 fixes from V1
 

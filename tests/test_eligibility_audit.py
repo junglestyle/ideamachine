@@ -90,7 +90,6 @@ def test_the_sheet_keys_a_random_sample_of_live_captures_under_the_rubric(pipe, 
     assert out["items"] == len(key["items"]) == live and key["rubric"] == ea.rubric() and key["seed"] == 10
     assert key["population"]["archive_skipped"] == 1
     assert set(key["sample"]["by_kind"]) == {"monologue", "conversation"}
-    assert sum(key["sample"]["by_route"].values()) == live
     text = (folder / "sheet.md").read_text()
     assert ea.rubric()["sha256"][:12] in text
     body = text.split("\n## 1\n", 1)[1]

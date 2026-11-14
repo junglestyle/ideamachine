@@ -21,14 +21,14 @@ from im.fixtures import FixtureStream
 TEST_DB = "im_test"
 BOOTSTRAP = Path(__file__).parent.parent / "dev" / "init" / "bootstrap-db.sql.in"
 DSNS = {name: os.environ.get(name) for name in (db.DEV_ADMIN_ENV, db.PIPELINE_ENV)}
-# The ambient settings no test may see. IM_TEST_MODELS is the suite's own switch.
+# The ambient settings no test may see.
 AMBIENT = ("IM_", "ANTHROPIC_", "CORRAL_", "OPENROUTER_", "TYPESAFE_")
 
 
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch):
     for name in list(os.environ):
-        if name.startswith(AMBIENT) and name != "IM_TEST_MODELS":
+        if name.startswith(AMBIENT):
             monkeypatch.delenv(name)
     monkeypatch.setenv("ANTHROPIC_PROFILE", "im-test-no-such-profile")   # nor a logged-in `ant` profile: no Claude
 

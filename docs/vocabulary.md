@@ -14,7 +14,7 @@ How the citations read:
   or file settles.
 
 `kind` on its own means nothing here. A kind is always qualified: capture kind, connection kind, lineage kind,
-feedback event kind, speaker kind, triage kind, episode shape, digest point kind, stutter kind. The columns keep the
+feedback event kind, speaker kind, episode shape, digest point kind, stutter kind. The columns keep the
 name `kind`.
 
 Storage has three layers ([0006]). The **ledger** is append-only: what was received, extracted and decided
@@ -58,7 +58,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   - `time_overlap`: a new transcription, matched by time;
   - `rekey`: the same start, end and text under an older segment key ([M1 design]).
 
-  It carries labels and verdicts forward. It doesn't decide which segment is current.
+  It carries verdicts and attention items forward. It doesn't decide which segment is current.
 - **Forgetting.** The operation that deletes a segment, and everything derived from it, when an entry in
   `forgotten.json` overlaps it in time (ROADMAP §3.4, `pipeline._purge_tombstoned`).
 - **Tombstone.** The textless record that a segment was forgotten (`im.source_tombstones`, 002:56-62).
@@ -77,17 +77,16 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   `me` or `not_me` (036:13). Hearsay names no one but me (SPEC.md:22-23).
 - **Speaker label.** The display name on a segment: `me`, a name, `anon A` or `unknown` (002:27).
 - **Tap.** A press on the pendant, recorded as a time (`source_conversations.taps`, 005:1-2). An episode's taps are
-  those within 30 s of it (`triage.py`). To extraction a tap is a prompt cue: "A tap usually means I wanted something
-  kept: look closely at what I said around that time" (`extract.SYSTEM_V5_3`). A tap also puts my lines around it on
-  the attention queue. _Not_ tapping a star on the sky.
+  those within 30 s of it (`egress.build`). To extraction a tap is a prompt cue: "A tap usually means I wanted
+  something kept: look closely at what I said around that time" (`extract.SYSTEM_V5_3`). A tap also puts my lines
+  around it on the attention queue. _Not_ tapping a star on the sky.
 - **Attention queue (attention item).** What I asked to look at again, by a tap or a note-to-self cue: one item each
   (`im.attention_items`, 066; `attention.py`). An item marks lines: for a tap my lines from 30 s before it to 30 s
   after, in every conversation that lists it; for a note its line and my next lines, up to three within two minutes.
-  Both are found in code, never by a model. An item changes nothing else: the speech is extracted, captured and
-  routed as if it weren't there, and removing it (`im queue remove`) only marks it removed, for good. A tap's item
-  is keyed by the tap's time and a note's by its line, which a re-transcription hands on through supersession, so
-  each is one item whatever is corrected. _Not_ the router's review queue (`im review`), and _not_ capture review
-  (`im ideas --review`).
+  Both are found in code, never by a model. An item changes nothing else: the speech is extracted and captured as if
+  it weren't there, and removing it (`im queue remove`) only marks it removed, for good. A tap's item is keyed by the
+  tap's time and a note's by its line, which a re-transcription hands on through supersession, so each is one item
+  whatever is corrected. It replaced V1's review queue ([0014]). _Not_ capture review (`im ideas --review`).
 - **Places.** The places I named for a conversation, with their times (013:3-5).
 - **Affect, arousal.** Affect is the stream's container for measures of how I sounded. Arousal is the measure in it:
   how animated I sounded, about 0 to 1, from the audio alone, meaning tone of voice and not sentiment (013:7-9).
@@ -111,21 +110,14 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
   column) is `monologue`, `conversation` or `others_only` (001:30). _Not_ a conversation.
 - **Active episode.** An episode whose segments are still the current grouping. Its column is
   `episodes.current = true` (001:40). A changed grouping retires the old episode instead of deleting it.
-- **Triage, label, route, project.** V1's first pass over episodes:
-  - **triage**: a local model's answers about an episode (`is_self_thinking`, triage kind, project, `keep_score`),
-    stored in `im.triage` (004). The triage kinds are `idea`, `task`, `decision`, `chatter` and `noise`
-    (`triage.KINDS`);
-  - **label**: my answer to the same questions (`im.labels`, 003);
-  - **route**: `auto_file`, `review` or `escalate` (006:5). "A route is a label": nothing is dropped;
-  - **project**: an entry in the hand-kept registry `im.projects` (003:4-10).
-
-  **Status:** the local triage models are off by default (ROADMAP.md:100). Router v3 sends an episode to review
-  when it has a tap, a note-to-self cue or an undiscarded capture, whatever its confidence (`router.py`; v2 asked for
-  0.5 or more, retired by decision 0012).
+- **Triage, label, route, project.** V1's first pass over episodes: a local model's answers about an episode
+  (triage), my answers to the same questions (labels), whether the episode came to me for review (route), and a
+  hand-kept registry of projects. **Status:** retired with `im label`, `im review`, `im eval`, `im train` and
+  `im project` ([0014]); migration 067 dropped their tables (003, 004, 006).
 - **Payload.** The exact text of one request, system prompt excluded (`egress_log.payload`, 007:13;
   `egress.Payload`).
 - **Payload line.** One numbered line of a payload, `[n] S1: text`. Line n is the episode's nth segment
-  (`egress.py`). _Not_ a triage line, which is the local label and text, unnumbered (`triage.render`).
+  (`egress.py`).
 - **Egress log.** The record of every request that leaves the box: payload, policy, segments, model, provider
   (`served_by`) and cost (`im.egress_log`, 007:3-23; [0008]).
 - **Speaker-alias policy (policy B).** A privacy policy: everyone's words go out verbatim, each speaker is replaced
@@ -204,8 +196,8 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 - **Register.** How something is said, such as a joke or irony, as against what it says. **Status:** meant for a
   judging pass after extraction, not built (ROADMAP-v2 §5 q10-11).
 - **Note-to-self cue.** An explicit spoken instruction, "note to self", to keep the thought that follows. Extraction
-  captures what follows it (`extract.SYSTEM_V5_3`), the router sends the episode to review, and the line, with my
-  next ones, goes on the attention queue when I said it (`attention.NOTE_TO_SELF` finds it for both).
+  captures what follows it (`extract.SYSTEM_V5_3`), and the line, with my next ones, goes on the attention queue when
+  I said it (`attention.NOTE_TO_SELF`).
 
 ## Observations and clusters
 
@@ -270,7 +262,7 @@ What Hearsay heard, as Idea Machine reads it. Hearsay's
 ## Ideas and my decisions
 
 - **Idea.** A kept cluster: one I kept as canonical or as pinned (maturity `idea`). Only I make one (SPEC.md:33-35,
-  [0007]). _Not_ any `im.ideas` row, and _not_ the capture kind or triage kind `idea`.
+  [0007]). _Not_ any `im.ideas` row, and _not_ the capture kind `idea`.
 - **Kept status.** How I keep a cluster (`kept_as`, `im.idea_kept`, 031:17-30): canonical, pinned or unkept. Canonical
   and pinned are two ways of keeping it, told apart by whether being kept adds to weight:
   - **canonical**: being kept adds weight to the cluster (the `canonical` signal), and to every cluster connected to
@@ -597,7 +589,7 @@ Each role decides one thing. The model behind it can change, so models are liste
   - **question set**: the wordings that decide (`jev.QUESTION_SETS`);
   - **probe**: a question asked only to measure (`jev.PROBE_SET`);
   - **cut**: the probability at or above which a ranking counts as yes (`jev.CUT`).
-- **Laya, logreg, local LLM.** V1's triage backends (`backends.py`, [0001], [0002]). **Status:** off by default.
+- **Laya, logreg, local LLM.** V1's triage backends ([0001], [0002]). **Status:** retired ([0014]).
 - **Corral.** The job queue that runs the pipeline on the NAS, and GPU jobs on the dev box (deploy.md:4-7,
   118-130).
 - **Re-read gate.** What keeps a version change from sending again, by itself, work already done (`reread.py`;
@@ -675,9 +667,6 @@ Each role decides one thing. The model behind it can change, so models are liste
   stored, or linked by me.
 - **Analogy, analogy lens.** An analogy is a correspondence between ideas. An analogy lens is the query I keep for
   it.
-- **Attention queue, review queue.** The attention queue holds what I asked for myself, a tap or a note to self, as
-  the lines it marks (`im queue`). The review queue is the router's: episodes it sent me, for any of its reasons,
-  captures included (`im review`).
 
 ## Overloaded or drifting terms
 
@@ -687,7 +676,6 @@ they are; prose follows the meanings given here.
 ### kind
 
 - Capture kind: `im.items.kind` (007:31), which only the archived database's captures have.
-- Triage kind: `triage.KINDS`, `label.KINDS`.
 - Episode shape (001:30), speaker kind (002:25) and stutter kind (019:2).
 - Feedback event kind (008:91, 031:7-11).
 - Connection kind (045:28) and lineage kind (045:40). The dropped `im.idea_links.kind` mixed `evolves`, `related`
@@ -721,7 +709,7 @@ is "a cluster without owner evidence" in prose. The capture kind went with `v1` 
 
 - Every cluster is an `im.ideas` row with an `idea_id` (031:49, 031:60), and `pub.ideas` lists clusters of any
   maturity (043:27-28).
-- "Idea" is also the maturity `idea` (031:36), and the capture kind and triage kind `idea`.
+- "Idea" is also the maturity `idea` (031:36), and the capture kind `idea`.
 - "Candidate" is also the nearest clusters shown to the matcher ("Candidates", `lattice.MATCH_SYSTEM`), a model under
   trial ([0008]:40).
 - "Cluster" is also the seeded archive's five clusters (ROADMAP.md:143), a theme's provenance `clustered` (008:69),
@@ -806,7 +794,7 @@ traversal weight. A tap is a prompt cue.
   under `v1` and `v2`, fidelity confidence under `v3` and `v4`.
 - Connection confidence. For embedding stand-ins it holds the cosine ([M2 design]:159), which is a similarity, not a
   confidence.
-- A triage answer's confidence (004:12), `speaker_conf` (Hearsay's owner similarity) and `asr_confidence` (002:30-31).
+- `speaker_conf` (Hearsay's owner similarity) and `asr_confidence` (002:30-31).
 
 **Use:** say whose and in what: keep probability, capture fidelity confidence, connection confidence,
 speaker-attribution confidence, ASR confidence. Cosine is embedding similarity. A capture confidence compares only
@@ -826,7 +814,7 @@ ordered by when last said, latest first.
 ### keep, pin, star, dismiss
 
 - Keep: `idea_keep` (031:4). Also a capture verdict `keep` (007:69), the legacy events `keep` and `item_keep`,
-  `pub.ideas.kept` (a count of verdicts), and the triage question `keep_score`.
+  and `pub.ideas.kept` (a count of verdicts).
 - Pin: keeping a cluster as pinned (031). Also `themes.pinned` and `pin_theme` (008:71), a pinned lens
   ([0010]:47), and a lens pin, a cluster included in or excluded from a lens ([0013]).
 - Star: the `star` event, which is a pin (031:17-18). Also the capture verdict `star` (010:3-5), `digest_star`, and
@@ -944,7 +932,7 @@ legacy score has a capture count.
 
 - Note: my note (`idea_note`), the archive elaboration (`im.ideas.notes`), a verdict note, an audit note (a sheet's
   `note:` and `analogy:`), and the note-to-self cue.
-- Label: the speaker label, a triage label (`im.labels`), a B4 label, the prefixes gists open with ("Joke:", ROADMAP-v2
+- Label: the speaker label, a B4 label, the prefixes gists open with ("Joke:", ROADMAP-v2
   §5 q10), and "No value label exists" ([M2 design]:39).
 - Point: what an occurrence says ("the same point", [M2 design]:83), "two distinct points" ([0010]:28), a cluster
   ("the neighborhood's best existing point", [0010]:80), and a digest point (022).
@@ -969,10 +957,10 @@ is what an observation says; a graph node is a cluster, not a point; a digest's 
 - Utterance, segment and turn name one unit at different stages (`importer.Utterance`; 002:14; 013:8).
 - "Current" is said of segments (002:65), episodes (`episodes.current`, 001:40) and captures. A "current capture"
   can be misread as the latest read.
-- A payload line is `[n] S1: text` (`egress.py`). A triage line is `label: text` (`triage.render`).
+- A payload line is `[n] S1: text` (`egress.py`).
 
 **Use:** conversation, utterance, source segment and source context. "Turn" goes. Current source segment, active
-episode, capture on an active episode. Payload line and triage line.
+episode, capture on an active episode. Payload line.
 
 ### citation
 
@@ -1031,6 +1019,7 @@ These terms are in use, but no doc or file defines them:
 [0010]: decisions/0010-connections-kinds-lenses.md
 [0012]: decisions/0012-rebuild-with-v5.md
 [0013]: decisions/0013-lenses-and-boards.md
+[0014]: decisions/0014-retire-routing.md
 [M1 design]: design/m1-segment-identity.md
 [M2 design]: design/m2-observations-candidates-ideas.md
 [M6 notes]: design/m6-emanation.md

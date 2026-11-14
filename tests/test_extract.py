@@ -9,7 +9,7 @@ import anthropic
 import httpx2
 import pytest
 
-from im import egress, extract, feedback, importer, router
+from im import egress, extract, feedback, importer
 from im.fixtures import iso
 
 from helpers import HashEmbedder, assert_invariants, episodes_with_text, run, script, table
@@ -202,25 +202,6 @@ def test_forgetting_purges_items_and_payloads_but_reports_what_was_sent(pipe, cf
     assert_invariants(pipe)
 
 
-def test_router_routes_on_captures_taps_and_notes_and_respects_discards(pipe, cfg, stream):
-    stream.conversations["c-forget"].taps = [iso(14408)]
-    stream.write(stream.dir)
-    run(pipe, cfg, stream)
-    first = router.run_stage(pipe)
-    # One episode is only other people talking: routed at once, since a prompt reading only my speech never reads it.
-    assert first["review"] == 1 and first["waiting_for_claude"] == 7 and first["auto_file"] == 1
-    extract.run_stage(pipe, FakeClaude(coffee_item))
-    stats = router.run_stage(pipe)
-    assert stats["review"] == 2 and stats["auto_file"] == 7 and stats["waiting_for_claude"] == 0
-    assert router.run_stage(pipe)["changed"] == 0
-    (coffee,) = episodes_with_text(pipe, COFFEE)
-    assert table(pipe, "SELECT reasons FROM im.routes WHERE episode_id = %s", coffee) == [(["claude"],)]
-    (item,) = [r[0] for r in table(pipe, "SELECT item_id FROM im.items")]
-    extract.decide(pipe, item, "discard")
-    router.run_stage(pipe)
-    assert table(pipe, "SELECT route FROM im.routes WHERE episode_id = %s", coffee) == [("auto_file",)]
-
-
 def test_reviewing_items(pipe, cfg, stream):
     from im import cli
 
@@ -245,19 +226,6 @@ def test_a_capture_on_a_replaced_episode_isnt_offered_for_review(pipe, cfg, stre
     assert extract.review_items(pipe) == []
 
 
-@pytest.mark.parametrize("state, captures, expect", [
-    ("me: nothing much", 0, ("auto_file", [])),
-    ("me: Note to self, buy batteries", None, ("review", ["note_to_self"])),
-    ("Alice: note to self, she said", 0, ("auto_file", [])),
-    ("me: hm", 3, ("review", ["claude"])),
-])
-def test_router_rules(state, captures, expect):
-    from im.triage import EpisodeState
-
-    assert router.route(EpisodeState(1, state), captures) == expect
-    assert router.route(EpisodeState(1, state, taps=("t",)), captures)[1][0] == "tap"
-
-
 def test_im_run_goes_on_without_claude(pipe, cfg, stream, monkeypatch, capsys):
     from im import cli
 
@@ -267,7 +235,7 @@ def test_im_run_goes_on_without_claude(pipe, cfg, stream, monkeypatch, capsys):
     cli.main(["run"])
     out = json.loads(capsys.readouterr().out)
     assert out["extract"]["stopped"].startswith("Claude")
-    assert out["route"]["waiting_for_claude"] == 8   # the ninth is only other people talking: routed without Claude
+    assert "lattice" in out and "weight" in out   # the stages after extraction still ran
 
 
 def test_pending_reports_what_would_be_resent_and_what_the_gate_holds(pipe, cfg, stream, monkeypatch, capsys):
@@ -342,7 +310,7 @@ def test_im_run_goes_on_past_a_reply_that_fails_to_the_stages_after_extraction(p
     cli.main(["run"])
     out = json.loads(capsys.readouterr().out)
     assert (out["extract"]["read"], out["extract"]["failed"]) == (7, 1)
-    assert "lattice" in out and "digest" in out and out["route"]["waiting_for_claude"] == 1   # the failed one waits
+    assert "lattice" in out and "digest" in out
 
 
 def test_a_model_with_no_known_price_is_never_sent_to(pipe, cfg, stream):
@@ -404,9 +372,8 @@ def test_v5_3_reads_under_policy_b_with_names_said_as_said(pipe, cfg, stream, mo
     v53 = FakeClaude(respond)
     monkeypatch.setattr(anthropic, "Anthropic", lambda: v53)
     episodes = table(pipe, "SELECT count(*) FILTER (WHERE kind <> 'others_only') FROM im.episodes WHERE current")[0][0]
-    # Only my speech is captured, so an episode where I don't speak isn't sent, and isn't left waiting for Claude.
+    # Only my speech is captured, so an episode where I don't speak isn't sent.
     assert cli._extract(pipe, replace(cfg, extract=replace(cfg.extract, prompt="v5.3")))["read"] == episodes < 9
-    assert router.run_stage(pipe)["waiting_for_claude"] == 0
     assert "broke again, Alice?" in json.dumps([c["messages"] for c in v53.calls])   # the name said, as said
     assert table(pipe, "SELECT quote, gist, privacy_policy_version FROM im.items") == \
         [("Did you see the build broke again, Alice?", "I asked Alice whether the build broke again.",
